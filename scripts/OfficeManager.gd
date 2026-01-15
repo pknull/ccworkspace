@@ -115,15 +115,17 @@ func _create_main_agent() -> void:
 
 func _on_event_received(event_data: Dictionary) -> void:
 	var event_type = event_data.get("event", "")
-	status_label.text = "Event: %s" % event_type
+	var tool_name = event_data.get("tool", "")
+	if tool_name:
+		status_label.text = "Tool: %s" % tool_name
+	else:
+		status_label.text = "Event: %s" % event_type
 
 	match event_type:
 		"agent_spawn":
 			_handle_agent_spawn(event_data)
 		"agent_complete":
 			_handle_agent_complete(event_data)
-		"file_edit":
-			_handle_file_edit(event_data)
 		"tool_use":
 			_handle_tool_use(event_data)
 
@@ -191,13 +193,23 @@ func _handle_agent_complete(data: Dictionary) -> void:
 				print("[OfficeManager] Completed agent (fallback): %s" % aid)
 				break
 
-func _handle_file_edit(data: Dictionary) -> void:
-	var file_path = data.get("file", "")
-	status_label.text = "File: %s" % file_path.get_file()
-
 func _handle_tool_use(data: Dictionary) -> void:
 	var tool_name = data.get("tool", "")
-	status_label.text = "Tool: %s" % tool_name
+	var agent_id = data.get("agent_id", "main")
+
+	# Find the agent and show tool indicator
+	if agent_id == "main" and main_agent:
+		main_agent.show_tool(tool_name)
+	elif active_agents.has(agent_id):
+		var agent = active_agents[agent_id] as Agent
+		agent.show_tool(tool_name)
+	else:
+		# Fallback: show on most recently spawned working agent
+		for aid in active_agents.keys():
+			var agent = active_agents[aid] as Agent
+			if agent.state == Agent.State.WORKING:
+				agent.show_tool(tool_name)
+				break
 
 func _find_available_desk() -> Desk:
 	for desk in desks:

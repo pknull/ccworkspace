@@ -33,6 +33,32 @@ const AGENT_LABELS = {
 	"default": "Worker"
 }
 
+const TOOL_ICONS = {
+	"Bash": "[>_]",
+	"Read": "[R]",
+	"Edit": "[E]",
+	"Write": "[W]",
+	"Glob": "[*]",
+	"Grep": "[?]",
+	"WebFetch": "[W]",
+	"WebSearch": "[S]",
+	"Task": "[T]",
+	"NotebookEdit": "[N]"
+}
+
+const TOOL_COLORS = {
+	"Bash": Color(0.2, 0.8, 0.2),      # Green - terminal
+	"Read": Color(0.4, 0.6, 1.0),      # Blue - reading
+	"Edit": Color(1.0, 0.8, 0.2),      # Yellow - editing
+	"Write": Color(1.0, 0.6, 0.2),     # Orange - writing
+	"Glob": Color(0.8, 0.4, 1.0),      # Purple - search
+	"Grep": Color(0.8, 0.4, 1.0),      # Purple - search
+	"WebFetch": Color(0.2, 0.8, 0.8),  # Cyan - web
+	"WebSearch": Color(0.2, 0.8, 0.8), # Cyan - web
+	"Task": Color(0.9, 0.5, 0.2),      # Orange - task
+	"NotebookEdit": Color(1.0, 0.6, 0.2)  # Orange - notebook
+}
+
 @export var agent_type: String = "default"
 @export var description: String = ""
 
@@ -54,6 +80,12 @@ var body: ColorRect
 var head: ColorRect
 var status_label: Label
 var type_label: Label
+var tool_label: Label
+var tool_bg: ColorRect
+
+# Tool display
+var current_tool: String = ""
+var tool_display_timer: float = 0.0
 
 var _visuals_created: bool = false
 
@@ -102,6 +134,23 @@ func _create_visuals() -> void:
 	status_label.add_theme_color_override("font_color", Color(0.3, 0.3, 0.3))
 	add_child(status_label)
 
+	# Tool indicator (floats to the right of agent)
+	tool_bg = ColorRect.new()
+	tool_bg.size = Vector2(36, 22)
+	tool_bg.position = Vector2(20, -40)
+	tool_bg.color = Color(0.2, 0.2, 0.2, 0.8)
+	tool_bg.visible = false
+	add_child(tool_bg)
+
+	tool_label = Label.new()
+	tool_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tool_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	tool_label.position = Vector2(20, -40)
+	tool_label.size = Vector2(36, 22)
+	tool_label.add_theme_font_size_override("font_size", 14)
+	tool_label.visible = false
+	add_child(tool_label)
+
 func _update_appearance() -> void:
 	var color = AGENT_COLORS.get(agent_type, AGENT_COLORS["default"])
 	body.color = color
@@ -109,6 +158,19 @@ func _update_appearance() -> void:
 	type_label.text = AGENT_LABELS.get(agent_type, AGENT_LABELS["default"])
 
 func _process(delta: float) -> void:
+	# Update tool display timer
+	if tool_display_timer > 0:
+		tool_display_timer -= delta
+		if tool_display_timer <= 0:
+			_hide_tool()
+		elif tool_display_timer < 0.5:
+			# Fade out
+			var alpha = tool_display_timer / 0.5
+			if tool_bg:
+				tool_bg.modulate.a = alpha
+			if tool_label:
+				tool_label.modulate.a = alpha
+
 	match state:
 		State.SPAWNING:
 			_process_spawning(delta)
@@ -239,3 +301,27 @@ func force_complete() -> void:
 	# Called when SubagentStop is received
 	if state == State.WORKING:
 		complete_work()
+
+func show_tool(tool_name: String) -> void:
+	current_tool = tool_name
+	tool_display_timer = 2.0  # Show for 2 seconds
+
+	if tool_label and tool_bg:
+		var icon = TOOL_ICONS.get(tool_name, "[" + tool_name.substr(0, 1) + "]")
+		var color = TOOL_COLORS.get(tool_name, Color(0.5, 0.5, 0.5))
+
+		tool_label.text = icon
+		tool_label.add_theme_color_override("font_color", color)
+		tool_bg.color = Color(0.1, 0.1, 0.1, 0.9)
+
+		tool_label.visible = true
+		tool_bg.visible = true
+		tool_label.modulate.a = 1.0
+		tool_bg.modulate.a = 1.0
+
+func _hide_tool() -> void:
+	current_tool = ""
+	if tool_label:
+		tool_label.visible = false
+	if tool_bg:
+		tool_bg.visible = false
