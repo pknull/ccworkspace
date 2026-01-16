@@ -10,15 +10,20 @@ var desks: Array[Desk] = []
 var active_agents: Dictionary = {}  # agent_id -> Agent
 var agent_by_type: Dictionary = {}  # agent_type -> Array of agent_ids (for fallback)
 var completed_count: int = 0
-var inbox_position: Vector2 = Vector2(1100, 550)
+var inbox_position: Vector2 = Vector2(750, 550)
 
 # UI elements
 var inbox_label: Label
 var status_label: Label
 var inbox_visual: Node2D
+var taskboard: Node2D
+var session_labels: Dictionary = {}  # session_path -> Label
 
 # Connection lines (parent to child)
 var connection_lines: Array[Line2D] = []
+
+# Track agents by session
+var agents_by_session: Dictionary = {}  # session_id -> [agent_ids]
 
 # Main orchestrator agent (always present)
 var main_agent: Agent = null
@@ -31,6 +36,7 @@ func _ready() -> void:
 	_setup_ui()
 	_create_desks()
 	_create_inbox()
+	_create_taskboard()
 	_create_main_agent()
 
 	# Connect TCP server (for external tools/hooks)
@@ -42,6 +48,9 @@ func _ready() -> void:
 	transcript_watcher.event_received.connect(_on_event_received)
 
 	print("[OfficeManager] Ready. Desks: %d" % desks.size())
+
+func _process(_delta: float) -> void:
+	_update_taskboard()
 
 func _setup_ui() -> void:
 	# Title
@@ -61,16 +70,16 @@ func _setup_ui() -> void:
 	add_child(status_label)
 
 func _create_desks() -> void:
-	# Create a grid of desks
+	# Create a tighter grid of desks (left side of screen)
 	var desk_positions = [
-		Vector2(300, 200),
-		Vector2(500, 200),
-		Vector2(700, 200),
-		Vector2(900, 200),
-		Vector2(300, 400),
-		Vector2(500, 400),
-		Vector2(700, 400),
-		Vector2(900, 400),
+		Vector2(220, 180),
+		Vector2(370, 180),
+		Vector2(520, 180),
+		Vector2(670, 180),
+		Vector2(220, 350),
+		Vector2(370, 350),
+		Vector2(520, 350),
+		Vector2(670, 350),
 	]
 
 	for pos in desk_positions:
@@ -110,6 +119,73 @@ func _create_inbox() -> void:
 	stack_base.color = Color(1.0, 1.0, 0.9)
 	inbox_visual.add_child(stack_base)
 
+func _create_taskboard() -> void:
+	taskboard = Node2D.new()
+	taskboard.position = Vector2(820, 120)
+	add_child(taskboard)
+
+	# Taskboard background
+	var bg = ColorRect.new()
+	bg.size = Vector2(350, 400)
+	bg.position = Vector2(0, 0)
+	bg.color = Color(0.25, 0.25, 0.28, 0.9)
+	taskboard.add_child(bg)
+
+	# Taskboard header
+	var header = Label.new()
+	header.text = "SESSIONS"
+	header.position = Vector2(10, 10)
+	header.add_theme_font_size_override("font_size", 20)
+	header.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
+	taskboard.add_child(header)
+
+	# Divider line
+	var divider = ColorRect.new()
+	divider.size = Vector2(330, 2)
+	divider.position = Vector2(10, 40)
+	divider.color = Color(0.5, 0.5, 0.5)
+	taskboard.add_child(divider)
+
+func _update_taskboard() -> void:
+	if not transcript_watcher:
+		return
+
+	var watched = transcript_watcher.watched_sessions
+	var y_offset = 55
+
+	# Clear old labels
+	for path in session_labels.keys():
+		if not watched.has(path):
+			session_labels[path].queue_free()
+			session_labels.erase(path)
+
+	# Update/create labels for each session
+	for path in watched.keys():
+		var session_id = path.get_file().get_basename()
+		var short_id = session_id.substr(0, 8)
+
+		# Count agents for this session
+		var agent_count = 0
+		if agents_by_session.has(session_id):
+			agent_count = agents_by_session[session_id].size()
+
+		var text = "%s...  [%d agents]" % [short_id, agent_count]
+
+		if session_labels.has(path):
+			# Update existing
+			session_labels[path].text = text
+		else:
+			# Create new label
+			var label = Label.new()
+			label.text = text
+			label.position = Vector2(15, y_offset)
+			label.add_theme_font_size_override("font_size", 14)
+			label.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+			taskboard.add_child(label)
+			session_labels[path] = label
+
+		y_offset += 25
+
 func _create_main_agent() -> void:
 	# Create the main orchestrator agent (represents Claude)
 	main_agent = AgentScene.instantiate() as Agent
@@ -145,8 +221,15 @@ func _handle_agent_spawn(data: Dictionary) -> void:
 	var parent_id = data.get("parent_id", "main")
 	var agent_type = data.get("agent_type", "default")
 	var description = data.get("description", "")
+	var session_path = data.get("session_path", "")
+	var session_id = session_path.get_file().get_basename() if session_path else "unknown"
 
 	print("[OfficeManager] Spawning agent: %s (%s) from parent %s" % [agent_type, agent_id, parent_id])
+
+	# Track by session
+	if not agents_by_session.has(session_id):
+		agents_by_session[session_id] = []
+	agents_by_session[session_id].append(agent_id)
 
 	# Find available desk
 	var desk = _find_available_desk()
@@ -167,6 +250,7 @@ func _handle_agent_spawn(data: Dictionary) -> void:
 	agent.agent_id = agent_id
 	agent.parent_id = parent_id
 	agent.agent_type = agent_type
+	agent.session_id = session_id
 	agent.position = spawn_pos
 	agent.set_description(description)
 	agent.set_inbox_position(inbox_position)
@@ -265,6 +349,10 @@ func _on_agent_completed(agent: Agent) -> void:
 	# Remove from type tracking
 	if agent_by_type.has(agent.agent_type):
 		agent_by_type[agent.agent_type].erase(aid)
+
+	# Remove from session tracking
+	if agent.session_id and agents_by_session.has(agent.session_id):
+		agents_by_session[agent.session_id].erase(aid)
 
 	# Queue free after fade out
 	agent.queue_free()

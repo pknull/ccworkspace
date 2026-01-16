@@ -64,6 +64,7 @@ const TOOL_COLORS = {
 
 var agent_id: String = ""
 var parent_id: String = ""
+var session_id: String = ""
 var state: State = State.SPAWNING
 var target_position: Vector2
 var assigned_desk: Node2D = null

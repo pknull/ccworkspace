@@ -174,7 +174,8 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 			"agent_type": agent_type,
 			"description": description,
 			"parent_id": "main",
-			"timestamp": timestamp
+			"timestamp": timestamp,
+			"session_path": session_path
 		})
 	else:
 		# Regular tool use
