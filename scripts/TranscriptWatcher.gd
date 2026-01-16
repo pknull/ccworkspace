@@ -79,7 +79,15 @@ func scan_for_sessions() -> void:
 
 	for path in to_remove:
 		print("[TranscriptWatcher] Stopped watching inactive: %s" % path.get_file())
+		var session_id = path.get_file().get_basename()
 		watched_sessions.erase(path)
+		# Emit session_end so orchestrator can take a break
+		event_received.emit({
+			"event": "session_end",
+			"session_id": session_id,
+			"session_path": path,
+			"timestamp": Time.get_datetime_string_from_system()
+		})
 
 func start_watching_session(file_path: String) -> void:
 	# Open file and seek to end
@@ -92,8 +100,20 @@ func start_watching_session(file_path: String) -> void:
 		}
 		file.close()
 		print("[TranscriptWatcher] Watching: %s" % file_path.get_file())
+
+		# Emit session_start event so orchestrator (Claude) appears (deferred to ensure signal is connected)
+		var session_id = file_path.get_file().get_basename()
+		call_deferred("_emit_session_start", session_id, file_path)
 	else:
 		push_warning("[TranscriptWatcher] Cannot open: %s" % file_path)
+
+func _emit_session_start(session_id: String, session_path: String) -> void:
+	event_received.emit({
+		"event": "session_start",
+		"session_id": session_id,
+		"session_path": session_path,
+		"timestamp": Time.get_datetime_string_from_system()
+	})
 
 func check_all_sessions() -> void:
 	for file_path in watched_sessions.keys():
@@ -123,6 +143,7 @@ func process_line(line: String, session_path: String = "") -> void:
 	var json = JSON.new()
 	var error = json.parse(line)
 	if error != OK:
+		push_warning("[TranscriptWatcher] JSON parse error at line %d: %s" % [json.get_error_line(), json.get_error_message()])
 		return
 
 	var entry = json.data
@@ -198,7 +219,8 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 			"agent_id": "main",
 			"tool": tool_name,
 			"description": tool_desc,
-			"timestamp": timestamp
+			"timestamp": timestamp,
+			"session_path": session_path  # Include session so we can find the orchestrator
 		})
 
 func process_tool_result(item: Dictionary, entry: Dictionary) -> void:

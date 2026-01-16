@@ -1,0 +1,150 @@
+class_name OfficeConstants
+
+# =============================================================================
+# LAYOUT - Office Dimensions and Positions
+# =============================================================================
+
+# Screen/window bounds
+const SCREEN_WIDTH: float = 1280.0
+const SCREEN_HEIGHT: float = 720.0
+
+# Floor walkable area (where agents can move)
+const FLOOR_MIN_X: float = 10.0
+const FLOOR_MAX_X: float = 1270.0
+const FLOOR_MIN_Y: float = 85.0   # Below back wall seam
+const FLOOR_MAX_Y: float = 625.0  # Above bottom wall seam
+
+# Wall positions
+const BACK_WALL_HEIGHT: float = 76.0
+const BACK_WALL_SEAM_Y: float = 68.0
+const BOTTOM_WALL_Y: float = 632.0
+const BOTTOM_WALL_HEIGHT: float = 88.0
+
+# =============================================================================
+# PATHFINDING - Desk Layout and Navigation
+# =============================================================================
+
+# Desk row Y positions (center of desk) - 4 rows with tighter spacing (grid-aligned)
+const ROW1_DESK_Y: float = 135.0   # Cell row 2: 2*20+95
+const ROW2_DESK_Y: float = 235.0   # Cell row 7: 7*20+95
+const ROW3_DESK_Y: float = 335.0   # Cell row 12: 12*20+95
+const ROW4_DESK_Y: float = 435.0   # Cell row 17: 17*20+95
+
+# Pathfinding zones - boundaries for each row (grid-aligned)
+const ROW1_TOP: float = 95.0        # Above row 1 desks
+const ROW1_BOTTOM: float = 195.0    # Below row 1 work positions
+const ROW2_TOP: float = 215.0       # Above row 2 desks
+const ROW2_BOTTOM: float = 295.0    # Below row 2 work positions
+const ROW3_TOP: float = 315.0       # Above row 3 desks
+const ROW3_BOTTOM: float = 395.0    # Below row 3 work positions
+const ROW4_TOP: float = 415.0       # Above row 4 desks
+const ROW4_BOTTOM: float = 495.0    # Below row 4 work positions
+const MAIN_AISLE_Y: float = 515.0   # Main horizontal aisle
+
+# Vertical corridors between desk columns (X positions)
+const CORRIDORS_X: Array[float] = [130.0, 295.0, 445.0, 595.0, 740.0]
+
+# Desk X positions (grid-aligned: n*20+10)
+const DESK_POSITIONS_X: Array[float] = [230.0, 390.0, 530.0, 690.0]
+
+# =============================================================================
+# SPAWN POINTS - Entry/Exit Locations
+# =============================================================================
+
+const DOOR_POSITION: Vector2 = Vector2(640, 665)
+const SPAWN_POINT: Vector2 = Vector2(640, 620)  # Just inside from bottom door
+
+# =============================================================================
+# FURNITURE - Default Positions
+# =============================================================================
+
+# Grid-aligned furniture positions (X: n*20+10, Y: n*20+95)
+const WATER_COOLER_POSITION: Vector2 = Vector2(50, 215)   # X=cell 2, Y=cell 6
+const PLANT_POSITION: Vector2 = Vector2(50, 415)          # X=cell 2, Y=cell 16
+const FILING_CABINET_POSITION: Vector2 = Vector2(50, 555) # X=cell 2, Y=cell 23
+const SHREDDER_POSITION: Vector2 = Vector2(1210, 535)     # X=cell 60, Y=cell 22
+const TASKBOARD_POSITION: Vector2 = Vector2(920, 20)      # Top-right corner
+
+# Taskboard dimensions for dragging
+const TASKBOARD_SIZE: Vector2 = Vector2(170, 130)
+const TASKBOARD_OBSTACLE: Vector2 = Vector2(170, 130)  # Full board blocks navigation
+
+# =============================================================================
+# Z-INDEX - Layer Ordering (lower = behind)
+# =============================================================================
+
+const Z_FLOOR: int = -10
+const Z_FLOOR_DETAIL: int = -9
+const Z_WALL: int = -8
+const Z_DOOR: int = 2
+const Z_SEAM: int = 1
+const Z_FURNITURE: int = 0
+const Z_CAT: int = -1  # Cat renders behind people
+const Z_AGENT: int = 0
+const Z_WINDOW_SKY: int = 1
+const Z_WINDOW_CLOUD: int = 2
+const Z_WINDOW_FRAME: int = 3
+const Z_WINDOW_MASK: int = 4
+const Z_TASKBOARD: int = 5
+const Z_UI_TOOLTIP: int = 100
+
+# =============================================================================
+# TIMING - Durations and Intervals (in seconds)
+# =============================================================================
+
+const MIN_WORK_TIME: float = 3.0       # Minimum time agent shows working
+const AGENT_SPAWN_FADE_TIME: float = 0.5
+const AGENT_EXIT_FADE_TIME: float = 0.5
+const SOCIALIZE_TIME_MIN: float = 2.0
+const SOCIALIZE_TIME_MAX: float = 5.0
+const FIDGET_TIME_MIN: float = 3.0
+const FIDGET_TIME_MAX: float = 8.0
+const FIDGET_DURATION: float = 1.5
+const NEXT_FIDGET_MIN: float = 5.0
+const NEXT_FIDGET_MAX: float = 15.0
+const TRANSCRIPT_POLL_INTERVAL: float = 0.5
+const SESSION_INACTIVE_TIMEOUT: float = 30.0
+
+# =============================================================================
+# MOVEMENT - Speeds (in pixels per second)
+# =============================================================================
+
+const AGENT_WALK_SPEED: float = 180.0
+const CAT_WALK_SPEED: float = 40.0
+const CLOUD_SPEED_MIN: float = 3.0
+const CLOUD_SPEED_MAX: float = 7.0
+
+# =============================================================================
+# DIMENSIONS - Object Sizes
+# =============================================================================
+
+# Desk
+const DESK_WIDTH: float = 80.0
+const DESK_DEPTH: float = 28.0
+
+# Windows
+const WINDOW_WIDTH: float = 80.0
+const WINDOW_HEIGHT: float = 44.0
+const WINDOW_FRAME_THICKNESS: float = 4.0
+
+# Agent collision/click bounds
+const AGENT_CLICK_WIDTH: float = 40.0
+const AGENT_CLICK_HEIGHT: float = 85.0
+
+# Obstacle sizes for pathfinding
+const WATER_COOLER_OBSTACLE: Vector2 = Vector2(40, 60)
+const PLANT_OBSTACLE: Vector2 = Vector2(40, 50)
+const FILING_CABINET_OBSTACLE: Vector2 = Vector2(40, 80)
+const SHREDDER_OBSTACLE: Vector2 = Vector2(30, 40)
+
+# =============================================================================
+# GRID NAVIGATION - A* Pathfinding Grid
+# =============================================================================
+
+const CELL_SIZE: int = 20
+const GRID_WIDTH: int = 64   # 1280 / 20
+const GRID_HEIGHT: int = 28  # (625 - 85) / 20 ≈ 27, round to 28
+const GRID_ORIGIN: Vector2 = Vector2(0.0, 85.0)  # Top-left of walkable area
+
+# Work position offset from desk (where agent stands)
+const WORK_POSITION_OFFSET: float = 55.0  # Pixels in front of desk center

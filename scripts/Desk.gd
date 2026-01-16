@@ -1,148 +1,247 @@
 extends Node2D
 class_name Desk
 
+signal position_changed(desk: Desk, new_position: Vector2)
+
 var is_occupied: bool = false
 
 # Visual nodes
 var desk_rect: ColorRect
 var monitor: ColorRect
+var screen: ColorRect
+var screen_glow: ColorRect
 var status_indicator: ColorRect
+var personal_items: Node2D  # Container for worker's personal items
+
+# Tool display on monitor
+var tool_label: Label
+
+# Dragging support (only when empty)
+var is_dragging: bool = false
+var drag_offset: Vector2 = Vector2.ZERO
+var click_area: Rect2 = Rect2(-45, -35, 90, 85)  # Area covering desk and monitor
+const DRAG_BOUNDS_MIN: Vector2 = Vector2(50, 100)
+const DRAG_BOUNDS_MAX: Vector2 = Vector2(1230, 580)
+
+# For collision checking
+var navigation_grid: NavigationGrid = null
 
 func _ready() -> void:
 	_create_visuals()
+	# Set z_index based on Y position - desks lower on screen render in front
+	z_index = int(position.y)
 
 func _create_visuals() -> void:
-	# Desk surface - beige laminate like Wernham Hogg
+	# Shallower desk - layout: [Item] [Keyboard] [Mouse]
+	var desk_width = 80
+	var desk_depth = 28  # Shallower
+
+	# Shadow under desk
+	var shadow = ColorRect.new()
+	shadow.size = Vector2(desk_width + 5, desk_depth + 5)
+	shadow.position = Vector2(-desk_width/2 + 3, 3)
+	shadow.color = Color(0.0, 0.0, 0.0, 0.15)
+	shadow.z_index = -1
+	add_child(shadow)
+
+	# Desk surface - beige laminate
 	desk_rect = ColorRect.new()
-	desk_rect.size = Vector2(90, 55)
-	desk_rect.position = Vector2(-45, -5)
-	desk_rect.color = Color(0.76, 0.70, 0.60)  # Beige laminate
+	desk_rect.size = Vector2(desk_width, desk_depth)
+	desk_rect.position = Vector2(-desk_width/2, 0)
+	desk_rect.color = Color(0.76, 0.70, 0.60)
 	add_child(desk_rect)
 
-	# Desk edge (darker trim)
-	var desk_edge = ColorRect.new()
-	desk_edge.size = Vector2(90, 4)
-	desk_edge.position = Vector2(-45, 46)
-	desk_edge.color = Color(0.45, 0.40, 0.35)
-	add_child(desk_edge)
+	# Desk front edge (3D depth)
+	var desk_front = ColorRect.new()
+	desk_front.size = Vector2(desk_width, 5)
+	desk_front.position = Vector2(-desk_width/2, desk_depth - 2)
+	desk_front.color = Color(0.55, 0.50, 0.42)
+	add_child(desk_front)
 
-	# Monitor base/stand
+	# Monitor (smaller, at back of desk)
 	var monitor_stand = ColorRect.new()
-	monitor_stand.size = Vector2(20, 8)
-	monitor_stand.position = Vector2(-10, -8)
-	monitor_stand.color = Color(0.25, 0.25, 0.28)
+	monitor_stand.size = Vector2(16, 6)
+	monitor_stand.position = Vector2(-8, -4)
+	monitor_stand.color = Color(0.22, 0.22, 0.25)
 	add_child(monitor_stand)
 
-	# Monitor - chunky CRT style
 	monitor = ColorRect.new()
-	monitor.size = Vector2(44, 36)
-	monitor.position = Vector2(-22, -42)
-	monitor.color = Color(0.82, 0.80, 0.75)  # Beige plastic (old monitor)
+	monitor.size = Vector2(40, 30)
+	monitor.position = Vector2(-20, -32)
+	monitor.color = Color(0.18, 0.18, 0.20)
 	add_child(monitor)
 
-	# Monitor bezel (inner frame)
-	var bezel = ColorRect.new()
-	bezel.size = Vector2(38, 28)
-	bezel.position = Vector2(-19, -39)
-	bezel.color = Color(0.2, 0.2, 0.22)
-	add_child(bezel)
-
-	# Monitor screen (with glow effect)
-	var screen = ColorRect.new()
-	screen.size = Vector2(34, 24)
-	screen.position = Vector2(-17, -37)
-	screen.color = Color(0.12, 0.18, 0.25)  # Dark blue screen
+	# Monitor screen (dark when off)
+	screen = ColorRect.new()
+	screen.size = Vector2(36, 24)
+	screen.position = Vector2(-18, -30)
+	screen.color = Color(0.08, 0.08, 0.10)  # Dark/off
 	add_child(screen)
 
-	# Screen content - fake text lines
-	var line1 = ColorRect.new()
-	line1.size = Vector2(26, 2)
-	line1.position = Vector2(-13, -34)
-	line1.color = Color(0.4, 0.7, 0.5, 0.6)  # Green text
-	add_child(line1)
+	# Screen glow (only visible when on)
+	screen_glow = ColorRect.new()
+	screen_glow.size = Vector2(34, 22)
+	screen_glow.position = Vector2(-17, -29)
+	screen_glow.color = Color(0.08, 0.08, 0.10)  # Dark/off
+	add_child(screen_glow)
 
-	var line2 = ColorRect.new()
-	line2.size = Vector2(20, 2)
-	line2.position = Vector2(-13, -30)
-	line2.color = Color(0.4, 0.7, 0.5, 0.5)
-	add_child(line2)
+	# Layout on desk: [Personal Item spot] [Keyboard] [Mouse]
+	# Personal items container (left side of desk)
+	personal_items = Node2D.new()
+	personal_items.name = "PersonalItems"
+	personal_items.position = Vector2(-30, 8)  # Left side
+	add_child(personal_items)
 
-	var line3 = ColorRect.new()
-	line3.size = Vector2(24, 2)
-	line3.position = Vector2(-13, -26)
-	line3.color = Color(0.4, 0.7, 0.5, 0.4)
-	add_child(line3)
-
-	# Keyboard
+	# Keyboard (center)
 	var keyboard = ColorRect.new()
-	keyboard.size = Vector2(36, 12)
-	keyboard.position = Vector2(-18, 18)
-	keyboard.color = Color(0.85, 0.83, 0.78)  # Beige keyboard
+	keyboard.size = Vector2(28, 10)
+	keyboard.position = Vector2(-14, 10)
+	keyboard.color = Color(0.25, 0.25, 0.28)
 	add_child(keyboard)
 
-	# Mouse
+	var keys = ColorRect.new()
+	keys.size = Vector2(24, 6)
+	keys.position = Vector2(-12, 12)
+	keys.color = Color(0.32, 0.32, 0.35)
+	add_child(keys)
+
+	# Mouse (right side)
 	var mouse = ColorRect.new()
 	mouse.size = Vector2(8, 12)
-	mouse.position = Vector2(24, 20)
-	mouse.color = Color(0.85, 0.83, 0.78)
+	mouse.position = Vector2(22, 9)
+	mouse.color = Color(0.25, 0.25, 0.28)
 	add_child(mouse)
 
-	# Stack of papers (left side)
-	var papers = ColorRect.new()
-	papers.size = Vector2(18, 14)
-	papers.position = Vector2(-42, 10)
-	papers.color = Color(0.95, 0.95, 0.92)  # White paper
-	add_child(papers)
+	var mouse_highlight = ColorRect.new()
+	mouse_highlight.size = Vector2(6, 3)
+	mouse_highlight.position = Vector2(23, 10)
+	mouse_highlight.color = Color(0.35, 0.35, 0.38)
+	add_child(mouse_highlight)
 
-	# Coffee mug (right side)
-	var mug = ColorRect.new()
-	mug.size = Vector2(10, 14)
-	mug.position = Vector2(32, 8)
-	mug.color = Color(0.9, 0.9, 0.9)  # White mug
-	add_child(mug)
-
-	# Mug handle
-	var handle = ColorRect.new()
-	handle.size = Vector2(4, 8)
-	handle.position = Vector2(42, 11)
-	handle.color = Color(0.9, 0.9, 0.9)
-	add_child(handle)
-
-	# Pen holder
-	var pen_holder = ColorRect.new()
-	pen_holder.size = Vector2(8, 12)
-	pen_holder.position = Vector2(-38, -2)
-	pen_holder.color = Color(0.3, 0.3, 0.35)
-	add_child(pen_holder)
-
-	# Pens sticking out
-	var pen1 = ColorRect.new()
-	pen1.size = Vector2(2, 8)
-	pen1.position = Vector2(-37, -8)
-	pen1.color = Color(0.1, 0.2, 0.6)  # Blue pen
-	add_child(pen1)
-
-	var pen2 = ColorRect.new()
-	pen2.size = Vector2(2, 6)
-	pen2.position = Vector2(-34, -6)
-	pen2.color = Color(0.6, 0.1, 0.1)  # Red pen
-	add_child(pen2)
-
-	# Status indicator (power light on monitor)
+	# Status indicator (power light on monitor - red when unoccupied)
 	status_indicator = ColorRect.new()
-	status_indicator.size = Vector2(6, 6)
-	status_indicator.position = Vector2(12, -12)
-	status_indicator.color = Color(0.2, 0.7, 0.2)  # Green = available
+	status_indicator.size = Vector2(4, 4)
+	status_indicator.position = Vector2(12, -8)
+	status_indicator.color = Color(0.8, 0.2, 0.2)  # Red when unoccupied
 	add_child(status_indicator)
 
+	# Tool display label (on monitor)
+	tool_label = Label.new()
+	tool_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tool_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	tool_label.position = Vector2(-18, -30)
+	tool_label.size = Vector2(36, 24)
+	tool_label.add_theme_font_size_override("font_size", 14)
+	tool_label.add_theme_color_override("font_color", Color(0.3, 0.9, 0.4))
+	tool_label.visible = false
+	tool_label.z_index = 1
+	add_child(tool_label)
+
+func _process(_delta: float) -> void:
+	# Update z_index while dragging
+	if is_dragging:
+		z_index = int(position.y)
+
+func _input(event: InputEvent) -> void:
+	# Only allow dragging when desk is empty (not occupied)
+	if is_occupied:
+		return
+
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				var local_pos = get_local_mouse_position()
+				if click_area.has_point(local_pos):
+					is_dragging = true
+					drag_offset = position - get_global_mouse_position()
+			else:
+				if is_dragging:
+					is_dragging = false
+					# Snap to grid
+					var snapped_pos = _snap_to_grid(position)
+
+					# Check for valid placement (no overlap with other objects)
+					if navigation_grid:
+						var desk_id = "desk_%d" % get_instance_id()
+						var test_rect = _get_obstacle_rect(snapped_pos)
+						if not navigation_grid.can_place_obstacle(test_rect, desk_id):
+							# Find nearest valid position
+							snapped_pos = navigation_grid.find_nearest_valid_position(test_rect, desk_id)
+
+					position = snapped_pos
+					z_index = int(position.y)
+					position_changed.emit(self, position)
+
+	elif event is InputEventMouseMotion and is_dragging:
+		var new_pos = get_global_mouse_position() + drag_offset
+		new_pos.x = clamp(new_pos.x, DRAG_BOUNDS_MIN.x, DRAG_BOUNDS_MAX.x)
+		new_pos.y = clamp(new_pos.y, DRAG_BOUNDS_MIN.y, DRAG_BOUNDS_MAX.y)
+		position = new_pos
+
+func _get_obstacle_rect(pos: Vector2) -> Rect2:
+	# Desk obstacle includes the desk surface and work area in front
+	return Rect2(
+		pos.x - OfficeConstants.DESK_WIDTH / 2,
+		pos.y,
+		OfficeConstants.DESK_WIDTH,
+		OfficeConstants.DESK_DEPTH + OfficeConstants.WORK_POSITION_OFFSET
+	)
+
+func _snap_to_grid(pos: Vector2) -> Vector2:
+	var cell_size = OfficeConstants.CELL_SIZE
+	var origin = OfficeConstants.GRID_ORIGIN
+	var gx = round((pos.x - origin.x) / cell_size)
+	var gy = round((pos.y - origin.y) / cell_size)
+	return Vector2(
+		gx * cell_size + origin.x + cell_size / 2.0,
+		gy * cell_size + origin.y + cell_size / 2.0
+	)
+
+func show_tool(tool_text: String, tool_color: Color) -> void:
+	if tool_label:
+		tool_label.text = tool_text
+		tool_label.add_theme_color_override("font_color", tool_color)
+		tool_label.visible = true
+		tool_label.modulate.a = 1.0
+		# No timer - persists until changed
+
+func hide_tool() -> void:
+	if tool_label:
+		tool_label.visible = false
+
 func get_work_position() -> Vector2:
-	# Position where agent should stand (in front of desk)
-	return global_position + Vector2(0, 70)
+	# Position where agent should stand (in front of shallower desk)
+	return global_position + Vector2(0, 45)
 
 func set_occupied(occupied: bool) -> void:
 	is_occupied = occupied
-	if status_indicator:
-		status_indicator.color = Color(0.8, 0.3, 0.2) if occupied else Color(0.2, 0.7, 0.2)
+	if occupied:
+		# Occupied: green indicator, lit screen
+		if status_indicator:
+			status_indicator.color = Color(0.2, 0.8, 0.2)  # Green
+		if screen:
+			screen.color = Color(0.15, 0.25, 0.18)  # Light green background
+		if screen_glow:
+			screen_glow.color = Color(0.2, 0.35, 0.22)  # Lighter green glow
+	else:
+		# Unoccupied: red indicator, dark screen
+		if status_indicator:
+			status_indicator.color = Color(0.8, 0.2, 0.2)  # Red
+		if screen:
+			screen.color = Color(0.08, 0.08, 0.10)  # Dark/off
+		if screen_glow:
+			screen_glow.color = Color(0.08, 0.08, 0.10)  # Dark/off
+		if tool_label:
+			tool_label.visible = false
 
 func is_available() -> bool:
 	return not is_occupied
+
+func add_personal_item(item: Node2D) -> void:
+	if personal_items:
+		personal_items.add_child(item)
+
+func clear_personal_items() -> void:
+	if personal_items:
+		for child in personal_items.get_children():
+			child.queue_free()
