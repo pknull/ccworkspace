@@ -12,6 +12,19 @@ var state_timer: float = 0.0
 var next_action_time: float = 3.0
 var animation_timer: float = 0.0
 
+# Meow speech bubbles
+var meow_bubble: Node2D = null
+var meow_timer: float = 0.0
+var meow_cooldown: float = 0.0
+const MEOW_CHECK_INTERVAL: float = 20.0  # Check every 20 seconds
+const MEOW_CHANCE: float = 0.18  # 18% chance when checked
+const MEOW_COOLDOWN: float = 40.0  # Minimum 40s between meows
+
+const MEOW_PHRASES = [
+	"meow", "mrrp?", "prrrr", "mew!", "nya~", "*purr*",
+	"meow?", "mrow!", "*stretch*", "prrt!", "mrrrow",
+]
+
 # Visual nodes
 var body: ColorRect
 var head: ColorRect
@@ -171,6 +184,10 @@ func _process(delta: float) -> void:
 	# Tail wag animation (always subtle movement)
 	if tail and state != State.SLEEPING:
 		tail.rotation = sin(animation_timer * 2.0) * 0.15
+
+	# Process meow bubbles (not while sleeping)
+	if state != State.SLEEPING:
+		_process_meow_bubble(delta)
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
@@ -381,3 +398,72 @@ func _find_valid_position() -> Vector2:
 			return test_pos
 	# Fallback: return position in a known safe corridor
 	return Vector2(randf_range(100, 180), randf_range(bounds_min.y, bounds_max.y))
+
+# =============================================================================
+# MEOW SPEECH BUBBLES
+# =============================================================================
+
+func _process_meow_bubble(delta: float) -> void:
+	# Update meow bubble fade
+	if meow_bubble and meow_timer > 0:
+		meow_timer -= delta
+		if meow_timer < 0.4:
+			meow_bubble.modulate.a = meow_timer / 0.4
+		if meow_timer <= 0:
+			meow_bubble.queue_free()
+			meow_bubble = null
+
+	# Cooldown between meows
+	if meow_cooldown > 0:
+		meow_cooldown -= delta
+		return
+
+	# Check for spontaneous meow
+	animation_timer += delta  # Reuse animation_timer for meow checks
+	if int(animation_timer) % int(MEOW_CHECK_INTERVAL) == 0 and int(animation_timer) > 0:
+		if randf() < MEOW_CHANCE and meow_bubble == null:
+			_show_meow()
+			meow_cooldown = MEOW_COOLDOWN
+
+func _show_meow() -> void:
+	if meow_bubble:
+		meow_bubble.queue_free()
+
+	var phrase = MEOW_PHRASES[randi() % MEOW_PHRASES.size()]
+
+	meow_bubble = Node2D.new()
+	meow_bubble.z_index = 100
+	add_child(meow_bubble)
+
+	# Tiny speech bubble
+	var bubble_bg = ColorRect.new()
+	var text_width = phrase.length() * 6 + 10
+	bubble_bg.size = Vector2(max(text_width, 35), 16)
+	bubble_bg.position = Vector2(-bubble_bg.size.x / 2, -28)
+	bubble_bg.color = Color(1.0, 0.98, 0.92, 0.95)  # Warm cream
+	meow_bubble.add_child(bubble_bg)
+
+	# Border
+	var border = ColorRect.new()
+	border.size = bubble_bg.size + Vector2(2, 2)
+	border.position = bubble_bg.position - Vector2(1, 1)
+	border.color = Color(0.5, 0.45, 0.35)
+	border.z_index = -1
+	meow_bubble.add_child(border)
+
+	# Tiny pointer
+	var pointer = ColorRect.new()
+	pointer.size = Vector2(5, 5)
+	pointer.position = Vector2(-2.5, -13)
+	pointer.color = Color(1.0, 0.98, 0.92, 0.95)
+	meow_bubble.add_child(pointer)
+
+	# Text
+	var text_label = Label.new()
+	text_label.text = phrase
+	text_label.position = bubble_bg.position + Vector2(5, 1)
+	text_label.add_theme_font_size_override("font_size", 9)
+	text_label.add_theme_color_override("font_color", Color(0.35, 0.3, 0.25))
+	meow_bubble.add_child(text_label)
+
+	meow_timer = 2.0  # Show for 2 seconds

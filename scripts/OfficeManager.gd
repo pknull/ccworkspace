@@ -52,7 +52,7 @@ var office_cat: Node2D = null
 # Spontaneous bubble coordination
 var current_spontaneous_agent: Agent = null
 var spontaneous_bubble_cooldown: float = 0.0
-const GLOBAL_SPONTANEOUS_COOLDOWN: float = 8.0  # Minimum 8s between any spontaneous bubbles
+const GLOBAL_SPONTANEOUS_COOLDOWN: float = 5.0  # Minimum 5s between any spontaneous bubbles (was 8)
 
 # Obstacles for agent pathfinding (legacy - kept for cat)
 var office_obstacles: Array[Rect2] = []

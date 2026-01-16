@@ -139,9 +139,9 @@ var reaction_timer: float = 0.0
 # Spontaneous voice bubbles
 var spontaneous_bubble_timer: float = 0.0
 var spontaneous_cooldown: float = 0.0
-const SPONTANEOUS_CHECK_INTERVAL: float = 25.0  # Check every 25 seconds
-const SPONTANEOUS_CHANCE: float = 0.15  # 15% chance when checked
-const SPONTANEOUS_COOLDOWN: float = 45.0  # Minimum 45s between spontaneous bubbles
+const SPONTANEOUS_CHECK_INTERVAL: float = 12.0  # Check every 12 seconds (was 25)
+const SPONTANEOUS_CHANCE: float = 0.25  # 25% chance when checked (was 15%)
+const SPONTANEOUS_COOLDOWN: float = 30.0  # Minimum 30s between spontaneous bubbles (was 45)
 var office_manager: Node = null  # Set by OfficeManager for global coordination
 
 # Idle fidget animations
@@ -478,8 +478,8 @@ func _create_female_visuals(skin_color: Color) -> void:
 
 func _create_tooltip() -> void:
 	tooltip_panel = ColorRect.new()
-	tooltip_panel.size = Vector2(220, 100)  # Larger to show tool info
-	tooltip_panel.position = Vector2(30, -70)
+	tooltip_panel.size = Vector2(200, 72)  # Compact size
+	tooltip_panel.position = Vector2(30, -50)
 	tooltip_panel.color = Color(0.95, 0.93, 0.85, 0.98)  # Cream paper
 	tooltip_panel.visible = false
 	tooltip_panel.z_index = 100  # Always on top
@@ -487,13 +487,13 @@ func _create_tooltip() -> void:
 
 	# Tooltip border
 	var border = ColorRect.new()
-	border.size = Vector2(220, 100)
+	border.size = Vector2(200, 72)
 	border.position = Vector2(0, 0)
 	border.color = Color(0.6, 0.55, 0.45)
 	tooltip_panel.add_child(border)
 
 	var inner = ColorRect.new()
-	inner.size = Vector2(216, 96)
+	inner.size = Vector2(196, 68)
 	inner.position = Vector2(2, 2)
 	inner.color = Color(0.95, 0.93, 0.85)
 	tooltip_panel.add_child(inner)
@@ -501,24 +501,24 @@ func _create_tooltip() -> void:
 	# Tooltip header
 	var header = Label.new()
 	header.name = "Header"
-	header.position = Vector2(8, 6)
-	header.size = Vector2(204, 18)
-	header.add_theme_font_size_override("font_size", 12)
+	header.position = Vector2(6, 4)
+	header.size = Vector2(188, 16)
+	header.add_theme_font_size_override("font_size", 11)
 	header.add_theme_color_override("font_color", Color(0.3, 0.3, 0.3))
 	tooltip_panel.add_child(header)
 
 	# Divider line
 	var divider = ColorRect.new()
-	divider.size = Vector2(204, 1)
-	divider.position = Vector2(8, 24)
+	divider.size = Vector2(188, 1)
+	divider.position = Vector2(6, 20)
 	divider.color = Color(0.7, 0.65, 0.55)
 	tooltip_panel.add_child(divider)
 
 	# Tooltip content
 	tooltip_label = Label.new()
-	tooltip_label.position = Vector2(8, 28)
-	tooltip_label.size = Vector2(204, 68)  # Taller for more content
-	tooltip_label.add_theme_font_size_override("font_size", 10)  # Slightly smaller for more text
+	tooltip_label.position = Vector2(6, 23)
+	tooltip_label.size = Vector2(188, 45)
+	tooltip_label.add_theme_font_size_override("font_size", 9)
 	tooltip_label.add_theme_color_override("font_color", Color(0.25, 0.25, 0.25))
 	tooltip_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	tooltip_panel.add_child(tooltip_label)
@@ -588,27 +588,29 @@ func _show_tooltip() -> void:
 				State.COMPLETING: state_text = "Done!"
 				State.IDLE: state_text = "Idle"
 
-			# Build tooltip content
-			var content = ""
+			# Build tooltip content - compact single-line spacing
+			var lines: Array[String] = []
 
-			# Task description
+			# Task description (truncate if too long)
 			if description:
-				content = description
+				var desc = description
+				if desc.length() > 60:
+					desc = desc.substr(0, 57) + "..."
+				lines.append(desc)
 			else:
-				content = "(no task description)"
+				lines.append("(no task)")
 
 			# Current tool (if working and using a tool)
 			if state == State.WORKING and current_tool:
-				content += "\n\nUsing: " + current_tool
+				lines.append("Using: " + current_tool)
 
-			# Status
-			content += "\n\nStatus: " + state_text
-
-			# Work progress (if working)
+			# Status with optional work time
+			var status_line = "Status: " + state_text
 			if state == State.WORKING and work_elapsed > 0:
-				content += " (%.0fs)" % work_elapsed
+				status_line += " (%.0fs)" % work_elapsed
+			lines.append(status_line)
 
-			tooltip_label.text = content
+			tooltip_label.text = "\n".join(lines)
 		tooltip_panel.visible = true
 
 func _hide_tooltip() -> void:
