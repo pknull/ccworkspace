@@ -76,6 +76,7 @@ const POSITION_SETTERS = {
 	"plant": "set_plant_position",
 	"filing_cabinet": "set_filing_cabinet_position",
 	"shredder": "set_shredder_position",
+	"meeting_table": "set_meeting_table_position",
 }
 
 # Default positions for reset
@@ -85,6 +86,7 @@ const DEFAULT_POSITIONS = {
 	"filing_cabinet": OfficeConstants.FILING_CABINET_POSITION,
 	"shredder": OfficeConstants.SHREDDER_POSITION,
 	"taskboard": OfficeConstants.TASKBOARD_POSITION,
+	"meeting_table": OfficeConstants.MEETING_TABLE_POSITION,
 }
 
 func _ready() -> void:
@@ -188,9 +190,12 @@ func _create_furniture() -> void:
 	add_child(draggable_shredder)
 	office_obstacles.append(Rect2(shredder_position.x - 15, shredder_position.y - 20, 30, 40))
 
-	# Meeting table (overflow area - not draggable)
-	meeting_table = OfficeVisualFactory.create_meeting_table()
+	# Meeting table (overflow area - draggable)
+	meeting_table = OfficeVisualFactory.create_meeting_table(DraggableItemScript)
 	meeting_table.position = meeting_table_position
+	meeting_table.navigation_grid = navigation_grid
+	meeting_table.obstacle_size = OfficeConstants.MEETING_TABLE_OBSTACLE
+	meeting_table.position_changed.connect(_on_item_position_changed)
 	add_child(meeting_table)
 	# Register as obstacle
 	var table_size = OfficeConstants.MEETING_TABLE_OBSTACLE
@@ -419,7 +424,7 @@ func _handle_agent_spawn(data: Dictionary) -> void:
 		_draw_spawn_connection(spawn_pos, desk.get_work_position(), agent_type)
 	else:
 		# Meeting table overflow
-		var meeting_spot = OfficeConstants.MEETING_SPOTS[meeting_spot_idx]
+		var meeting_spot = get_meeting_spot_position(meeting_spot_idx)
 		meeting_spots_occupied[meeting_spot_idx] = true
 		agents_in_meeting[agent_id] = meeting_spot_idx
 		agent.start_meeting(meeting_spot)
@@ -446,6 +451,31 @@ func _release_meeting_spot(agent_id: String) -> void:
 		if spot_idx >= 0 and spot_idx < meeting_spots_occupied.size():
 			meeting_spots_occupied[spot_idx] = false
 		agents_in_meeting.erase(agent_id)
+
+func _update_meeting_spots() -> void:
+	# Recalculate meeting spot positions based on current table position
+	# The spots are defined relative to the default table position
+	var default_pos = OfficeConstants.MEETING_TABLE_POSITION
+	var offset = meeting_table_position - default_pos
+
+	# Update any agents currently in meeting with new positions
+	for agent_id in agents_in_meeting.keys():
+		var spot_idx = agents_in_meeting[agent_id]
+		if active_agents.has(agent_id):
+			var agent = active_agents[agent_id]
+			var new_spot = get_meeting_spot_position(spot_idx)
+			agent.meeting_spot = new_spot
+			# If they're standing at the table, move them
+			if agent.state == Agent.State.MEETING and agent.path_waypoints.is_empty():
+				agent.position = new_spot
+
+func get_meeting_spot_position(spot_idx: int) -> Vector2:
+	# Get meeting spot position adjusted for current table position
+	if spot_idx < 0 or spot_idx >= OfficeConstants.MEETING_SPOTS.size():
+		return meeting_table_position
+	var default_pos = OfficeConstants.MEETING_TABLE_POSITION
+	var offset = meeting_table_position - default_pos
+	return OfficeConstants.MEETING_SPOTS[spot_idx] + offset
 
 func _handle_agent_complete(data: Dictionary) -> void:
 	var agent_id = data.get("agent_id", "")
@@ -589,6 +619,13 @@ func _on_item_position_changed(item_name: String, new_position: Vector2) -> void
 			shredder_position = new_position
 			obstacle_size = OfficeConstants.SHREDDER_OBSTACLE
 			_update_obstacle(3, Rect2(new_position.x - 15, new_position.y - 20, 30, 40))
+		"meeting_table":
+			meeting_table_position = new_position
+			obstacle_size = OfficeConstants.MEETING_TABLE_OBSTACLE
+			var ts = OfficeConstants.MEETING_TABLE_OBSTACLE
+			_update_obstacle(4, Rect2(new_position.x - ts.x / 2, new_position.y - ts.y / 2, ts.x, ts.y))
+			# Update meeting spots relative to new table position
+			_update_meeting_spots()
 		"taskboard":
 			taskboard_position = new_position
 			# Taskboard is on the wall, no floor navigation impact

@@ -924,6 +924,10 @@ func set_plant_position(pos: Vector2) -> void:
 func set_filing_cabinet_position(pos: Vector2) -> void:
 	filing_cabinet_position = pos
 
+func set_meeting_table_position(_pos: Vector2) -> void:
+	# Meeting spot updates are handled by OfficeManager._update_meeting_spots()
+	pass
+
 func set_door_position(pos: Vector2) -> void:
 	door_position = pos
 
@@ -1213,6 +1217,28 @@ const MEETING_PHRASES = [
 	"That's a stretch.", "Can we scope it?", "Dependencies?", "Ship it!",
 ]
 
+# Tool-aware phrase templates ({tool} gets replaced)
+const TOOL_PHRASES_WORKING = [
+	"Working on {tool}...", "This {tool}...", "Hmm, {tool}...",
+	"Almost done with {tool}", "{tool} looks good", "Running {tool}...",
+	"Checking {tool}...", "{tool} is tricky", "Nice {tool} result!",
+]
+
+const TOOL_PHRASES_MEETING = [
+	"The {tool} shows...", "Per the {tool}...", "Based on {tool}...",
+	"Running {tool} here", "{tool} says...", "Let me {tool} that",
+	"My {tool} found...", "The {tool} output...", "Checking {tool}...",
+]
+
+func _get_tool_aware_phrase(tool_name: String, is_meeting: bool) -> String:
+	var templates = TOOL_PHRASES_MEETING if is_meeting else TOOL_PHRASES_WORKING
+	var template = templates[randi() % templates.size()]
+	# Shorten tool name if too long
+	var short_tool = tool_name
+	if short_tool.length() > 12:
+		short_tool = short_tool.substr(0, 10) + ".."
+	return template.replace("{tool}", short_tool)
+
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		# Check if click is on this agent
@@ -1411,12 +1437,18 @@ func _can_show_spontaneous_globally() -> bool:
 
 func _show_spontaneous_reaction(is_socializing: bool = false, is_meeting: bool = false) -> void:
 	# Pick appropriate phrase based on context
-	var phrases = WORKING_PHRASES
-	if is_meeting:
-		phrases = MEETING_PHRASES
-	elif is_socializing:
-		phrases = SOCIALIZING_PHRASES
-	var phrase = phrases[randi() % phrases.size()]
+	var phrase = ""
+
+	# If we have a tool and it's work-related context, sometimes mention the tool
+	if current_tool and not is_socializing and randf() < 0.5:
+		phrase = _get_tool_aware_phrase(current_tool, is_meeting)
+	else:
+		var phrases = WORKING_PHRASES
+		if is_meeting:
+			phrases = MEETING_PHRASES
+		elif is_socializing:
+			phrases = SOCIALIZING_PHRASES
+		phrase = phrases[randi() % phrases.size()]
 
 	# Notify manager that we're showing a bubble
 	if office_manager and office_manager.has_method("register_spontaneous_bubble"):

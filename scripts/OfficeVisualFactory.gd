@@ -232,9 +232,10 @@ static func create_shredder(draggable_script: Script) -> Node2D:
 
 	return shredder
 
-static func create_meeting_table() -> Node2D:
-	var table = Node2D.new()
-	table.name = "MeetingTable"
+static func create_meeting_table(draggable_script: Script) -> Node2D:
+	var table = draggable_script.new()
+	table.item_name = "meeting_table"
+	table.set_click_area(Rect2(-65, -35, 130, 70))
 
 	# Shadow under table
 	var shadow = ColorRect.new()
