@@ -53,21 +53,183 @@ func _process(_delta: float) -> void:
 	_update_taskboard()
 
 func _setup_ui() -> void:
-	# Title
+	# Office floor (carpet tiles)
+	var floor_bg = ColorRect.new()
+	floor_bg.size = Vector2(1280, 720)
+	floor_bg.position = Vector2(0, 0)
+	floor_bg.color = Color(0.55, 0.52, 0.48)  # Gray-brown office carpet
+	floor_bg.z_index = -10
+	add_child(floor_bg)
+
+	# Add some carpet tile lines for texture
+	for i in range(0, 1280, 80):
+		var vline = ColorRect.new()
+		vline.size = Vector2(1, 720)
+		vline.position = Vector2(i, 0)
+		vline.color = Color(0.50, 0.47, 0.43, 0.3)
+		vline.z_index = -9
+		add_child(vline)
+	for i in range(0, 720, 80):
+		var hline = ColorRect.new()
+		hline.size = Vector2(1280, 1)
+		hline.position = Vector2(0, i)
+		hline.color = Color(0.50, 0.47, 0.43, 0.3)
+		hline.z_index = -9
+		add_child(hline)
+
+	# Wall at top
+	var wall = ColorRect.new()
+	wall.size = Vector2(1280, 60)
+	wall.position = Vector2(0, 0)
+	wall.color = Color(0.85, 0.82, 0.78)  # Beige wall
+	wall.z_index = -8
+	add_child(wall)
+
+	# Skirting board
+	var skirting = ColorRect.new()
+	skirting.size = Vector2(1280, 8)
+	skirting.position = Vector2(0, 60)
+	skirting.color = Color(0.45, 0.40, 0.35)
+	skirting.z_index = -7
+	add_child(skirting)
+
+	# Office decor - Water cooler (left side)
+	_create_water_cooler(Vector2(50, 200))
+
+	# Office decor - Potted plant (corner)
+	_create_potted_plant(Vector2(50, 400))
+
+	# Office decor - Filing cabinet
+	_create_filing_cabinet(Vector2(50, 550))
+
+	# Title - like a wall sign
+	var sign_bg = ColorRect.new()
+	sign_bg.size = Vector2(200, 40)
+	sign_bg.position = Vector2(540, 10)
+	sign_bg.color = Color(0.3, 0.35, 0.45)
+	add_child(sign_bg)
+
 	var title = Label.new()
 	title.text = "AGENT OFFICE"
-	title.position = Vector2(540, 20)
-	title.add_theme_font_size_override("font_size", 32)
-	title.add_theme_color_override("font_color", Color(0.2, 0.2, 0.3))
+	title.position = Vector2(545, 15)
+	title.add_theme_font_size_override("font_size", 24)
+	title.add_theme_color_override("font_color", Color(0.95, 0.95, 0.95))
 	add_child(title)
 
-	# Status
+	# Status bar at bottom
+	var status_bg = ColorRect.new()
+	status_bg.size = Vector2(1280, 30)
+	status_bg.position = Vector2(0, 690)
+	status_bg.color = Color(0.25, 0.25, 0.28)
+	add_child(status_bg)
+
 	status_label = Label.new()
-	status_label.text = "Waiting for events on port 9999..."
-	status_label.position = Vector2(20, 680)
-	status_label.add_theme_font_size_override("font_size", 14)
-	status_label.add_theme_color_override("font_color", Color(0.4, 0.4, 0.4))
+	status_label.text = "Waiting for events..."
+	status_label.position = Vector2(20, 695)
+	status_label.add_theme_font_size_override("font_size", 12)
+	status_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	add_child(status_label)
+
+func _create_water_cooler(pos: Vector2) -> void:
+	var cooler = Node2D.new()
+	cooler.position = pos
+	add_child(cooler)
+
+	# Base
+	var base = ColorRect.new()
+	base.size = Vector2(30, 20)
+	base.position = Vector2(-15, 30)
+	base.color = Color(0.75, 0.75, 0.78)
+	cooler.add_child(base)
+
+	# Body
+	var body = ColorRect.new()
+	body.size = Vector2(26, 35)
+	body.position = Vector2(-13, -5)
+	body.color = Color(0.85, 0.85, 0.88)
+	cooler.add_child(body)
+
+	# Water bottle (blue tinted)
+	var bottle = ColorRect.new()
+	bottle.size = Vector2(20, 30)
+	bottle.position = Vector2(-10, -35)
+	bottle.color = Color(0.7, 0.85, 0.95, 0.8)
+	cooler.add_child(bottle)
+
+	# Tap
+	var tap = ColorRect.new()
+	tap.size = Vector2(8, 6)
+	tap.position = Vector2(-4, 10)
+	tap.color = Color(0.5, 0.5, 0.55)
+	cooler.add_child(tap)
+
+func _create_potted_plant(pos: Vector2) -> void:
+	var plant = Node2D.new()
+	plant.position = pos
+	add_child(plant)
+
+	# Pot
+	var pot = ColorRect.new()
+	pot.size = Vector2(30, 25)
+	pot.position = Vector2(-15, 20)
+	pot.color = Color(0.6, 0.35, 0.25)  # Terracotta
+	plant.add_child(pot)
+
+	# Soil
+	var soil = ColorRect.new()
+	soil.size = Vector2(26, 6)
+	soil.position = Vector2(-13, 18)
+	soil.color = Color(0.3, 0.25, 0.2)
+	plant.add_child(soil)
+
+	# Leaves (simple green rectangles at angles)
+	var leaf1 = ColorRect.new()
+	leaf1.size = Vector2(20, 8)
+	leaf1.position = Vector2(-18, 0)
+	leaf1.color = Color(0.3, 0.55, 0.3)
+	leaf1.rotation = -0.4
+	plant.add_child(leaf1)
+
+	var leaf2 = ColorRect.new()
+	leaf2.size = Vector2(22, 8)
+	leaf2.position = Vector2(-5, -10)
+	leaf2.color = Color(0.35, 0.6, 0.35)
+	leaf2.rotation = 0.3
+	plant.add_child(leaf2)
+
+	var leaf3 = ColorRect.new()
+	leaf3.size = Vector2(18, 8)
+	leaf3.position = Vector2(0, 5)
+	leaf3.color = Color(0.3, 0.5, 0.3)
+	leaf3.rotation = 0.5
+	plant.add_child(leaf3)
+
+func _create_filing_cabinet(pos: Vector2) -> void:
+	var cabinet = Node2D.new()
+	cabinet.position = pos
+	add_child(cabinet)
+
+	# Cabinet body
+	var body = ColorRect.new()
+	body.size = Vector2(40, 80)
+	body.position = Vector2(-20, -40)
+	body.color = Color(0.5, 0.5, 0.52)  # Gray metal
+	cabinet.add_child(body)
+
+	# Drawers (3 of them)
+	for i in range(3):
+		var drawer = ColorRect.new()
+		drawer.size = Vector2(36, 22)
+		drawer.position = Vector2(-18, -36 + i * 26)
+		drawer.color = Color(0.55, 0.55, 0.58)
+		cabinet.add_child(drawer)
+
+		# Drawer handle
+		var handle = ColorRect.new()
+		handle.size = Vector2(12, 4)
+		handle.position = Vector2(-6, -30 + i * 26)
+		handle.color = Color(0.4, 0.4, 0.42)
+		cabinet.add_child(handle)
 
 func _create_desks() -> void:
 	# Create a tighter grid of desks (left side of screen)
@@ -89,37 +251,76 @@ func _create_desks() -> void:
 		desks.append(desk)
 
 func _create_inbox() -> void:
-	# Create inbox visual
+	# Create inbox visual - office desk tray style
 	inbox_visual = Node2D.new()
 	inbox_visual.position = inbox_position
 	add_child(inbox_visual)
 
-	# Inbox box (brown)
-	var box = ColorRect.new()
-	box.size = Vector2(70, 50)
-	box.position = Vector2(-35, -25)
-	box.color = Color(0.45, 0.35, 0.25)
-	inbox_visual.add_child(box)
+	# Tray base (dark plastic)
+	var tray_base = ColorRect.new()
+	tray_base.size = Vector2(80, 12)
+	tray_base.position = Vector2(-40, 15)
+	tray_base.color = Color(0.2, 0.2, 0.22)
+	inbox_visual.add_child(tray_base)
 
-	# Inbox count label (inside the box)
+	# Tray back
+	var tray_back = ColorRect.new()
+	tray_back.size = Vector2(80, 35)
+	tray_back.position = Vector2(-40, -20)
+	tray_back.color = Color(0.25, 0.25, 0.28)
+	inbox_visual.add_child(tray_back)
+
+	# Tray sides
+	var tray_left = ColorRect.new()
+	tray_left.size = Vector2(6, 35)
+	tray_left.position = Vector2(-40, -20)
+	tray_left.color = Color(0.22, 0.22, 0.25)
+	inbox_visual.add_child(tray_left)
+
+	var tray_right = ColorRect.new()
+	tray_right.size = Vector2(6, 35)
+	tray_right.position = Vector2(34, -20)
+	tray_right.color = Color(0.22, 0.22, 0.25)
+	inbox_visual.add_child(tray_right)
+
+	# Some papers in the tray
+	var paper1 = ColorRect.new()
+	paper1.size = Vector2(60, 4)
+	paper1.position = Vector2(-30, 5)
+	paper1.color = Color(0.95, 0.95, 0.92)
+	inbox_visual.add_child(paper1)
+
+	var paper2 = ColorRect.new()
+	paper2.size = Vector2(58, 4)
+	paper2.position = Vector2(-28, 0)
+	paper2.color = Color(0.92, 0.92, 0.88)
+	inbox_visual.add_child(paper2)
+
+	# Count badge (red circle with number)
+	var badge_bg = ColorRect.new()
+	badge_bg.size = Vector2(28, 28)
+	badge_bg.position = Vector2(25, -35)
+	badge_bg.color = Color(0.75, 0.25, 0.2)
+	inbox_visual.add_child(badge_bg)
+
 	inbox_label = Label.new()
 	inbox_label.text = "0"
 	inbox_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	inbox_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	inbox_label.position = Vector2(-35, -25)
-	inbox_label.size = Vector2(70, 50)
-	inbox_label.add_theme_font_size_override("font_size", 24)
-	inbox_label.add_theme_color_override("font_color", Color(1.0, 1.0, 0.95))
+	inbox_label.position = Vector2(25, -35)
+	inbox_label.size = Vector2(28, 28)
+	inbox_label.add_theme_font_size_override("font_size", 16)
+	inbox_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0))
 	inbox_visual.add_child(inbox_label)
 
-	# "INBOX" label above
+	# "IN" label on tray
 	var title = Label.new()
-	title.text = "INBOX"
+	title.text = "IN"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.position = Vector2(-35, -45)
-	title.size = Vector2(70, 20)
-	title.add_theme_font_size_override("font_size", 12)
-	title.add_theme_color_override("font_color", Color(0.3, 0.3, 0.3))
+	title.position = Vector2(-40, -15)
+	title.size = Vector2(80, 20)
+	title.add_theme_font_size_override("font_size", 14)
+	title.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
 	inbox_visual.add_child(title)
 
 func _create_taskboard() -> void:
