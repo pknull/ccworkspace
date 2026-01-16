@@ -68,17 +68,17 @@ func scan_for_sessions() -> void:
 		subdir_name = dir.get_next()
 	dir.list_dir_end()
 
-	# Remove stale sessions (not modified recently)
+	# Remove stale sessions (not modified recently AND no pending agents)
 	var to_remove = []
 	for path in watched_sessions.keys():
 		var mod_time = FileAccess.get_modified_time(path)
 		if current_time - mod_time > ACTIVE_THRESHOLD:
-			to_remove.append(path)
+			# Only remove if no pending agents from this session
+			if not session_has_pending_agents(path):
+				to_remove.append(path)
 
 	for path in to_remove:
 		print("[TranscriptWatcher] Stopped watching inactive: %s" % path.get_file())
-		# Clean up any orphaned agents from this session
-		cleanup_session_agents(path)
 		watched_sessions.erase(path)
 
 func start_watching_session(file_path: String) -> void:
@@ -218,24 +218,12 @@ func process_tool_result(item: Dictionary, entry: Dictionary) -> void:
 			"timestamp": timestamp
 		})
 
-func cleanup_session_agents(session_path: String) -> void:
-	# Force-complete any pending agents from this session
-	var to_remove = []
+func session_has_pending_agents(session_path: String) -> bool:
 	for tool_id in pending_agents.keys():
 		var agent_info = pending_agents[tool_id]
 		if agent_info.get("session_path", "") == session_path:
-			print("[TranscriptWatcher] Cleaning up orphaned agent: %s" % agent_info.description)
-			# Send complete event
-			event_received.emit({
-				"event": "agent_complete",
-				"agent_id": tool_id.substr(0, 8),
-				"success": "true",
-				"timestamp": ""
-			})
-			to_remove.append(tool_id)
-
-	for tool_id in to_remove:
-		pending_agents.erase(tool_id)
+			return true
+	return false
 
 func get_watched_count() -> int:
 	return watched_sessions.size()
