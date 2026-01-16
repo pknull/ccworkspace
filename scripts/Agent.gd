@@ -127,13 +127,21 @@ func _create_visuals() -> void:
 	type_label.add_theme_font_size_override("font_size", 12)
 	add_child(type_label)
 
-	# Status label (speech bubble style)
+	# Status label background (for readability)
+	var status_bg = ColorRect.new()
+	status_bg.name = "StatusBg"
+	status_bg.size = Vector2(130, 18)
+	status_bg.position = Vector2(-65, -88)
+	status_bg.color = Color(0.15, 0.15, 0.18, 0.85)
+	add_child(status_bg)
+
+	# Status label (task description)
 	status_label = Label.new()
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status_label.position = Vector2(-60, -90)
-	status_label.size = Vector2(120, 20)
-	status_label.add_theme_font_size_override("font_size", 10)
-	status_label.add_theme_color_override("font_color", Color(0.3, 0.3, 0.3))
+	status_label.position = Vector2(-65, -90)
+	status_label.size = Vector2(130, 20)
+	status_label.add_theme_font_size_override("font_size", 11)
+	status_label.add_theme_color_override("font_color", Color(0.95, 0.95, 0.95))
 	add_child(status_label)
 
 	# Tool indicator (floats to the right of agent)
