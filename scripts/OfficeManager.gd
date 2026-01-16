@@ -2,6 +2,7 @@ extends Node2D
 class_name OfficeManager
 
 const AgentScene = preload("res://scenes/Agent.tscn")
+const TranscriptWatcherScript = preload("res://scripts/TranscriptWatcher.gd")
 
 @export var spawn_point: Vector2 = Vector2(100, 400)
 
@@ -22,14 +23,24 @@ var connection_lines: Array[Line2D] = []
 # Main orchestrator agent (always present)
 var main_agent: Agent = null
 
+# Event sources
 @onready var event_server: EventServer = $EventServer
+var transcript_watcher: Node = null
 
 func _ready() -> void:
 	_setup_ui()
 	_create_desks()
 	_create_inbox()
 	_create_main_agent()
+
+	# Connect TCP server (for external tools/hooks)
 	event_server.event_received.connect(_on_event_received)
+
+	# Create and connect transcript watcher (monitors .jsonl files directly)
+	transcript_watcher = TranscriptWatcherScript.new()
+	add_child(transcript_watcher)
+	transcript_watcher.event_received.connect(_on_event_received)
+
 	print("[OfficeManager] Ready. Desks: %d" % desks.size())
 
 func _setup_ui() -> void:

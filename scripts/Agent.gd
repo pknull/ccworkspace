@@ -298,9 +298,29 @@ func set_description(desc: String) -> void:
 			status_label.text = desc
 
 func force_complete() -> void:
-	# Called when SubagentStop is received
-	if state == State.WORKING:
-		complete_work()
+	# Called when agent_complete event is received
+	# Handle completion regardless of current state
+	match state:
+		State.WORKING:
+			complete_work()
+		State.SPAWNING, State.WALKING_TO_DESK:
+			# Agent hasn't reached desk yet - skip to completion
+			print("[Agent] Force completing agent still in transit: %s" % agent_id)
+			# Release desk if assigned
+			if assigned_desk:
+				assigned_desk.set_occupied(false)
+			# Skip directly to completing (fade out)
+			state = State.COMPLETING
+			spawn_timer = 0.5
+			if status_label:
+				status_label.text = "Done!"
+		State.IDLE:
+			# Not assigned to work - just fade out
+			state = State.COMPLETING
+			spawn_timer = 0.5
+		State.DELIVERING, State.COMPLETING:
+			# Already completing - ignore
+			pass
 
 func show_tool(tool_name: String) -> void:
 	current_tool = tool_name
