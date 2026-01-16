@@ -74,6 +74,8 @@ var work_timer: float = 0.0
 var spawn_timer: float = 0.0
 var is_waiting_for_completion: bool = true
 var pending_completion: bool = false
+var min_work_time: float = 3.0  # Minimum seconds to show working at desk
+var work_elapsed: float = 0.0
 
 # Document being carried
 var document: ColorRect = null
@@ -371,22 +373,31 @@ func _process_walking_to_desk(delta: float) -> void:
 	var direction = target_position - position
 	if direction.length() < 5:
 		position = target_position
-		if pending_completion:
-			pending_completion = false
-			complete_work()
-		else:
-			state = State.WORKING
-			if status_label:
-				status_label.text = "Working..."
+		# Start working - reset work timer
+		work_elapsed = 0.0
+		state = State.WORKING
+		print("[Agent %s] Reached desk, starting work (pending_completion=%s)" % [agent_id, pending_completion])
+		if status_label:
+			status_label.text = "Working..."
 	else:
 		position += direction.normalized() * 180 * delta
 
 func _process_working(delta: float) -> void:
+	# Track work time
+	work_elapsed += delta
+
 	# Subtle typing animation
 	if body:
 		body.position.y = -15 + sin(Time.get_ticks_msec() * 0.008) * 1.5
 	if head:
 		head.position.y = -35 + sin(Time.get_ticks_msec() * 0.008) * 1.5
+
+	# Check if we have a pending completion and met minimum work time
+	if pending_completion:
+		if work_elapsed >= min_work_time:
+			print("[Agent %s] Min work time reached (%.1f >= %.1f), completing" % [agent_id, work_elapsed, min_work_time])
+			pending_completion = false
+			complete_work()
 
 func _process_delivering(delta: float) -> void:
 	var direction = inbox_position - position
@@ -465,7 +476,13 @@ func set_description(desc: String) -> void:
 func force_complete() -> void:
 	match state:
 		State.WORKING:
-			complete_work()
+			# If we haven't worked long enough, delay completion
+			if work_elapsed >= min_work_time:
+				complete_work()
+			else:
+				pending_completion = true
+				if status_label:
+					status_label.text = "Wrapping up..."
 		State.SPAWNING, State.WALKING_TO_DESK:
 			pending_completion = true
 			if status_label:
