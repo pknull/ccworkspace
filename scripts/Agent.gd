@@ -3,7 +3,7 @@ class_name Agent
 
 signal work_completed(agent: Agent)
 
-enum State { SPAWNING, WALKING_TO_DESK, WORKING, DELIVERING, SOCIALIZING, LEAVING, COMPLETING, IDLE }
+enum State { SPAWNING, WALKING_TO_DESK, WORKING, DELIVERING, SOCIALIZING, LEAVING, COMPLETING, IDLE, MEETING }
 
 # Shirt/tie colors by agent type (more muted, office-appropriate)
 const AGENT_COLORS = {
@@ -89,6 +89,10 @@ const FLOOR_MAX_Y: float = 625.0  # Above bottom wall seam
 var obstacles: Array[Rect2] = []
 var work_timer: float = 0.0
 var socialize_timer: float = 0.0
+
+# Meeting overflow state
+var is_in_meeting: bool = false
+var meeting_spot: Vector2 = Vector2.ZERO
 
 # Pathfinding
 var path_waypoints: Array[Vector2] = []
@@ -557,6 +561,8 @@ func _process(delta: float) -> void:
 			# Idle agents can still walk to a destination (e.g., water cooler)
 			if not path_waypoints.is_empty():
 				_process_walking_path(delta)
+		State.MEETING:
+			_process_meeting(delta)
 
 func _check_mouse_hover() -> void:
 	var mouse_pos = get_local_mouse_position()
@@ -586,6 +592,7 @@ func _show_tooltip() -> void:
 				State.LEAVING: state_text = "Leaving"
 				State.COMPLETING: state_text = "Done!"
 				State.IDLE: state_text = "Idle"
+				State.MEETING: state_text = "In meeting"
 
 			# Build tooltip content - compact single-line spacing
 			var lines: Array[String] = []
@@ -747,6 +754,40 @@ func _process_socializing(delta: float) -> void:
 		# Pick next action: another spot or finally leave
 		_pick_post_work_action()
 
+func _process_meeting(delta: float) -> void:
+	# Walk to meeting spot if not there yet
+	if not path_waypoints.is_empty():
+		_process_walking_path(delta)
+		return
+
+	# Track work time (meetings count as work)
+	work_elapsed += delta
+
+	# Subtle standing animation (shift weight)
+	if body:
+		body.position.y = -15 + sin(Time.get_ticks_msec() * 0.003) * 1.5
+	if head:
+		head.position.y = -35 + sin(Time.get_ticks_msec() * 0.003 + 0.3) * 1.5
+
+	# Meeting-specific spontaneous bubbles
+	_process_spontaneous_bubble(delta, false, true)  # Third param = is_meeting
+
+	# Check if we have a pending completion
+	if pending_completion:
+		if work_elapsed >= min_work_time:
+			print("[Agent %s] Meeting done, completing" % agent_id)
+			pending_completion = false
+			is_in_meeting = false
+			_start_delivering()
+
+func start_meeting(spot: Vector2) -> void:
+	is_in_meeting = true
+	meeting_spot = spot
+	state = State.MEETING
+	_build_path_to(spot)
+	if status_label:
+		status_label.text = "Heading to meeting..."
+
 func _process_working(delta: float) -> void:
 	# Track work time
 	work_elapsed += delta
@@ -805,7 +846,12 @@ func complete_work() -> void:
 		if assigned_desk.has_method("hide_tool"):
 			assigned_desk.hide_tool()
 		assigned_desk.set_occupied(false)
+	_start_delivering()
+
+func _start_delivering() -> void:
 	state = State.DELIVERING
+	if not document:
+		_create_document()
 	# Pick a random approach position to the shredder (from any accessible side)
 	var delivery_pos = _get_random_shredder_approach()
 	_build_path_to(delivery_pos)
@@ -902,6 +948,15 @@ func force_complete() -> void:
 				pending_completion = true
 				if status_label:
 					status_label.text = "Wrapping up..."
+		State.MEETING:
+			# If we haven't met long enough, delay completion
+			if work_elapsed >= min_work_time:
+				is_in_meeting = false
+				_start_delivering()
+			else:
+				pending_completion = true
+				if status_label:
+					status_label.text = "Wrapping up meeting..."
 		State.SPAWNING, State.WALKING_TO_DESK:
 			pending_completion = true
 			if status_label:
@@ -1150,6 +1205,14 @@ const SOCIALIZING_PHRASES = [
 	"Love this cooler.", "Quick break!", "Busy day!", "Same here.",
 ]
 
+const MEETING_PHRASES = [
+	"Good point.", "Let's sync up.", "Action items?", "Any blockers?",
+	"Per my last...", "Circling back...", "Take it offline?", "Synergies!",
+	"Moving forward...", "Aligned.", "Let's table that.", "Deep dive?",
+	"Bandwidth?", "EOD works.", "Ping me later.", "Noted.",
+	"That's a stretch.", "Can we scope it?", "Dependencies?", "Ship it!",
+]
+
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		# Check if click is on this agent
@@ -1310,7 +1373,7 @@ func _end_fidget() -> void:
 		body.position.y = base_body_y
 
 # Spontaneous voice bubble functions
-func _process_spontaneous_bubble(delta: float, is_socializing: bool = false) -> void:
+func _process_spontaneous_bubble(delta: float, is_socializing: bool = false, is_meeting: bool = false) -> void:
 	# Don't process if already showing a reaction
 	if reaction_timer > 0:
 		return
@@ -1322,16 +1385,22 @@ func _process_spontaneous_bubble(delta: float, is_socializing: bool = false) -> 
 
 	spontaneous_bubble_timer += delta
 
-	# Different intervals for working vs socializing
-	var check_interval = SPONTANEOUS_CHECK_INTERVAL if not is_socializing else SPONTANEOUS_CHECK_INTERVAL * 0.6
-	var chance = SPONTANEOUS_CHANCE if not is_socializing else SPONTANEOUS_CHANCE * 1.5
+	# Different intervals: meetings have higher chance (more chatty)
+	var check_interval = SPONTANEOUS_CHECK_INTERVAL
+	var chance = SPONTANEOUS_CHANCE
+	if is_meeting:
+		check_interval = SPONTANEOUS_CHECK_INTERVAL * 0.5  # Check more often in meetings
+		chance = SPONTANEOUS_CHANCE * 2.0  # Much more chatty
+	elif is_socializing:
+		check_interval = SPONTANEOUS_CHECK_INTERVAL * 0.6
+		chance = SPONTANEOUS_CHANCE * 1.5
 
 	if spontaneous_bubble_timer >= check_interval:
 		spontaneous_bubble_timer = 0.0
 		if randf() < chance:
 			# Check global coordination (only one spontaneous bubble at a time)
 			if _can_show_spontaneous_globally():
-				_show_spontaneous_reaction(is_socializing)
+				_show_spontaneous_reaction(is_socializing, is_meeting)
 				spontaneous_cooldown = SPONTANEOUS_COOLDOWN
 
 func _can_show_spontaneous_globally() -> bool:
@@ -1340,9 +1409,13 @@ func _can_show_spontaneous_globally() -> bool:
 		return office_manager.can_show_spontaneous_bubble()
 	return true  # Default to yes if no manager
 
-func _show_spontaneous_reaction(is_socializing: bool = false) -> void:
+func _show_spontaneous_reaction(is_socializing: bool = false, is_meeting: bool = false) -> void:
 	# Pick appropriate phrase based on context
-	var phrases = SOCIALIZING_PHRASES if is_socializing else WORKING_PHRASES
+	var phrases = WORKING_PHRASES
+	if is_meeting:
+		phrases = MEETING_PHRASES
+	elif is_socializing:
+		phrases = SOCIALIZING_PHRASES
 	var phrase = phrases[randi() % phrases.size()]
 
 	# Notify manager that we're showing a bubble

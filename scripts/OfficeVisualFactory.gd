@@ -232,6 +232,59 @@ static func create_shredder(draggable_script: Script) -> Node2D:
 
 	return shredder
 
+static func create_meeting_table() -> Node2D:
+	var table = Node2D.new()
+	table.name = "MeetingTable"
+
+	# Shadow under table
+	var shadow = ColorRect.new()
+	shadow.size = Vector2(130, 20)
+	shadow.position = Vector2(-65, 25)
+	shadow.color = OfficePalette.SHADOW
+	table.add_child(shadow)
+
+	# Table legs (4 corners, visible from top-down angle)
+	var leg_positions = [
+		Vector2(-50, -20), Vector2(50, -20),  # Back legs
+		Vector2(-50, 20), Vector2(50, 20),    # Front legs
+	]
+	for leg_pos in leg_positions:
+		var leg = ColorRect.new()
+		leg.size = Vector2(8, 8)
+		leg.position = leg_pos - Vector2(4, 4)
+		leg.color = OfficePalette.MEETING_TABLE_LEG
+		table.add_child(leg)
+
+	# Table edge (front face - darker)
+	var edge_front = ColorRect.new()
+	edge_front.size = Vector2(120, 8)
+	edge_front.position = Vector2(-60, 22)
+	edge_front.color = OfficePalette.MEETING_TABLE_EDGE
+	table.add_child(edge_front)
+
+	# Table surface (main top - lighter wood)
+	var surface = ColorRect.new()
+	surface.size = Vector2(120, 50)
+	surface.position = Vector2(-60, -28)
+	surface.color = OfficePalette.MEETING_TABLE_SURFACE
+	table.add_child(surface)
+
+	# Surface edge detail (lighter strip at top for 3D effect)
+	var edge_top = ColorRect.new()
+	edge_top.size = Vector2(120, 4)
+	edge_top.position = Vector2(-60, -28)
+	edge_top.color = OfficePalette.MEETING_TABLE_SURFACE.lightened(0.1)
+	table.add_child(edge_top)
+
+	# Center decoration (subtle inlay pattern)
+	var inlay = ColorRect.new()
+	inlay.size = Vector2(80, 30)
+	inlay.position = Vector2(-40, -18)
+	inlay.color = OfficePalette.MEETING_TABLE_SURFACE.darkened(0.05)
+	table.add_child(inlay)
+
+	return table
+
 static func create_door(parent: Node2D, pos: Vector2) -> Node2D:
 	var door = Node2D.new()
 	door.position = pos

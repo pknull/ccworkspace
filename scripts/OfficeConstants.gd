@@ -65,6 +65,23 @@ const FILING_CABINET_POSITION: Vector2 = Vector2(50, 555) # X=cell 2, Y=cell 23
 const SHREDDER_POSITION: Vector2 = Vector2(1210, 535)     # X=cell 60, Y=cell 22
 const TASKBOARD_POSITION: Vector2 = Vector2(920, 20)      # Top-right corner
 
+# Meeting table for overflow agents (right side of office)
+const MEETING_TABLE_POSITION: Vector2 = Vector2(890, 235)  # Upper-right area
+const MEETING_TABLE_SIZE: Vector2 = Vector2(120, 60)       # Rectangular conference table
+const MEETING_TABLE_OBSTACLE: Vector2 = Vector2(130, 70)   # Slightly larger for pathfinding
+
+# Meeting table standing positions (around the table)
+const MEETING_SPOTS: Array[Vector2] = [
+	Vector2(830, 205),   # Left-top
+	Vector2(830, 265),   # Left-bottom
+	Vector2(950, 205),   # Right-top
+	Vector2(950, 265),   # Right-bottom
+	Vector2(870, 175),   # Top-left
+	Vector2(910, 175),   # Top-right
+	Vector2(870, 295),   # Bottom-left
+	Vector2(910, 295),   # Bottom-right
+]
+
 # Taskboard dimensions for dragging
 const TASKBOARD_SIZE: Vector2 = Vector2(170, 130)
 const TASKBOARD_OBSTACLE: Vector2 = Vector2(170, 130)  # Full board blocks navigation

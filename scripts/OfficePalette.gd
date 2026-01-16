@@ -31,6 +31,11 @@ const WOOD_DOOR_LIGHT = Color(0.6, 0.48, 0.38)
 const DESK_SURFACE = Color(0.76, 0.70, 0.60)
 const DESK_EDGE = Color(0.55, 0.50, 0.42)
 
+# Meeting Table (darker wood conference table)
+const MEETING_TABLE_SURFACE = Color(0.42, 0.32, 0.24)
+const MEETING_TABLE_EDGE = Color(0.35, 0.26, 0.18)
+const MEETING_TABLE_LEG = Color(0.30, 0.22, 0.16)
+
 # Metal (filing cabinet, etc)
 const METAL_GRAY = Color(0.5, 0.5, 0.52)
 const METAL_GRAY_LIGHT = Color(0.55, 0.55, 0.58)

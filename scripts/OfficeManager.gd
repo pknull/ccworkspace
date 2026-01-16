@@ -19,6 +19,12 @@ var filing_cabinet_position: Vector2 = OfficeConstants.FILING_CABINET_POSITION
 var door_position: Vector2 = OfficeConstants.DOOR_POSITION
 var shredder_position: Vector2 = OfficeConstants.SHREDDER_POSITION
 var taskboard_position: Vector2 = OfficeConstants.TASKBOARD_POSITION
+var meeting_table_position: Vector2 = OfficeConstants.MEETING_TABLE_POSITION
+
+# Meeting table overflow tracking
+var meeting_table: Node2D = null
+var meeting_spots_occupied: Array[bool] = []  # Track which spots are taken
+var agents_in_meeting: Dictionary = {}  # agent_id -> spot_index
 
 # Draggable furniture references
 var draggable_water_cooler: Node2D = null
@@ -182,6 +188,17 @@ func _create_furniture() -> void:
 	add_child(draggable_shredder)
 	office_obstacles.append(Rect2(shredder_position.x - 15, shredder_position.y - 20, 30, 40))
 
+	# Meeting table (overflow area - not draggable)
+	meeting_table = OfficeVisualFactory.create_meeting_table()
+	meeting_table.position = meeting_table_position
+	add_child(meeting_table)
+	# Register as obstacle
+	var table_size = OfficeConstants.MEETING_TABLE_OBSTACLE
+	office_obstacles.append(Rect2(meeting_table_position.x - table_size.x / 2, meeting_table_position.y - table_size.y / 2, table_size.x, table_size.y))
+	# Initialize meeting spots (8 spots around the table)
+	meeting_spots_occupied.resize(OfficeConstants.MEETING_SPOTS.size())
+	meeting_spots_occupied.fill(false)
+
 func _create_desks() -> void:
 	var desk_x_positions = OfficeConstants.DESK_POSITIONS_X
 	var desk_y_positions = [
@@ -233,6 +250,7 @@ func _register_with_navigation_grid() -> void:
 	_register_furniture_obstacle("plant", plant_position, OfficeConstants.PLANT_OBSTACLE)
 	_register_furniture_obstacle("filing_cabinet", filing_cabinet_position, OfficeConstants.FILING_CABINET_OBSTACLE)
 	_register_furniture_obstacle("shredder", shredder_position, OfficeConstants.SHREDDER_OBSTACLE)
+	_register_furniture_obstacle("meeting_table", meeting_table_position, OfficeConstants.MEETING_TABLE_OBSTACLE)
 
 func _register_furniture_obstacle(obstacle_id: String, pos: Vector2, size: Vector2) -> void:
 	var rect = Rect2(pos.x - size.x / 2, pos.y - size.y / 2, size.x, size.y)
@@ -360,10 +378,17 @@ func _handle_agent_spawn(data: Dictionary) -> void:
 
 	print("[OfficeManager] Spawning agent: %s (%s)" % [agent_type, agent_id])
 
+	# Try to find a desk first
 	var desk = _find_available_desk()
+	var meeting_spot_idx = -1
+
 	if desk == null:
-		push_warning("No available desks!")
-		return
+		# No desk - try meeting table overflow
+		meeting_spot_idx = _find_available_meeting_spot()
+		if meeting_spot_idx == -1:
+			push_warning("No available desks or meeting spots!")
+			return
+		print("[OfficeManager] No desk available, using meeting table spot %d" % meeting_spot_idx)
 
 	# Track by session
 	if not agents_by_session.has(session_id):
@@ -385,9 +410,20 @@ func _handle_agent_spawn(data: Dictionary) -> void:
 	agent.set_obstacles(office_obstacles)
 	agent.navigation_grid = navigation_grid  # Use grid-based pathfinding
 	agent.office_manager = self  # For spontaneous bubble coordination
-	agent.assign_desk(desk)
 	agent.work_completed.connect(_on_agent_completed)
 	add_child(agent)
+
+	if desk != null:
+		# Normal desk assignment
+		agent.assign_desk(desk)
+		_draw_spawn_connection(spawn_pos, desk.get_work_position(), agent_type)
+	else:
+		# Meeting table overflow
+		var meeting_spot = OfficeConstants.MEETING_SPOTS[meeting_spot_idx]
+		meeting_spots_occupied[meeting_spot_idx] = true
+		agents_in_meeting[agent_id] = meeting_spot_idx
+		agent.start_meeting(meeting_spot)
+		_draw_spawn_connection(spawn_pos, meeting_spot, agent_type)
 
 	# Track agent
 	active_agents[agent_id] = agent
@@ -396,8 +432,20 @@ func _handle_agent_spawn(data: Dictionary) -> void:
 	agent_by_type[agent_type].append(agent_id)
 
 	# Visual feedback
-	_draw_spawn_connection(spawn_pos, desk.get_work_position(), agent_type)
 	status_label.text = "Spawned: %s" % agent_type
+
+func _find_available_meeting_spot() -> int:
+	for i in range(meeting_spots_occupied.size()):
+		if not meeting_spots_occupied[i]:
+			return i
+	return -1
+
+func _release_meeting_spot(agent_id: String) -> void:
+	if agents_in_meeting.has(agent_id):
+		var spot_idx = agents_in_meeting[agent_id]
+		if spot_idx >= 0 and spot_idx < meeting_spots_occupied.size():
+			meeting_spots_occupied[spot_idx] = false
+		agents_in_meeting.erase(agent_id)
 
 func _handle_agent_complete(data: Dictionary) -> void:
 	var agent_id = data.get("agent_id", "")
@@ -509,6 +557,9 @@ func _on_agent_completed(agent: Agent) -> void:
 		agent_by_type[agent.agent_type].erase(aid)
 	if agent.session_id and agents_by_session.has(agent.session_id):
 		agents_by_session[agent.session_id].erase(aid)
+
+	# Release meeting spot if this agent was in a meeting
+	_release_meeting_spot(aid)
 
 	agent.queue_free()
 
