@@ -5,43 +5,43 @@ signal event_received(event_data: Dictionary)
 
 const CLAUDE_PROJECTS_DIR = "/.claude/projects"
 const POLL_INTERVAL = 0.5  # seconds
+const SCAN_INTERVAL = 5.0  # seconds - how often to scan for new sessions
+const ACTIVE_THRESHOLD = 300  # seconds - consider sessions active if modified within this time
 
-var watching_file: String = ""
-var file_handle: FileAccess = null
-var file_position: int = 0
+# Track multiple sessions
+var watched_sessions: Dictionary = {}  # file_path -> {position: int, last_modified: int}
 var poll_timer: float = 0.0
+var scan_timer: float = 0.0
 
 # Track tool_use_id -> agent info for matching with tool_result
 var pending_agents: Dictionary = {}  # tool_use_id -> {agent_type, description}
 
 func _ready() -> void:
-	# Find and start watching the most recent session
-	var session_file = find_latest_session()
-	if session_file:
-		start_watching(session_file)
-	else:
-		push_warning("[TranscriptWatcher] No session file found")
+	# Find and start watching all active sessions
+	scan_for_sessions()
 
 func _process(delta: float) -> void:
-	if watching_file.is_empty():
-		return
-
+	# Poll existing sessions for new entries
 	poll_timer += delta
 	if poll_timer >= POLL_INTERVAL:
 		poll_timer = 0.0
-		check_for_new_entries()
+		check_all_sessions()
 
-func find_latest_session() -> String:
+	# Periodically scan for new sessions
+	scan_timer += delta
+	if scan_timer >= SCAN_INTERVAL:
+		scan_timer = 0.0
+		scan_for_sessions()
+
+func scan_for_sessions() -> void:
 	var home_dir = OS.get_environment("HOME")
 	var projects_dir = home_dir + CLAUDE_PROJECTS_DIR
+	var current_time = Time.get_unix_time_from_system()
 
 	var dir = DirAccess.open(projects_dir)
 	if not dir:
 		push_warning("[TranscriptWatcher] Cannot open: %s" % projects_dir)
-		return ""
-
-	var latest_file = ""
-	var latest_time = 0
+		return
 
 	# Search all project subdirectories
 	dir.list_dir_begin()
@@ -57,49 +57,65 @@ func find_latest_session() -> String:
 					if file_name.ends_with(".jsonl"):
 						var full_path = subdir_path + "/" + file_name
 						var mod_time = FileAccess.get_modified_time(full_path)
-						if mod_time > latest_time:
-							latest_time = mod_time
-							latest_file = full_path
+
+						# Only watch recently active sessions
+						if current_time - mod_time < ACTIVE_THRESHOLD:
+							if not watched_sessions.has(full_path):
+								# New session - start watching from end
+								start_watching_session(full_path)
 					file_name = subdir.get_next()
 				subdir.list_dir_end()
 		subdir_name = dir.get_next()
 	dir.list_dir_end()
 
-	return latest_file
+	# Remove stale sessions (not modified recently)
+	var to_remove = []
+	for path in watched_sessions.keys():
+		var mod_time = FileAccess.get_modified_time(path)
+		if current_time - mod_time > ACTIVE_THRESHOLD:
+			to_remove.append(path)
 
-func start_watching(file_path: String) -> void:
-	watching_file = file_path
+	for path in to_remove:
+		print("[TranscriptWatcher] Stopped watching inactive: %s" % path.get_file())
+		watched_sessions.erase(path)
 
+func start_watching_session(file_path: String) -> void:
 	# Open file and seek to end
-	file_handle = FileAccess.open(file_path, FileAccess.READ)
-	if file_handle:
-		file_handle.seek_end(0)
-		file_position = file_handle.get_position()
+	var file = FileAccess.open(file_path, FileAccess.READ)
+	if file:
+		file.seek_end(0)
+		watched_sessions[file_path] = {
+			"position": file.get_position(),
+			"last_modified": FileAccess.get_modified_time(file_path)
+		}
+		file.close()
 		print("[TranscriptWatcher] Watching: %s" % file_path.get_file())
 	else:
 		push_warning("[TranscriptWatcher] Cannot open: %s" % file_path)
 
-func check_for_new_entries() -> void:
-	if not file_handle:
-		return
+func check_all_sessions() -> void:
+	for file_path in watched_sessions.keys():
+		check_session_for_entries(file_path)
 
-	# Reopen file to get fresh content (file might have grown)
-	file_handle.close()
-	file_handle = FileAccess.open(watching_file, FileAccess.READ)
-	if not file_handle:
+func check_session_for_entries(file_path: String) -> void:
+	var session = watched_sessions[file_path]
+	var file = FileAccess.open(file_path, FileAccess.READ)
+	if not file:
 		return
 
 	# Seek to where we left off
-	file_handle.seek(file_position)
+	file.seek(session.position)
 
 	# Read new lines
-	while not file_handle.eof_reached():
-		var line = file_handle.get_line()
+	while not file.eof_reached():
+		var line = file.get_line()
 		if line.strip_edges().is_empty():
 			continue
 		process_line(line)
 
-	file_position = file_handle.get_position()
+	# Update position
+	watched_sessions[file_path].position = file.get_position()
+	file.close()
 
 func process_line(line: String) -> void:
 	var json = JSON.new()
@@ -199,27 +215,5 @@ func process_tool_result(item: Dictionary, entry: Dictionary) -> void:
 			"timestamp": timestamp
 		})
 
-func switch_session(session_id: String) -> void:
-	# Allow manually switching to a specific session
-	var home_dir = OS.get_environment("HOME")
-	var projects_dir = home_dir + CLAUDE_PROJECTS_DIR
-
-	var dir = DirAccess.open(projects_dir)
-	if not dir:
-		return
-
-	dir.list_dir_begin()
-	var subdir_name = dir.get_next()
-	while subdir_name != "":
-		if dir.current_is_dir():
-			var file_path = projects_dir + "/" + subdir_name + "/" + session_id + ".jsonl"
-			if FileAccess.file_exists(file_path):
-				if file_handle:
-					file_handle.close()
-				pending_agents.clear()
-				start_watching(file_path)
-				return
-		subdir_name = dir.get_next()
-	dir.list_dir_end()
-
-	push_warning("[TranscriptWatcher] Session not found: %s" % session_id)
+func get_watched_count() -> int:
+	return watched_sessions.size()
