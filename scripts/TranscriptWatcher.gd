@@ -14,7 +14,7 @@ var poll_timer: float = 0.0
 var scan_timer: float = 0.0
 
 # Track tool_use_id -> agent info for matching with tool_result
-var pending_agents: Dictionary = {}  # tool_use_id -> {agent_type, description}
+var pending_agents: Dictionary = {}  # tool_use_id -> {agent_type, description, session_path}
 
 func _ready() -> void:
 	# Find and start watching all active sessions
@@ -77,6 +77,8 @@ func scan_for_sessions() -> void:
 
 	for path in to_remove:
 		print("[TranscriptWatcher] Stopped watching inactive: %s" % path.get_file())
+		# Clean up any orphaned agents from this session
+		cleanup_session_agents(path)
 		watched_sessions.erase(path)
 
 func start_watching_session(file_path: String) -> void:
@@ -111,13 +113,13 @@ func check_session_for_entries(file_path: String) -> void:
 		var line = file.get_line()
 		if line.strip_edges().is_empty():
 			continue
-		process_line(line)
+		process_line(line, file_path)
 
 	# Update position
 	watched_sessions[file_path].position = file.get_position()
 	file.close()
 
-func process_line(line: String) -> void:
+func process_line(line: String, session_path: String = "") -> void:
 	var json = JSON.new()
 	var error = json.parse(line)
 	if error != OK:
@@ -142,11 +144,11 @@ func process_line(line: String) -> void:
 		var item_type = item.get("type", "")
 
 		if item_type == "tool_use":
-			process_tool_use(item, entry)
+			process_tool_use(item, entry, session_path)
 		elif item_type == "tool_result":
 			process_tool_result(item, entry)
 
-func process_tool_use(item: Dictionary, entry: Dictionary) -> void:
+func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String = "") -> void:
 	var tool_name = item.get("name", "")
 	var tool_id = item.get("id", "")
 	var tool_input = item.get("input", {})
@@ -157,10 +159,11 @@ func process_tool_use(item: Dictionary, entry: Dictionary) -> void:
 		var agent_type = tool_input.get("subagent_type", "default")
 		var description = tool_input.get("description", "")
 
-		# Store for matching with result
+		# Store for matching with result (including session for cleanup)
 		pending_agents[tool_id] = {
 			"agent_type": agent_type,
-			"description": description
+			"description": description,
+			"session_path": session_path
 		}
 
 		print("[TranscriptWatcher] SPAWN: %s - %s" % [agent_type, description])
@@ -214,6 +217,25 @@ func process_tool_result(item: Dictionary, entry: Dictionary) -> void:
 			"success": "true",
 			"timestamp": timestamp
 		})
+
+func cleanup_session_agents(session_path: String) -> void:
+	# Force-complete any pending agents from this session
+	var to_remove = []
+	for tool_id in pending_agents.keys():
+		var agent_info = pending_agents[tool_id]
+		if agent_info.get("session_path", "") == session_path:
+			print("[TranscriptWatcher] Cleaning up orphaned agent: %s" % agent_info.description)
+			# Send complete event
+			event_received.emit({
+				"event": "agent_complete",
+				"agent_id": tool_id.substr(0, 8),
+				"success": "true",
+				"timestamp": ""
+			})
+			to_remove.append(tool_id)
+
+	for tool_id in to_remove:
+		pending_agents.erase(tool_id)
 
 func get_watched_count() -> int:
 	return watched_sessions.size()
