@@ -47,12 +47,31 @@ func _create_visuals() -> void:
 	bezel.color = Color(0.2, 0.2, 0.22)
 	add_child(bezel)
 
-	# Monitor screen
+	# Monitor screen (with glow effect)
 	var screen = ColorRect.new()
 	screen.size = Vector2(34, 24)
 	screen.position = Vector2(-17, -37)
-	screen.color = Color(0.15, 0.22, 0.18)  # Dark green-ish (old CRT)
+	screen.color = Color(0.12, 0.18, 0.25)  # Dark blue screen
 	add_child(screen)
+
+	# Screen content - fake text lines
+	var line1 = ColorRect.new()
+	line1.size = Vector2(26, 2)
+	line1.position = Vector2(-13, -34)
+	line1.color = Color(0.4, 0.7, 0.5, 0.6)  # Green text
+	add_child(line1)
+
+	var line2 = ColorRect.new()
+	line2.size = Vector2(20, 2)
+	line2.position = Vector2(-13, -30)
+	line2.color = Color(0.4, 0.7, 0.5, 0.5)
+	add_child(line2)
+
+	var line3 = ColorRect.new()
+	line3.size = Vector2(24, 2)
+	line3.position = Vector2(-13, -26)
+	line3.color = Color(0.4, 0.7, 0.5, 0.4)
+	add_child(line3)
 
 	# Keyboard
 	var keyboard = ColorRect.new()
