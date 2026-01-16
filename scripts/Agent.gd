@@ -89,7 +89,6 @@ const FLOOR_MAX_Y: float = 625.0  # Above bottom wall seam
 var obstacles: Array[Rect2] = []
 var work_timer: float = 0.0
 var socialize_timer: float = 0.0
-var should_socialize: bool = false
 
 # Pathfinding
 var path_waypoints: Array[Vector2] = []
@@ -689,8 +688,8 @@ func _on_path_complete() -> void:
 			# Arrived at shredder, deliver document
 			print("[Agent %s] Reached shredder at %s, delivering document" % [agent_id, position])
 			_deliver_document()
-			# Now go to water cooler
-			_start_socializing()
+			# Pick next action: socialize somewhere or leave
+			_pick_post_work_action()
 		State.LEAVING:
 			# Arrived at door, complete and fade out
 			state = State.COMPLETING
@@ -698,25 +697,29 @@ func _on_path_complete() -> void:
 			if status_label:
 				status_label.text = "Goodbye!"
 
-func _start_socializing() -> void:
-	# Random chance to take a break (70% chance)
-	should_socialize = randf() < 0.7
-	if should_socialize:
-		socialize_timer = randf_range(2.0, 5.0)  # Hang out for 2-5 seconds
-		state = State.SOCIALIZING
-		# Pick a random break spot: water cooler, plant, or filing cabinet
-		var break_spots = [
-			{"pos": water_cooler_position, "name": "Water cooler break..."},
-			{"pos": plant_position, "name": "Admiring the plant..."},
-			{"pos": filing_cabinet_position, "name": "Filing paperwork..."},
-		]
-		var spot = break_spots[randi() % break_spots.size()]
-		_build_path_to(spot["pos"] + Vector2(randf_range(20, 50), randf_range(-20, 20)))
-		if status_label:
-			status_label.text = spot["name"]
-	else:
-		# Skip socializing, go straight to door
+func _pick_post_work_action() -> void:
+	# After delivering or socializing, randomly pick: socialize spot or exit
+	# Options: cooler, plant, cabinet, exit (weighted toward socializing)
+	var options = [
+		{"type": "socialize", "pos": water_cooler_position, "name": "Water cooler break..."},
+		{"type": "socialize", "pos": plant_position, "name": "Admiring the plant..."},
+		{"type": "socialize", "pos": filing_cabinet_position, "name": "Filing paperwork..."},
+		{"type": "exit", "pos": door_position, "name": "Heading out..."},
+	]
+	var choice = options[randi() % options.size()]
+
+	if choice["type"] == "exit":
 		_start_leaving()
+	else:
+		_start_socializing_at(choice["pos"], choice["name"])
+
+func _start_socializing_at(target_pos: Vector2, status_text: String) -> void:
+	socialize_timer = randf_range(2.0, 5.0)  # Hang out for 2-5 seconds
+	state = State.SOCIALIZING
+	# Add some randomness to exact position
+	_build_path_to(target_pos + Vector2(randf_range(20, 50), randf_range(-20, 20)))
+	if status_label:
+		status_label.text = status_text
 
 func _start_leaving() -> void:
 	state = State.LEAVING
@@ -741,7 +744,8 @@ func _process_socializing(delta: float) -> void:
 
 	socialize_timer -= delta
 	if socialize_timer <= 0:
-		_start_leaving()
+		# Pick next action: another spot or finally leave
+		_pick_post_work_action()
 
 func _process_working(delta: float) -> void:
 	# Track work time
