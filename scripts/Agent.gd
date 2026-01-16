@@ -71,6 +71,7 @@ var inbox_position: Vector2 = Vector2(1100, 550)  # Where to deliver work
 var work_timer: float = 0.0
 var spawn_timer: float = 0.0
 var is_waiting_for_completion: bool = true  # Don't auto-complete, wait for event
+var pending_completion: bool = false  # Complete event arrived but still walking to desk
 
 # Document being carried (shown during DELIVERING)
 var document: ColorRect = null
@@ -195,7 +196,10 @@ func _process_spawning(delta: float) -> void:
 			state = State.WALKING_TO_DESK
 			target_position = assigned_desk.get_work_position()
 			if status_label:
-				status_label.text = "Going to desk..."
+				if pending_completion:
+					status_label.text = "Finishing up..."
+				else:
+					status_label.text = "Going to desk..."
 		else:
 			state = State.IDLE
 
@@ -203,10 +207,15 @@ func _process_walking_to_desk(delta: float) -> void:
 	var direction = target_position - position
 	if direction.length() < 5:
 		position = target_position
-		state = State.WORKING
-		if status_label:
-			status_label.text = "Working..."
-		# Don't use a timer - wait for actual completion event
+		# Check if completion was already requested
+		if pending_completion:
+			pending_completion = false
+			complete_work()
+		else:
+			state = State.WORKING
+			if status_label:
+				status_label.text = "Working..."
+			# Don't use a timer - wait for actual completion event
 	else:
 		position += direction.normalized() * 200 * delta
 
@@ -304,16 +313,10 @@ func force_complete() -> void:
 		State.WORKING:
 			complete_work()
 		State.SPAWNING, State.WALKING_TO_DESK:
-			# Agent hasn't reached desk yet - skip to completion
-			print("[Agent] Force completing agent still in transit: %s" % agent_id)
-			# Release desk if assigned
-			if assigned_desk:
-				assigned_desk.set_occupied(false)
-			# Skip directly to completing (fade out)
-			state = State.COMPLETING
-			spawn_timer = 0.5
+			# Agent hasn't reached desk yet - wait until they do
+			pending_completion = true
 			if status_label:
-				status_label.text = "Done!"
+				status_label.text = "Finishing up..."
 		State.IDLE:
 			# Not assigned to work - just fade out
 			state = State.COMPLETING
