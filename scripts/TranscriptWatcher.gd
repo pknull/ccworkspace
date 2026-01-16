@@ -166,11 +166,11 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 			"session_path": session_path
 		}
 
-		print("[TranscriptWatcher] SPAWN: %s - %s" % [agent_type, description])
+		print("[TranscriptWatcher] SPAWN: %s - %s (id: %s)" % [agent_type, description, tool_id.substr(0, 12)])
 
 		event_received.emit({
 			"event": "agent_spawn",
-			"agent_id": tool_id.substr(0, 8),
+			"agent_id": tool_id.substr(0, 12),  # Use 12 chars to reduce collision risk
 			"agent_type": agent_type,
 			"description": description,
 			"parent_id": "main",
@@ -210,11 +210,11 @@ func process_tool_result(item: Dictionary, entry: Dictionary) -> void:
 		var agent_info = pending_agents[tool_use_id]
 		pending_agents.erase(tool_use_id)
 
-		print("[TranscriptWatcher] COMPLETE: %s - %s" % [agent_info.agent_type, agent_info.description])
+		print("[TranscriptWatcher] COMPLETE: %s - %s (id: %s)" % [agent_info.agent_type, agent_info.description, tool_use_id.substr(0, 12)])
 
 		event_received.emit({
 			"event": "agent_complete",
-			"agent_id": tool_use_id.substr(0, 8),
+			"agent_id": tool_use_id.substr(0, 12),  # Match spawn ID length
 			"success": "true",
 			"timestamp": timestamp
 		})

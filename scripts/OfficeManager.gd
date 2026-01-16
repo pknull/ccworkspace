@@ -229,16 +229,16 @@ func _handle_agent_spawn(data: Dictionary) -> void:
 
 	print("[OfficeManager] Spawning agent: %s (%s) from parent %s" % [agent_type, agent_id, parent_id])
 
-	# Track by session
-	if not agents_by_session.has(session_id):
-		agents_by_session[session_id] = []
-	agents_by_session[session_id].append(agent_id)
-
-	# Find available desk
+	# Find available desk FIRST (before tracking)
 	var desk = _find_available_desk()
 	if desk == null:
 		push_warning("No available desks!")
 		return
+
+	# Track by session (only after confirming desk available)
+	if not agents_by_session.has(session_id):
+		agents_by_session[session_id] = []
+	agents_by_session[session_id].append(agent_id)
 
 	# Determine spawn position (from parent agent if exists)
 	var spawn_pos = spawn_point
@@ -283,13 +283,20 @@ func _handle_agent_complete(data: Dictionary) -> void:
 		agent.force_complete()
 		print("[OfficeManager] Completed agent: %s" % agent_id)
 	else:
-		# Fallback: complete the oldest agent of any type
+		# Log active agents for debugging
+		print("[OfficeManager] Agent %s not found. Active agents: %s" % [agent_id, active_agents.keys()])
+		# Fallback: complete any active agent (not just WORKING - could be SPAWNING/WALKING)
+		var completed_fallback = false
 		for aid in active_agents.keys():
 			var agent = active_agents[aid] as Agent
-			if agent.state == Agent.State.WORKING:
+			# Skip agents already completing/delivering
+			if agent.state != Agent.State.COMPLETING and agent.state != Agent.State.DELIVERING:
 				agent.force_complete()
-				print("[OfficeManager] Completed agent (fallback): %s" % aid)
+				print("[OfficeManager] Completed agent (fallback): %s (state was %d)" % [aid, agent.state])
+				completed_fallback = true
 				break
+		if not completed_fallback:
+			print("[OfficeManager] WARNING: No agent to complete!")
 
 func _handle_tool_use(data: Dictionary) -> void:
 	var tool_name = data.get("tool", "")
