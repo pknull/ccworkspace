@@ -10,7 +10,7 @@ var desks: Array[Desk] = []
 var active_agents: Dictionary = {}  # agent_id -> Agent
 var agent_by_type: Dictionary = {}  # agent_type -> Array of agent_ids (for fallback)
 var completed_count: int = 0
-var inbox_position: Vector2 = Vector2(750, 550)
+var inbox_position: Vector2 = Vector2(370, 520)
 
 # UI elements
 var inbox_label: Label
@@ -94,30 +94,33 @@ func _create_inbox() -> void:
 	inbox_visual.position = inbox_position
 	add_child(inbox_visual)
 
-	# Inbox tray
-	var tray = ColorRect.new()
-	tray.size = Vector2(80, 30)
-	tray.position = Vector2(-40, 0)
-	tray.color = Color(0.4, 0.35, 0.3)
-	inbox_visual.add_child(tray)
+	# Inbox box (brown)
+	var box = ColorRect.new()
+	box.size = Vector2(70, 50)
+	box.position = Vector2(-35, -25)
+	box.color = Color(0.45, 0.35, 0.25)
+	inbox_visual.add_child(box)
 
-	# Inbox label
+	# Inbox count label (inside the box)
 	inbox_label = Label.new()
-	inbox_label.text = "INBOX: 0"
+	inbox_label.text = "0"
 	inbox_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	inbox_label.position = Vector2(-50, -30)
-	inbox_label.size = Vector2(100, 25)
-	inbox_label.add_theme_font_size_override("font_size", 16)
-	inbox_label.add_theme_color_override("font_color", Color(0.2, 0.5, 0.2))
+	inbox_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	inbox_label.position = Vector2(-35, -25)
+	inbox_label.size = Vector2(70, 50)
+	inbox_label.add_theme_font_size_override("font_size", 24)
+	inbox_label.add_theme_color_override("font_color", Color(1.0, 1.0, 0.95))
 	inbox_visual.add_child(inbox_label)
 
-	# Stack of completed documents (grows as work is delivered)
-	var stack_base = ColorRect.new()
-	stack_base.name = "DocumentStack"
-	stack_base.size = Vector2(60, 5)
-	stack_base.position = Vector2(-30, -5)
-	stack_base.color = Color(1.0, 1.0, 0.9)
-	inbox_visual.add_child(stack_base)
+	# "INBOX" label above
+	var title = Label.new()
+	title.text = "INBOX"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.position = Vector2(-35, -45)
+	title.size = Vector2(70, 20)
+	title.add_theme_font_size_override("font_size", 12)
+	title.add_theme_color_override("font_color", Color(0.3, 0.3, 0.3))
+	inbox_visual.add_child(title)
 
 func _create_taskboard() -> void:
 	taskboard = Node2D.new()
@@ -192,7 +195,7 @@ func _create_main_agent() -> void:
 	main_agent.agent_type = "main"
 	main_agent.agent_id = "main"
 	main_agent.description = "Orchestrator"
-	main_agent.position = Vector2(100, 300)
+	main_agent.position = Vector2(220, 520)  # Below worker desks, left of inbox
 	add_child(main_agent)
 
 	# Main agent doesn't go to desk, just stays visible
@@ -333,13 +336,7 @@ func _draw_spawn_connection(from_pos: Vector2, to_pos: Vector2, agent_type: Stri
 
 func _on_agent_completed(agent: Agent) -> void:
 	completed_count += 1
-	inbox_label.text = "INBOX: %d" % completed_count
-
-	# Grow the document stack visual
-	var stack = inbox_visual.get_node_or_null("DocumentStack")
-	if stack:
-		stack.size.y = min(5 + completed_count * 2, 50)  # Cap at 50px height
-		stack.position.y = -5 - stack.size.y + 5
+	inbox_label.text = str(completed_count)
 
 	# Remove from tracking
 	var aid = agent.agent_id
