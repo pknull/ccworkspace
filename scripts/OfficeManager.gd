@@ -43,6 +43,8 @@ var agent_by_type: Dictionary = {}  # agent_type -> Array of agent_ids
 var agents_by_session: Dictionary = {}  # session_id -> [agent_ids]
 var session_orchestrators: Dictionary = {}  # session_id -> Agent
 var idle_orchestrators: Array[Agent] = []
+var idle_orchestrator_times: Dictionary = {}  # Agent -> idle_since (unix timestamp)
+const IDLE_LEAVE_TIMEOUT: float = 600.0  # 10 minutes before idle orchestrators leave
 var completed_count: int = 0
 
 # UI elements
@@ -117,6 +119,7 @@ func _process(delta: float) -> void:
 	_update_taskboard()
 	_animate_clouds(delta)
 	_update_spontaneous_cooldown(delta)
+	_check_idle_orchestrator_timeouts()
 
 # =============================================================================
 # OFFICE SETUP - Uses OfficeVisualFactory
@@ -557,6 +560,7 @@ func _get_or_create_session_orchestrator(session_id: String, _session_path: Stri
 	# Reuse idle orchestrator if available
 	if not idle_orchestrators.is_empty():
 		var orchestrator = idle_orchestrators.pop_back()
+		idle_orchestrator_times.erase(orchestrator)  # No longer idle
 		if is_instance_valid(orchestrator):
 			var desk = _find_available_desk()
 			if desk:
@@ -601,6 +605,24 @@ func _send_orchestrator_to_cooler(orchestrator: Agent) -> void:
 	orchestrator.state = Agent.State.IDLE
 	orchestrator.position = water_cooler_position + Vector2(randf_range(-40, 40), randf_range(-30, 30))
 	idle_orchestrators.append(orchestrator)
+	idle_orchestrator_times[orchestrator] = Time.get_unix_time_from_system()
+
+func _check_idle_orchestrator_timeouts() -> void:
+	var current_time = Time.get_unix_time_from_system()
+	var to_leave: Array[Agent] = []
+
+	for orch in idle_orchestrators:
+		if idle_orchestrator_times.has(orch):
+			var idle_since = idle_orchestrator_times[orch]
+			if current_time - idle_since > IDLE_LEAVE_TIMEOUT:
+				to_leave.append(orch)
+
+	for orch in to_leave:
+		print("[OfficeManager] Idle timeout - orchestrator leaving: %s" % orch.session_id.substr(0, 8) if orch.session_id else "unknown")
+		idle_orchestrators.erase(orch)
+		idle_orchestrator_times.erase(orch)
+		if is_instance_valid(orch):
+			_make_orchestrator_leave(orch)
 
 func _configure_agent_positions(agent: Agent) -> void:
 	agent.set_shredder_position(shredder_position)
@@ -639,6 +661,7 @@ func _on_orchestrator_completed(orchestrator: Agent) -> void:
 
 	# Remove from idle list if present
 	idle_orchestrators.erase(orchestrator)
+	idle_orchestrator_times.erase(orchestrator)
 
 	orchestrator.queue_free()
 	_update_taskboard()
