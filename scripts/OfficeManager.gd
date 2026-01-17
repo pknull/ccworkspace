@@ -383,7 +383,7 @@ func _handle_session_exit(data: Dictionary) -> void:
 		var orchestrator = session_orchestrators[session_id] as Agent
 		session_orchestrators.erase(session_id)
 		if orchestrator and is_instance_valid(orchestrator):
-			print("[OfficeManager] Session exit (/exit or /quit): %s" % session_id.substr(0, 8))
+			print("[OfficeManager] Session exit - orchestrator leaving: %s" % session_id.substr(0, 8))
 			_make_orchestrator_leave(orchestrator)
 		_update_taskboard()
 	# Also remove from idle orchestrators if present
