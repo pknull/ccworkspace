@@ -1,9 +1,9 @@
 ---
-version: "1.1"
+version: "1.2"
 lastUpdated: "2026-01-16 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - cute features complete"
+changeTrigger: "Session save - bug fixes and orchestrator lifecycle"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -12,15 +12,26 @@ dependencies: ["communicationStyle.md"]
 
 ## Current Project Status
 
-**Primary Focus**: Polish phase - adding personality and ambient behaviors
+**Primary Focus**: Stable - bug fixes complete, lifecycle management added
 
 **Active Work**:
-- Core cute features implemented
+- All cute features implemented
+- Orchestrator lifecycle management working (/exit detection, idle timeout)
 - Meeting table overflow system working
-- Tool-aware speech bubbles active
 
 **Recent Activities** (last 7 days):
-- **2026-01-16**: Added cute features via panel-driven development:
+- **2026-01-16 (Session 2)**: Bug fixes and orchestrator lifecycle:
+  - Fixed 6 visual/behavioral bugs:
+    - Desk items accumulating (defensive clear_personal_items)
+    - Head z-ordering (body=0, tie=1, head=2)
+    - Cat/whiteboard drag limits expanded
+    - Whiteboard legs added (metal easel)
+    - Monitor timing (separated reservation from set_monitor_active)
+  - Added /exit detection in TranscriptWatcher → orchestrators leave office
+  - Added 10-minute idle timeout → orchestrators at water cooler leave
+  - Removed female necklace/scarf (translated poorly)
+
+- **2026-01-16 (Session 1)**: Added cute features via panel-driven development:
   - Tuned spontaneous bubble timing (12s interval, 25% chance)
   - Cat meow speech bubbles with 11 phrases
   - Compact tooltips fixing overflow
@@ -55,6 +66,8 @@ Port 9999, JSON messages with `"event"` field:
 
 **Immediate**:
 - [x] All requested cute features implemented
+- [x] Bug fixes complete
+- [x] Orchestrator lifecycle management (/exit, idle timeout)
 
 **Blocked**:
 - None
@@ -63,3 +76,11 @@ Port 9999, JSON messages with `"event"` field:
 - Sound/audio system (user mentioned but deferred for later)
 - More furniture variety
 - Agent customization options
+
+## Learnings
+
+### TranscriptWatcher Behavior
+The JSONL watcher seeks to file end on start, so it only sees NEW entries. Commands like /exit must be run AFTER the office starts watching to be detected.
+
+### State Separation Pattern
+Separating logical state (desk reservation) from visual state (monitor active) allows finer timing control. The monitor now turns on only when the agent arrives, not when they claim the desk.
