@@ -39,7 +39,7 @@ var is_facing_left: bool = true  # Starts facing left (head on left side)
 
 # Boundaries for wandering
 var bounds_min: Vector2 = Vector2(30, 100)
-var bounds_max: Vector2 = Vector2(780, 620)
+var bounds_max: Vector2 = Vector2(1250, 620)  # Full width like other furniture
 
 # Desk obstacles (rectangles to avoid)
 var desk_rects: Array[Rect2] = []

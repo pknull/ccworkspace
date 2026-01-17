@@ -215,8 +215,20 @@ func get_work_position() -> Vector2:
 
 func set_occupied(occupied: bool) -> void:
 	is_occupied = occupied
+	# Only update indicator, not monitor - monitor is controlled by set_monitor_active
 	if occupied:
-		# Occupied: green indicator, lit screen
+		if status_indicator:
+			status_indicator.color = Color(0.8, 0.6, 0.2)  # Yellow/amber when reserved but worker not yet arrived
+	else:
+		if status_indicator:
+			status_indicator.color = Color(0.8, 0.2, 0.2)  # Red when unoccupied
+		# Turn off monitor and clear items when desk is vacated
+		set_monitor_active(false)
+		clear_personal_items()
+
+func set_monitor_active(active: bool) -> void:
+	if active:
+		# Worker arrived: green indicator, lit screen
 		if status_indicator:
 			status_indicator.color = Color(0.2, 0.8, 0.2)  # Green
 		if screen:
@@ -224,9 +236,7 @@ func set_occupied(occupied: bool) -> void:
 		if screen_glow:
 			screen_glow.color = Color(0.2, 0.35, 0.22)  # Lighter green glow
 	else:
-		# Unoccupied: red indicator, dark screen
-		if status_indicator:
-			status_indicator.color = Color(0.8, 0.2, 0.2)  # Red
+		# Dark screen
 		if screen:
 			screen.color = Color(0.08, 0.08, 0.10)  # Dark/off
 		if screen_glow:

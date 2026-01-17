@@ -341,6 +341,9 @@ func _on_event_received(event_data: Dictionary) -> void:
 	if event_type == "session_end":
 		_handle_session_end(event_data)
 		return
+	if event_type == "session_exit":
+		_handle_session_exit(event_data)
+		return
 
 	# Update status
 	var tool_name = event_data.get("tool", "")
@@ -372,6 +375,38 @@ func _handle_session_end(data: Dictionary) -> void:
 			print("[OfficeManager] Session ended: %s" % session_id.substr(0, 8))
 			_send_orchestrator_to_cooler(orchestrator)
 		_update_taskboard()
+
+func _handle_session_exit(data: Dictionary) -> void:
+	# User ran /exit or /quit - orchestrator should leave the office
+	var session_id = data.get("session_id", "")
+	if session_id and session_orchestrators.has(session_id):
+		var orchestrator = session_orchestrators[session_id] as Agent
+		session_orchestrators.erase(session_id)
+		if orchestrator and is_instance_valid(orchestrator):
+			print("[OfficeManager] Session exit (/exit or /quit): %s" % session_id.substr(0, 8))
+			_make_orchestrator_leave(orchestrator)
+		_update_taskboard()
+	# Also remove from idle orchestrators if present
+	for i in range(idle_orchestrators.size() - 1, -1, -1):
+		var orch = idle_orchestrators[i]
+		if orch.session_id == session_id:
+			idle_orchestrators.remove_at(i)
+			if is_instance_valid(orch):
+				_make_orchestrator_leave(orch)
+
+func _make_orchestrator_leave(orchestrator: Agent) -> void:
+	# Free up desk if occupied
+	if orchestrator.assigned_desk:
+		orchestrator.assigned_desk.set_occupied(false)
+		orchestrator.assigned_desk = null
+	# Make orchestrator walk to the door and exit
+	orchestrator.set_door_position(spawn_point)
+	if orchestrator.has_method("start_leaving"):
+		orchestrator.start_leaving()
+	else:
+		# Fallback: directly set leaving state
+		orchestrator.state = Agent.State.LEAVING
+		orchestrator._build_path_to(spawn_point)
 
 func _handle_agent_spawn(data: Dictionary) -> void:
 	var agent_id = data.get("agent_id", "agent_%d" % Time.get_ticks_msec())
@@ -552,6 +587,7 @@ func _get_or_create_session_orchestrator(session_id: String, _session_path: Stri
 	orchestrator.assign_desk(desk)
 	orchestrator.is_waiting_for_completion = false
 	orchestrator.min_work_time = 999999
+	orchestrator.work_completed.connect(_on_orchestrator_completed)
 	add_child(orchestrator)
 
 	session_orchestrators[session_id] = orchestrator
@@ -592,6 +628,20 @@ func _on_agent_completed(agent: Agent) -> void:
 	_release_meeting_spot(aid)
 
 	agent.queue_free()
+
+func _on_orchestrator_completed(orchestrator: Agent) -> void:
+	# Orchestrator has finished leaving (walked out the door)
+	print("[OfficeManager] Orchestrator left: %s" % orchestrator.agent_id)
+
+	# Clean up from tracking
+	if orchestrator.session_id and session_orchestrators.has(orchestrator.session_id):
+		session_orchestrators.erase(orchestrator.session_id)
+
+	# Remove from idle list if present
+	idle_orchestrators.erase(orchestrator)
+
+	orchestrator.queue_free()
+	_update_taskboard()
 
 # =============================================================================
 # FURNITURE POSITION UPDATES

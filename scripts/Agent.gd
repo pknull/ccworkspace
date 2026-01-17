@@ -279,6 +279,7 @@ func _create_male_visuals(skin_color: Color) -> void:
 	body.size = Vector2(26, 32)
 	body.position = Vector2(-13, -15)
 	body.color = Color(0.95, 0.95, 0.93)  # Off-white shirt
+	body.z_index = 0
 	add_child(body)
 
 	# Shirt collar points
@@ -286,18 +287,21 @@ func _create_male_visuals(skin_color: Color) -> void:
 	collar_left.size = Vector2(8, 6)
 	collar_left.position = Vector2(-11, -15)
 	collar_left.color = Color(0.95, 0.95, 0.93)
+	collar_left.z_index = 0
 	add_child(collar_left)
 
 	var collar_right = ColorRect.new()
 	collar_right.size = Vector2(8, 6)
 	collar_right.position = Vector2(3, -15)
 	collar_right.color = Color(0.95, 0.95, 0.93)
+	collar_right.z_index = 0
 	add_child(collar_right)
 
 	# Tie (colored by agent type)
 	tie = ColorRect.new()
 	tie.size = Vector2(6, 22)
 	tie.position = Vector2(-3, -12)
+	tie.z_index = 1
 	add_child(tie)
 
 	# Tie knot
@@ -305,6 +309,7 @@ func _create_male_visuals(skin_color: Color) -> void:
 	tie_knot.name = "TieKnot"
 	tie_knot.size = Vector2(8, 5)
 	tie_knot.position = Vector2(-4, -15)
+	tie_knot.z_index = 1
 	add_child(tie_knot)
 
 	# Head (container for face parts)
@@ -312,6 +317,7 @@ func _create_male_visuals(skin_color: Color) -> void:
 	head.size = Vector2(18, 18)
 	head.position = Vector2(-9, -35)
 	head.color = skin_color
+	head.z_index = 2
 	add_child(head)
 
 	# Hair (short male style) - child of head
@@ -393,6 +399,7 @@ func _create_female_visuals(skin_color: Color) -> void:
 	body.size = Vector2(26, 32)
 	body.position = Vector2(-13, -15)
 	body.color = blouse_color
+	body.z_index = 0
 	add_child(body)
 
 	# Collar (rounded for blouse)
@@ -400,19 +407,19 @@ func _create_female_visuals(skin_color: Color) -> void:
 	collar.size = Vector2(18, 6)
 	collar.position = Vector2(-9, -17)
 	collar.color = blouse_color
+	collar.z_index = 0
 	add_child(collar)
 
-	# Accent (necklace or scarf instead of tie) - colored by agent type
-	tie = ColorRect.new()
-	tie.size = Vector2(12, 4)
-	tie.position = Vector2(-6, -13)
-	add_child(tie)
+	# Female agents don't have a visible tie/necklace - it translated poorly visually
+	# The agent type is still shown via the label above their head
+	tie = null
 
 	# Head (container for face parts)
 	head = ColorRect.new()
 	head.size = Vector2(18, 18)
 	head.position = Vector2(-9, -35)
 	head.color = skin_color
+	head.z_index = 2
 	add_child(head)
 
 	# Eyes - children of head
@@ -686,6 +693,9 @@ func _on_path_complete() -> void:
 			# Arrived at desk, start working
 			work_elapsed = 0.0
 			state = State.WORKING
+			# Turn on monitor now that agent has arrived
+			if assigned_desk and assigned_desk.has_method("set_monitor_active"):
+				assigned_desk.set_monitor_active(true)
 			# Place personal items on desk
 			_place_personal_items_on_desk()
 			print("[Agent %s] Reached desk, starting work (pending_completion=%s)" % [agent_id, pending_completion])
@@ -733,6 +743,10 @@ func _start_leaving() -> void:
 	_build_path_to(door_position)
 	if status_label:
 		status_label.text = "Heading out..."
+
+func start_leaving() -> void:
+	# Public method for external callers (e.g., when session exits)
+	_start_leaving()
 
 func _process_socializing(delta: float) -> void:
 	# Walk to water cooler if not there yet
@@ -899,7 +913,7 @@ func _deliver_document() -> void:
 
 func assign_desk(desk: Node2D) -> void:
 	assigned_desk = desk
-	desk.set_occupied(true)
+	desk.set_occupied(true)  # Reserve the desk
 	target_position = desk.get_work_position()
 
 func start_walking_to_desk() -> void:
@@ -1014,6 +1028,10 @@ func _generate_personal_items() -> void:
 func _place_personal_items_on_desk() -> void:
 	if not assigned_desk:
 		return
+
+	# Clear any existing items first (defensive - in case previous agent didn't clean up)
+	if assigned_desk.has_method("clear_personal_items"):
+		assigned_desk.clear_personal_items()
 
 	# Generate items if not already done
 	if personal_item_types.is_empty():

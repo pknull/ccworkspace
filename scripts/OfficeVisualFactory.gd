@@ -442,9 +442,36 @@ static func create_taskboard(draggable_script: Script) -> Node2D:
 	taskboard.item_name = "taskboard"
 	taskboard.set_click_area(Rect2(0, 0, 170, 130))
 	taskboard.z_index = OfficeConstants.Z_TASKBOARD
-	# Taskboard has different drag bounds (can be placed along top wall)
-	taskboard.drag_bounds_min = Vector2(30, 10)
-	taskboard.drag_bounds_max = Vector2(1100, 120)
+	# Taskboard can be placed anywhere (now has easel legs)
+	taskboard.drag_bounds_min = Vector2(30, 100)
+	taskboard.drag_bounds_max = Vector2(1100, 520)  # Can go on floor, but leave room for legs
+
+	# Easel legs (behind frame)
+	var leg_color = Color(0.45, 0.45, 0.48)  # Dark metal
+
+	# Left leg
+	var left_leg = ColorRect.new()
+	left_leg.size = Vector2(6, 70)
+	left_leg.position = Vector2(25, 125)
+	left_leg.color = leg_color
+	left_leg.z_index = -1
+	taskboard.add_child(left_leg)
+
+	# Right leg
+	var right_leg = ColorRect.new()
+	right_leg.size = Vector2(6, 70)
+	right_leg.position = Vector2(139, 125)
+	right_leg.color = leg_color
+	right_leg.z_index = -1
+	taskboard.add_child(right_leg)
+
+	# Cross brace between legs
+	var brace = ColorRect.new()
+	brace.size = Vector2(100, 4)
+	brace.position = Vector2(38, 165)
+	brace.color = leg_color
+	brace.z_index = -1
+	taskboard.add_child(brace)
 
 	# Whiteboard frame (silver/aluminum)
 	var frame = ColorRect.new()

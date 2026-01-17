@@ -150,6 +150,25 @@ func process_line(line: String, session_path: String = "") -> void:
 	if not entry is Dictionary:
 		return
 
+	# Check for /exit or /quit commands in user messages
+	var entry_type = entry.get("type", "")
+	if entry_type == "user":
+		var user_message = entry.get("message", {})
+		if user_message is Dictionary:
+			var user_content = user_message.get("content", "")
+			if user_content is String:
+				if user_content.contains("<command-name>/exit</command-name>") or \
+				   user_content.contains("<command-name>/quit</command-name>"):
+					var session_id = session_path.get_file().get_basename()
+					print("[TranscriptWatcher] EXIT detected for session: %s" % session_id)
+					event_received.emit({
+						"event": "session_exit",
+						"session_id": session_id,
+						"session_path": session_path,
+						"timestamp": entry.get("timestamp", Time.get_datetime_string_from_system())
+					})
+					return  # Don't process further for exit commands
+
 	var message = entry.get("message", {})
 	if not message is Dictionary:
 		return
