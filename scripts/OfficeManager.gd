@@ -360,6 +360,8 @@ func _on_event_received(event_data: Dictionary) -> void:
 			_handle_agent_complete(event_data)
 		"tool_use":
 			_handle_tool_use(event_data)
+		"furniture_tour":
+			_handle_furniture_tour(event_data)
 
 func _handle_session_start(data: Dictionary) -> void:
 	var session_id = data.get("session_id", "")
@@ -549,6 +551,32 @@ func _handle_tool_use(data: Dictionary) -> void:
 				agent.show_tool(tool_name)
 				break
 
+func _handle_furniture_tour(data: Dictionary) -> void:
+	var agent_id = data.get("agent_id", "tour_%d" % Time.get_ticks_msec())
+	var agent_type = data.get("agent_type", "smoke-test")
+
+	print("[OfficeManager] Starting furniture tour with agent: %s" % agent_id)
+
+	# Create a tour agent at spawn point
+	var agent = AgentScene.instantiate() as Agent
+	agent.agent_id = agent_id
+	agent.agent_type = agent_type
+	agent.description = "Furniture Tour"
+	agent.set_obstacles(office_obstacles)
+	agent.navigation_grid = navigation_grid
+	_configure_agent_positions(agent)
+
+	# Set spawn position at door, skip spawn animation
+	agent.position = spawn_point
+	agent.modulate.a = 1.0  # Fully visible immediately
+	agent.state = Agent.State.IDLE
+
+	add_child(agent)
+	active_agents[agent_id] = agent
+
+	# Start the tour immediately
+	agent.start_furniture_tour(meeting_table_position)
+
 # =============================================================================
 # AGENT MANAGEMENT
 # =============================================================================
@@ -602,8 +630,12 @@ func _send_orchestrator_to_cooler(orchestrator: Agent) -> void:
 	if orchestrator.assigned_desk:
 		orchestrator.assigned_desk.set_occupied(false)
 		orchestrator.assigned_desk = null
-	orchestrator.state = Agent.State.IDLE
-	orchestrator.position = water_cooler_position + Vector2(randf_range(-40, 40), randf_range(-30, 30))
+	# Walk to water cooler instead of teleporting
+	var target = water_cooler_position + Vector2(randf_range(30, 50), randf_range(-20, 20))
+	orchestrator.state = Agent.State.SOCIALIZING
+	orchestrator._build_path_to(target, "water_cooler")
+	if orchestrator.status_label:
+		orchestrator.status_label.text = "Water cooler break..."
 	idle_orchestrators.append(orchestrator)
 	idle_orchestrator_times[orchestrator] = Time.get_unix_time_from_system()
 
@@ -728,10 +760,19 @@ func _update_all_agents_position(item_name: String, new_position: Vector2) -> vo
 	for agent in active_agents.values():
 		if agent.has_method(method_name):
 			agent.call(method_name, new_position)
+		# Recalculate path if agent is heading to this furniture
+		if agent.has_method("on_furniture_moved"):
+			agent.on_furniture_moved(item_name, new_position)
 
 	for orch in session_orchestrators.values():
 		if orch.has_method(method_name):
 			orch.call(method_name, new_position)
+		if orch.has_method("on_furniture_moved"):
+			orch.on_furniture_moved(item_name, new_position)
+
+	for orch in idle_orchestrators:
+		if orch.has_method("on_furniture_moved"):
+			orch.on_furniture_moved(item_name, new_position)
 
 func _update_obstacle(index: int, new_rect: Rect2) -> void:
 	if index < office_obstacles.size():

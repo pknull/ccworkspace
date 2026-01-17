@@ -3,7 +3,7 @@ class_name Agent
 
 signal work_completed(agent: Agent)
 
-enum State { SPAWNING, WALKING_TO_DESK, WORKING, DELIVERING, SOCIALIZING, LEAVING, COMPLETING, IDLE, MEETING }
+enum State { SPAWNING, WALKING_TO_DESK, WORKING, DELIVERING, SOCIALIZING, LEAVING, COMPLETING, IDLE, MEETING, FURNITURE_TOUR }
 
 # Shirt/tie colors by agent type (more muted, office-appropriate)
 const AGENT_COLORS = {
@@ -94,10 +94,17 @@ var socialize_timer: float = 0.0
 var is_in_meeting: bool = false
 var meeting_spot: Vector2 = Vector2.ZERO
 
+# Furniture tour (for smoke testing)
+var furniture_tour_active: bool = false
+var furniture_tour_index: int = 0
+var furniture_tour_targets: Array[Dictionary] = []
+
 # Pathfinding
 var path_waypoints: Array[Vector2] = []
 var current_waypoint_index: int = 0
 var navigation_grid: NavigationGrid = null  # Set by OfficeManager for grid-based pathfinding
+var current_destination: Vector2 = Vector2.ZERO  # Track where we're heading
+var destination_furniture: String = ""  # Track which furniture we're heading to (for recalculation)
 var spawn_timer: float = 0.0
 var is_waiting_for_completion: bool = true
 var pending_completion: bool = false
@@ -570,6 +577,8 @@ func _process(delta: float) -> void:
 				_process_walking_path(delta)
 		State.MEETING:
 			_process_meeting(delta)
+		State.FURNITURE_TOUR:
+			_process_walking_path(delta)
 
 func _check_mouse_hover() -> void:
 	var mouse_pos = get_local_mouse_position()
@@ -713,28 +722,95 @@ func _on_path_complete() -> void:
 			spawn_timer = 0.5
 			if status_label:
 				status_label.text = "Goodbye!"
+		State.FURNITURE_TOUR:
+			# Arrived at a furniture item during tour
+			_furniture_tour_arrived()
+
+func _furniture_tour_arrived() -> void:
+	if not furniture_tour_active:
+		return
+
+	# Brief pause at each furniture item
+	var current_target = furniture_tour_targets[furniture_tour_index]
+	print("[Agent %s] Furniture tour: arrived at %s" % [agent_id, current_target.get("name", "unknown")])
+	if status_label:
+		status_label.text = current_target.get("status", "Inspecting...")
+
+	# Move to next target after a short delay
+	furniture_tour_index += 1
+	if furniture_tour_index < furniture_tour_targets.size():
+		# Continue tour after brief pause
+		await get_tree().create_timer(1.0).timeout
+		if not is_instance_valid(self) or not furniture_tour_active:
+			return
+		var next_target = furniture_tour_targets[furniture_tour_index]
+		if status_label:
+			status_label.text = "Walking to " + next_target.get("name", "next")
+		_build_path_to(next_target["pos"])
+	else:
+		# Tour complete
+		print("[Agent %s] Furniture tour complete!" % agent_id)
+		furniture_tour_active = false
+		if status_label:
+			status_label.text = "Tour complete!"
+		# Leave the office
+		await get_tree().create_timer(1.0).timeout
+		if is_instance_valid(self):
+			_start_leaving()
+
+func start_furniture_tour(meeting_table_pos: Vector2 = Vector2.ZERO) -> void:
+	"""Start a furniture tour visiting all furniture items."""
+	print("[Agent %s] Starting furniture tour" % agent_id)
+	furniture_tour_active = true
+	furniture_tour_index = 0
+
+	# Define tour targets - visit each side of furniture where possible
+	furniture_tour_targets = [
+		{"pos": water_cooler_position + Vector2(40, 0), "name": "Water Cooler (right)", "status": "At water cooler..."},
+		{"pos": water_cooler_position + Vector2(-40, 0), "name": "Water Cooler (left)", "status": "At water cooler..."},
+		{"pos": plant_position + Vector2(40, 0), "name": "Plant (right)", "status": "Admiring plant..."},
+		{"pos": plant_position + Vector2(-40, 0), "name": "Plant (left)", "status": "Admiring plant..."},
+		{"pos": filing_cabinet_position + Vector2(40, 0), "name": "Filing Cabinet (right)", "status": "Checking files..."},
+		{"pos": filing_cabinet_position + Vector2(-40, 0), "name": "Filing Cabinet (left)", "status": "Checking files..."},
+		{"pos": shredder_position + Vector2(-50, 0), "name": "Shredder (left)", "status": "At shredder..."},
+		{"pos": shredder_position + Vector2(0, 40), "name": "Shredder (front)", "status": "At shredder..."},
+	]
+
+	# Add meeting table if position provided
+	if meeting_table_pos != Vector2.ZERO:
+		furniture_tour_targets.append({"pos": meeting_table_pos + Vector2(-70, 0), "name": "Meeting Table (left)", "status": "At meeting table..."})
+		furniture_tour_targets.append({"pos": meeting_table_pos + Vector2(70, 0), "name": "Meeting Table (right)", "status": "At meeting table..."})
+		furniture_tour_targets.append({"pos": meeting_table_pos + Vector2(0, -40), "name": "Meeting Table (top)", "status": "At meeting table..."})
+		furniture_tour_targets.append({"pos": meeting_table_pos + Vector2(0, 40), "name": "Meeting Table (bottom)", "status": "At meeting table..."})
+
+	# Start walking to first target
+	state = State.FURNITURE_TOUR
+	if status_label:
+		status_label.text = "Starting tour..."
+	var first_target = furniture_tour_targets[0]
+	_build_path_to(first_target["pos"])
 
 func _pick_post_work_action() -> void:
 	# After delivering or socializing, randomly pick: socialize spot or exit
 	# Options: cooler, plant, cabinet, exit (weighted toward socializing)
 	var options = [
-		{"type": "socialize", "pos": water_cooler_position, "name": "Water cooler break..."},
-		{"type": "socialize", "pos": plant_position, "name": "Admiring the plant..."},
-		{"type": "socialize", "pos": filing_cabinet_position, "name": "Filing paperwork..."},
-		{"type": "exit", "pos": door_position, "name": "Heading out..."},
+		{"type": "socialize", "pos": water_cooler_position, "name": "Water cooler break...", "furniture": "water_cooler"},
+		{"type": "socialize", "pos": plant_position, "name": "Admiring the plant...", "furniture": "plant"},
+		{"type": "socialize", "pos": filing_cabinet_position, "name": "Filing paperwork...", "furniture": "filing_cabinet"},
+		{"type": "exit", "pos": door_position, "name": "Heading out...", "furniture": ""},
 	]
 	var choice = options[randi() % options.size()]
 
 	if choice["type"] == "exit":
 		_start_leaving()
 	else:
-		_start_socializing_at(choice["pos"], choice["name"])
+		_start_socializing_at(choice["pos"], choice["name"], choice.get("furniture", ""))
 
-func _start_socializing_at(target_pos: Vector2, status_text: String) -> void:
+func _start_socializing_at(target_pos: Vector2, status_text: String, furniture_name: String = "") -> void:
 	socialize_timer = randf_range(2.0, 5.0)  # Hang out for 2-5 seconds
 	state = State.SOCIALIZING
 	# Add some randomness to exact position
-	_build_path_to(target_pos + Vector2(randf_range(20, 50), randf_range(-20, 20)))
+	_build_path_to(target_pos + Vector2(randf_range(20, 50), randf_range(-20, 20)), furniture_name)
 	if status_label:
 		status_label.text = status_text
 
@@ -832,19 +908,65 @@ func _process_working(delta: float) -> void:
 			pending_completion = false
 			complete_work()
 
-func _build_path_to(destination: Vector2) -> void:
+func _build_path_to(destination: Vector2, furniture_name: String = "") -> bool:
 	path_waypoints.clear()
 	current_waypoint_index = 0
+	current_destination = destination
+	destination_furniture = furniture_name
 
 	# Use grid-based A* pathfinding if available
 	if navigation_grid:
 		var path = navigation_grid.find_path(position, destination)
+		if path.is_empty():
+			# Path is unreachable - give up and go idle
+			print("[Agent %s] Cannot reach destination %s - going idle" % [agent_id, destination])
+			_handle_unreachable_destination()
+			return false
 		for waypoint in path:
 			path_waypoints.append(waypoint)
-		return
+		return true
 
 	# Fallback: direct path (shouldn't happen if grid is set up correctly)
 	path_waypoints.append(destination)
+	return true
+
+func _handle_unreachable_destination() -> void:
+	destination_furniture = ""
+	current_destination = Vector2.ZERO
+	# Transition to idle or leaving based on current state
+	match state:
+		State.FURNITURE_TOUR:
+			# Skip to next tour target or finish tour
+			furniture_tour_index += 1
+			if furniture_tour_index < furniture_tour_targets.size():
+				var next_target = furniture_tour_targets[furniture_tour_index]
+				if status_label:
+					status_label.text = "Skipping to " + next_target.get("name", "next")
+				_build_path_to(next_target["pos"])
+			else:
+				furniture_tour_active = false
+				_start_leaving()
+		State.SOCIALIZING, State.DELIVERING:
+			# Can't reach destination, just leave
+			_start_leaving()
+		_:
+			state = State.IDLE
+			if status_label:
+				status_label.text = "Can't get there..."
+
+func on_furniture_moved(furniture_name: String, new_position: Vector2) -> void:
+	"""Called when furniture moves - recalculate path if we're heading there."""
+	if destination_furniture != furniture_name:
+		return
+
+	if path_waypoints.is_empty():
+		return
+
+	print("[Agent %s] Recalculating path - %s moved to %s" % [agent_id, furniture_name, new_position])
+
+	# Recalculate path to new position (with some offset for approach)
+	var approach_offset = Vector2(randf_range(30, 50), randf_range(-20, 20))
+	_build_path_to(new_position + approach_offset, furniture_name)
 
 func _process_completing(delta: float) -> void:
 	spawn_timer -= delta
@@ -868,7 +990,7 @@ func _start_delivering() -> void:
 		_create_document()
 	# Pick a random approach position to the shredder (from any accessible side)
 	var delivery_pos = _get_random_shredder_approach()
-	_build_path_to(delivery_pos)
+	_build_path_to(delivery_pos, "shredder")
 	if status_label:
 		status_label.text = "Delivering..."
 

@@ -19,7 +19,12 @@ var obstacle_size: Vector2 = Vector2(40, 40)  # Default size, set by OfficeManag
 
 func _ready() -> void:
 	# Will be configured by parent
-	pass
+	# Set initial z_index based on Y position
+	z_index = int(position.y)
+
+func _process(_delta: float) -> void:
+	# Update z_index based on Y position - items lower on screen render in front
+	z_index = int(position.y)
 
 func set_click_area(rect: Rect2) -> void:
 	click_area = rect

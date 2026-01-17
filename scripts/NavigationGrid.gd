@@ -221,8 +221,9 @@ func find_path(start_world: Vector2, end_world: Vector2) -> Array[Vector2]:
 
 	var grid_path = _astar_search(start_grid, end_grid)
 	if grid_path.is_empty():
-		# Fallback: direct path if A* fails
-		return [end_world]
+		# No path found - return empty (let agent handle gracefully)
+		print("[NavigationGrid] No path from %s to %s" % [start_world, end_world])
+		return []
 
 	var world_path = _smooth_path(grid_path, end_world)
 	return world_path
