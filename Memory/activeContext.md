@@ -1,9 +1,9 @@
 ---
-version: "1.4"
-lastUpdated: "2026-01-17 UTC"
+version: "1.5"
+lastUpdated: "2026-01-18 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - gamification verification, tool centralization, codebase review"
+changeTrigger: "Session save - major feature additions, bug fixes, audio system"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -12,14 +12,35 @@ dependencies: ["communicationStyle.md"]
 
 ## Current Project Status
 
-**Primary Focus**: Gamification system stable, codebase improvements identified
+**Primary Focus**: Feature-rich office simulation with audio, day/night cycle, achievements
 
 **Active Work**:
-- Gamification system (AgentProfile, AgentRoster, BadgeSystem) - functional
-- Tool tracking investigation and fixes
-- Codebase refactoring opportunities identified
+- Audio system implemented with CC0 sound effects
+- Day/night cycle with real-time sky colors
+- Agent mood system (tired/frustrated/irate)
+- Enhanced achievement system with cat and speed achievements
 
 **Recent Activities** (last 7 days):
+- **2026-01-18 (Session 5)**: Major feature additions and bug fixes:
+  - Code review via `/local-review` identified issues across 19 files
+  - Fixed bugs:
+    - Unreachable hair rendering in ProfilePopup (moved from after return)
+    - DraggableItem input handling (reverted `_unhandled_input` to `_input`)
+    - Monitor staying on when agents leave (added desk release in `_start_leaving()`)
+    - Added `is_instance_valid()` checks in Agent.gd
+    - Centralized UI_POPUP_LAYER constant (replaced magic number 200)
+  - New features implemented:
+    - **Skill tooltips** in ProfilePopup badges
+    - **Wall clock** with real-time hour/minute/second hands (WallClock.gd)
+    - **Agent mood system**: Tired (30min), Frustrated (1hr), Irate (2hr) with mood-specific phrases
+    - **AudioManager**: Typing sounds, meow sounds, achievement stapler sound
+    - **Day/night cycle**: Real-time sky color transitions (dawn→day→dusk→night)
+    - **New achievements**: Cat Petter/Cat Friend/Crazy Cat Office, Quick Task/Lightning Fast/Speed Demon
+  - Downloaded CC0 audio files from BigSoundBank (typing.wav, meow.wav, stapler.wav)
+  - Fixed Godot class_name loading issues (preload instead of global class_name for AudioManager/WallClock)
+  - Modified agent "Quinn" appearance (female, light skin, brown hair)
+  - Repositioned wall clock to x=1020 (between windows, above window masks)
+
 - **2026-01-17 (Session 4)**: Gamification verification, codebase review:
   - Verified lifetime stats ARE persisting (AgentProfile JSON in user://stable/)
   - Diagnosed tool tracking delay - reduced SCAN_INTERVAL from 5s to 1s
@@ -101,6 +122,10 @@ Port 9999, JSON messages with `"event"` field:
 - [x] Path recalculation on furniture move
 - [x] Gamification lifetime stats verified working
 - [x] Tool definitions centralized in OfficePalette
+- [x] Sound/audio system implemented
+- [x] Day/night cycle
+- [x] Agent mood system
+- [x] Cat and speed achievements
 - [ ] Test tool tracking with reduced scan interval
 - [ ] Verify subagents leaving properly
 
@@ -111,7 +136,7 @@ Port 9999, JSON messages with `"event"` field:
 - Extract AgentSpawner from OfficeManager (reduces monolith)
 - EventBus pattern for decoupled communication
 - A* priority queue optimization
-- Sound/audio system
+- Weather effects (user noted back wall layering issues)
 - More furniture variety
 
 ## Learnings
@@ -136,3 +161,15 @@ TranscriptWatcher scans for new sessions at SCAN_INTERVAL. If too slow (5s), sub
 
 ### Centralized Constants Pattern
 Tool definitions (icons, colors) scattered across files create maintenance burden. Centralize in OfficePalette.gd for single source of truth. Use debug flags in OfficeConstants.gd to gate verbose logging.
+
+### Godot class_name Loading Order
+When using `class_name` declarations, Godot may not register them before other scripts try to use them as type annotations. Solution: Use `preload()` for new scripts and remove type annotations (e.g., `var audio_manager = null` instead of `var audio_manager: AudioManager = null`).
+
+### Window Mask Z-Index
+Window cloud masks (to hide overflow) render on top of wall decorations. Wall-mounted items like clocks need z_index higher than Z_WINDOW_MASK (4) to be visible.
+
+### _input vs _unhandled_input
+Using `_unhandled_input` for drag operations caused furniture dragging to break - other nodes consumed the input first. Reverted to `_input` for DraggableItem to ensure drag events are captured.
+
+### Godot Audio Import
+Audio files placed in `res://audio/` require Godot editor to scan and import them. Running headless editor (`godot --editor --headless`) triggers the import without opening the full GUI.
