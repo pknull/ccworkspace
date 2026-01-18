@@ -102,7 +102,7 @@ func can_place_obstacle(world_rect: Rect2, exclude_obstacle_id: String = "") -> 
 	var grid_cells = _rect_to_grid_cells(world_rect)
 
 	# Get cells occupied by the excluded obstacle (the one being moved)
-	var excluded_cells: Array[Vector2i] = []
+	var excluded_cells: Array = []
 	if exclude_obstacle_id != "" and obstacles.has(exclude_obstacle_id):
 		excluded_cells = obstacles[exclude_obstacle_id]
 
@@ -175,7 +175,7 @@ func register_work_position(world_pos: Vector2, desk: Node2D) -> void:
 	set_cell_state(grid_pos, CellState.WORK_POSITION)
 
 func unregister_work_position(desk: Node2D) -> void:
-	var to_remove: Array = []
+	var to_remove: Array[String] = []
 	for key in work_positions:
 		if work_positions[key] == desk:
 			to_remove.append(key)
@@ -194,6 +194,9 @@ func _grid_pos_to_key(grid_pos: Vector2i) -> String:
 
 func _key_to_grid_pos(key: String) -> Vector2i:
 	var parts = key.split(",")
+	if parts.size() != 2:
+		push_error("[NavigationGrid] Invalid grid pos key: %s" % key)
+		return Vector2i.ZERO
 	return Vector2i(int(parts[0]), int(parts[1]))
 
 # =============================================================================

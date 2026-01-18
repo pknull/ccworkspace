@@ -5,7 +5,7 @@ enum State { IDLE, WALKING, SITTING, GROOMING, SLEEPING, STRETCHING }
 
 var state: State = State.IDLE
 var target_position: Vector2
-var speed: float = 40.0  # Cats are slower/lazier than workers
+var speed: float = OfficeConstants.CAT_WALK_SPEED
 
 # Timers
 var state_timer: float = 0.0
@@ -34,15 +34,15 @@ var eyes: Array[ColorRect] = []
 var sleeping_z: Label  # Zzz indicator
 
 # Cat appearance
-var cat_color: Color = Color(0.6, 0.4, 0.25)  # Orange tabby by default
+var cat_color: Color = OfficePalette.CAT_ORANGE_TABBY  # Orange tabby by default
 var is_facing_left: bool = true  # Starts facing left (head on left side)
 
 # Boundaries for wandering
 var bounds_min: Vector2 = Vector2(30, 100)
 var bounds_max: Vector2 = Vector2(1250, 620)  # Full width like other furniture
 
-# Desk obstacles (rectangles to avoid)
-var desk_rects: Array[Rect2] = []
+# Obstacles to avoid (desks, furniture, etc.)
+var obstacle_rects: Array[Rect2] = []
 const DESK_SIZE: Vector2 = Vector2(100, 80)  # Desk footprint including work area
 
 # Dragging
@@ -56,14 +56,14 @@ func _ready() -> void:
 	next_action_time = randf_range(2.0, 5.0)
 
 func _randomize_appearance() -> void:
-	# Random cat colors
+	# Random cat colors (using Gruvbox palette)
 	var colors = [
-		Color(0.65, 0.45, 0.25),  # Orange tabby
-		Color(0.25, 0.25, 0.28),  # Black
-		Color(0.9, 0.88, 0.82),   # White
-		Color(0.55, 0.55, 0.52),  # Gray
-		Color(0.4, 0.32, 0.25),   # Brown tabby
-		Color(0.8, 0.6, 0.35),    # Cream
+		OfficePalette.CAT_ORANGE_TABBY,   # Orange tabby
+		OfficePalette.CAT_BLACK,          # Black
+		OfficePalette.CAT_WHITE,          # White
+		OfficePalette.CAT_GRAY,           # Gray
+		OfficePalette.CAT_BROWN_TABBY,    # Brown tabby
+		OfficePalette.CAT_CREAM,          # Cream
 	]
 	cat_color = colors[randi() % colors.size()]
 
@@ -72,7 +72,7 @@ func _create_visuals() -> void:
 	var shadow = ColorRect.new()
 	shadow.size = Vector2(24, 8)
 	shadow.position = Vector2(-12, 10)
-	shadow.color = Color(0.0, 0.0, 0.0, 0.15)
+	shadow.color = OfficePalette.SHADOW
 	shadow.z_index = -4
 	add_child(shadow)
 
@@ -119,27 +119,27 @@ func _create_visuals() -> void:
 	var inner_left = ColorRect.new()
 	inner_left.size = Vector2(2, 3)
 	inner_left.position = Vector2(1, -4)
-	inner_left.color = Color(0.9, 0.7, 0.7)
+	inner_left.color = OfficePalette.CAT_INNER_EAR
 	head.add_child(inner_left)
 
 	var inner_right = ColorRect.new()
 	inner_right.size = Vector2(2, 3)
 	inner_right.position = Vector2(9, -4)
-	inner_right.color = Color(0.9, 0.7, 0.7)
+	inner_right.color = OfficePalette.CAT_INNER_EAR
 	head.add_child(inner_right)
 
 	# Eyes (children of head)
 	var eye_left = ColorRect.new()
 	eye_left.size = Vector2(3, 3)
 	eye_left.position = Vector2(2, 3)  # Relative to head
-	eye_left.color = Color(0.3, 0.5, 0.3)  # Green eyes
+	eye_left.color = OfficePalette.CAT_EYES_GREEN
 	head.add_child(eye_left)
 	eyes.append(eye_left)
 
 	var eye_right = ColorRect.new()
 	eye_right.size = Vector2(3, 3)
 	eye_right.position = Vector2(7, 3)  # Relative to head
-	eye_right.color = Color(0.3, 0.5, 0.3)
+	eye_right.color = OfficePalette.CAT_EYES_GREEN
 	head.add_child(eye_right)
 	eyes.append(eye_right)
 
@@ -147,7 +147,7 @@ func _create_visuals() -> void:
 	var nose = ColorRect.new()
 	nose.size = Vector2(2, 2)
 	nose.position = Vector2(5, 6)  # Relative to head
-	nose.color = Color(0.9, 0.7, 0.7)
+	nose.color = OfficePalette.CAT_INNER_EAR  # Same pink as inner ear
 	head.add_child(nose)
 
 	# Sleeping Zzz (hidden by default)
@@ -155,7 +155,7 @@ func _create_visuals() -> void:
 	sleeping_z.text = "z z z"
 	sleeping_z.position = Vector2(-5, -20)
 	sleeping_z.add_theme_font_size_override("font_size", 10)
-	sleeping_z.add_theme_color_override("font_color", Color(0.6, 0.6, 0.7, 0.8))
+	sleeping_z.add_theme_color_override("font_color", OfficePalette.CAT_SLEEPING_Z)
 	sleeping_z.visible = false
 	add_child(sleeping_z)
 
@@ -266,6 +266,9 @@ func _process_sitting(delta: float) -> void:
 		head.position.x = -16 + sin(animation_timer * 0.8) * 2
 
 	if state_timer >= next_action_time:
+		# Reset head position before transitioning
+		if head:
+			head.position.x = -18 if is_facing_left else 6
 		_pick_next_action()
 
 func _process_grooming(delta: float) -> void:
@@ -341,14 +344,14 @@ func _pick_next_action() -> void:
 		state = State.SLEEPING
 		sleeping_z.visible = true
 		next_action_time = randf_range(8.0, 20.0)  # Cats sleep a lot
+	elif roll < 0.88:
+		# Idle (small chance - just stand there)
+		state = State.IDLE
+		next_action_time = randf_range(1.0, 3.0)
 	else:
 		# Stretch
 		state = State.STRETCHING
 		next_action_time = 2.0
-	# Idle (small chance)
-	if roll >= 0.85 and roll < 0.88:
-		state = State.IDLE
-		next_action_time = randf_range(1.0, 3.0)
 
 func _set_facing(left: bool) -> void:
 	if is_facing_left == left:
@@ -374,15 +377,20 @@ func set_bounds(min_pos: Vector2, max_pos: Vector2) -> void:
 	bounds_min = min_pos
 	bounds_max = max_pos
 
-func set_desk_positions(positions: Array) -> void:
-	desk_rects.clear()
+func set_desk_positions(positions: Array[Vector2]) -> void:
+	# Add desk obstacles (keep for backwards compatibility)
 	for pos in positions:
-		# Create a rect centered on desk position, covering desk + work area in front
 		var rect = Rect2(pos - DESK_SIZE / 2, DESK_SIZE)
-		desk_rects.append(rect)
+		obstacle_rects.append(rect)
+
+func add_obstacle(rect: Rect2) -> void:
+	obstacle_rects.append(rect)
+
+func clear_obstacles() -> void:
+	obstacle_rects.clear()
 
 func _is_position_blocked(pos: Vector2) -> bool:
-	for rect in desk_rects:
+	for rect in obstacle_rects:
 		if rect.has_point(pos):
 			return true
 	return false
@@ -403,6 +411,8 @@ func _find_valid_position() -> Vector2:
 # MEOW SPEECH BUBBLES
 # =============================================================================
 
+var _meow_check_timer: float = 0.0  # Separate timer for meow checks
+
 func _process_meow_bubble(delta: float) -> void:
 	# Update meow bubble fade
 	if meow_bubble and meow_timer > 0:
@@ -418,9 +428,10 @@ func _process_meow_bubble(delta: float) -> void:
 		meow_cooldown -= delta
 		return
 
-	# Check for spontaneous meow
-	animation_timer += delta  # Reuse animation_timer for meow checks
-	if int(animation_timer) % int(MEOW_CHECK_INTERVAL) == 0 and int(animation_timer) > 0:
+	# Check for spontaneous meow at fixed intervals
+	_meow_check_timer += delta
+	if _meow_check_timer >= MEOW_CHECK_INTERVAL:
+		_meow_check_timer = 0.0
 		if randf() < MEOW_CHANCE and meow_bubble == null:
 			_show_meow()
 			meow_cooldown = MEOW_COOLDOWN
@@ -432,7 +443,7 @@ func _show_meow() -> void:
 	var phrase = MEOW_PHRASES[randi() % MEOW_PHRASES.size()]
 
 	meow_bubble = Node2D.new()
-	meow_bubble.z_index = 100
+	meow_bubble.z_index = OfficeConstants.Z_UI_TOOLTIP
 	add_child(meow_bubble)
 
 	# Tiny speech bubble
@@ -440,14 +451,14 @@ func _show_meow() -> void:
 	var text_width = phrase.length() * 6 + 10
 	bubble_bg.size = Vector2(max(text_width, 35), 16)
 	bubble_bg.position = Vector2(-bubble_bg.size.x / 2, -28)
-	bubble_bg.color = Color(1.0, 0.98, 0.92, 0.95)  # Warm cream
+	bubble_bg.color = OfficePalette.SPEECH_BUBBLE
 	meow_bubble.add_child(bubble_bg)
 
 	# Border
 	var border = ColorRect.new()
 	border.size = bubble_bg.size + Vector2(2, 2)
 	border.position = bubble_bg.position - Vector2(1, 1)
-	border.color = Color(0.5, 0.45, 0.35)
+	border.color = OfficePalette.SPEECH_BUBBLE_BORDER
 	border.z_index = -1
 	meow_bubble.add_child(border)
 
@@ -455,7 +466,7 @@ func _show_meow() -> void:
 	var pointer = ColorRect.new()
 	pointer.size = Vector2(5, 5)
 	pointer.position = Vector2(-2.5, -13)
-	pointer.color = Color(1.0, 0.98, 0.92, 0.95)
+	pointer.color = OfficePalette.SPEECH_BUBBLE
 	meow_bubble.add_child(pointer)
 
 	# Text
@@ -463,7 +474,7 @@ func _show_meow() -> void:
 	text_label.text = phrase
 	text_label.position = bubble_bg.position + Vector2(5, 1)
 	text_label.add_theme_font_size_override("font_size", 9)
-	text_label.add_theme_color_override("font_color", Color(0.35, 0.3, 0.25))
+	text_label.add_theme_color_override("font_color", OfficePalette.UI_TEXT_DARK)
 	meow_bubble.add_child(text_label)
 
 	meow_timer = 2.0  # Show for 2 seconds

@@ -303,7 +303,7 @@ static func create_door(parent: Node2D, pos: Vector2) -> Node2D:
 	var body = ColorRect.new()
 	body.size = Vector2(52, 44)
 	body.position = Vector2(-26, 2)
-	body.color = Color(0.12, 0.10, 0.08)  # Dark hallway
+	body.color = OfficePalette.DOOR_HALLWAY
 	door.add_child(body)
 
 	# Door panels (to show it's open/ajar)
@@ -442,12 +442,13 @@ static func create_taskboard(draggable_script: Script) -> Node2D:
 	taskboard.item_name = "taskboard"
 	taskboard.set_click_area(Rect2(0, 0, 170, 130))
 	taskboard.z_index = OfficeConstants.Z_TASKBOARD
+	taskboard.use_dynamic_z_index = false  # Wall-mounted, keep fixed z_index
 	# Taskboard can be placed anywhere (now has easel legs)
 	taskboard.drag_bounds_min = Vector2(30, 100)
 	taskboard.drag_bounds_max = Vector2(1100, 520)  # Can go on floor, but leave room for legs
 
 	# Easel legs (behind frame)
-	var leg_color = Color(0.45, 0.45, 0.48)  # Dark metal
+	var leg_color = OfficePalette.TASKBOARD_EASEL_LEG
 
 	# Left leg
 	var left_leg = ColorRect.new()
@@ -477,7 +478,7 @@ static func create_taskboard(draggable_script: Script) -> Node2D:
 	var frame = ColorRect.new()
 	frame.size = Vector2(170, 130)
 	frame.position = Vector2(0, 0)
-	frame.color = Color(0.75, 0.75, 0.78)
+	frame.color = OfficePalette.TASKBOARD_FRAME
 	taskboard.add_child(frame)
 
 	# Whiteboard surface
@@ -494,14 +495,14 @@ static func create_taskboard(draggable_script: Script) -> Node2D:
 	header.position = Vector2(4, 6)
 	header.size = Vector2(162, 18)
 	header.add_theme_font_size_override("font_size", 12)
-	header.add_theme_color_override("font_color", Color(0.2, 0.2, 0.6))  # Blue marker
+	header.add_theme_color_override("font_color", OfficePalette.TASKBOARD_HEADER_TEXT)
 	taskboard.add_child(header)
 
 	# Underline
 	var underline = ColorRect.new()
 	underline.size = Vector2(80, 2)
 	underline.position = Vector2(45, 22)
-	underline.color = Color(0.2, 0.2, 0.6)
+	underline.color = OfficePalette.TASKBOARD_HEADER_TEXT
 	taskboard.add_child(underline)
 
 	return taskboard
@@ -511,6 +512,14 @@ static func create_reset_button() -> Button:
 	button.text = "Reset Layout"
 	button.position = Vector2(1150, 695)
 	button.size = Vector2(120, 22)
+	button.add_theme_font_size_override("font_size", 11)
+	return button
+
+static func create_stats_button() -> Button:
+	var button = Button.new()
+	button.text = "Stats"
+	button.position = Vector2(1080, 695)
+	button.size = Vector2(60, 22)
 	button.add_theme_font_size_override("font_size", 11)
 	return button
 
@@ -525,7 +534,7 @@ static func create_title_sign(parent: Node2D) -> void:
 	var sign_bg = ColorRect.new()
 	sign_bg.size = Vector2(160, 30)
 	sign_bg.position = Vector2(560, 15)
-	sign_bg.color = Color(0.95, 0.92, 0.85)  # Cream background
+	sign_bg.color = OfficePalette.GRUVBOX_LIGHT
 	parent.add_child(sign_bg)
 
 	var title = Label.new()
@@ -538,7 +547,7 @@ static func create_title_sign(parent: Node2D) -> void:
 	serif_font.font_names = ["DejaVu Serif", "Liberation Serif", "Times New Roman", "Serif"]
 	title.add_theme_font_override("font", serif_font)
 	title.add_theme_font_size_override("font_size", 18)
-	title.add_theme_color_override("font_color", Color(0.35, 0.30, 0.25))
+	title.add_theme_color_override("font_color", OfficePalette.UI_TEXT_DARK)
 	parent.add_child(title)
 
 static func create_floor(parent: Node2D) -> void:
@@ -603,7 +612,7 @@ static func create_status_bar(parent: Node2D) -> Label:
 	var status_bg = ColorRect.new()
 	status_bg.size = Vector2(OfficeConstants.SCREEN_WIDTH, 30)
 	status_bg.position = Vector2(0, 690)
-	status_bg.color = Color(0.25, 0.25, 0.28)
+	status_bg.color = OfficePalette.STATUS_BAR_BG
 	parent.add_child(status_bg)
 
 	var status_label = Label.new()
@@ -614,3 +623,21 @@ static func create_status_bar(parent: Node2D) -> Label:
 	parent.add_child(status_label)
 
 	return status_label
+
+static func create_vip_photo() -> VIPPhoto:
+	var photo = VIPPhoto.new()
+	photo.position = OfficeConstants.VIP_PHOTO_POSITION
+	photo.z_index = OfficeConstants.Z_WINDOW_FRAME  # Same layer as window frames (wall-mounted)
+	return photo
+
+static func create_roster_clipboard() -> RosterClipboard:
+	var clipboard = RosterClipboard.new()
+	clipboard.position = OfficeConstants.ROSTER_CLIPBOARD_POSITION
+	clipboard.z_index = OfficeConstants.Z_WINDOW_FRAME  # Same layer as window frames (wall-mounted)
+	return clipboard
+
+static func create_achievement_board() -> AchievementBoard:
+	var board = AchievementBoard.new()
+	board.position = OfficeConstants.ACHIEVEMENT_BOARD_POSITION
+	board.z_index = OfficeConstants.Z_WINDOW_FRAME  # Same layer as window frames (wall-mounted)
+	return board

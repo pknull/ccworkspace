@@ -4,9 +4,9 @@ class_name TranscriptWatcher
 signal event_received(event_data: Dictionary)
 
 const CLAUDE_PROJECTS_DIR = "/.claude/projects"
-const POLL_INTERVAL = 0.5  # seconds
-const SCAN_INTERVAL = 5.0  # seconds - how often to scan for new sessions
-const ACTIVE_THRESHOLD = 300  # seconds - consider sessions active if modified within this time
+const POLL_INTERVAL = OfficeConstants.TRANSCRIPT_POLL_INTERVAL
+const SCAN_INTERVAL = 1.0  # seconds - how often to scan for new sessions (fast to catch subagent sessions)
+const ACTIVE_THRESHOLD = 300  # seconds - consider sessions active if modified within this time (longer than SESSION_INACTIVE_TIMEOUT)
 
 # Track multiple sessions
 var watched_sessions: Dictionary = {}  # file_path -> {position: int, last_modified: int}
@@ -15,6 +15,9 @@ var scan_timer: float = 0.0
 
 # Track tool_use_id -> agent info for matching with tool_result
 var pending_agents: Dictionary = {}  # tool_use_id -> {agent_type, description, session_path}
+
+# Track ALL pending tool calls - any tool can require permission
+var pending_tools: Dictionary = {}  # tool_use_id -> {tool_name, session_path}
 
 func _ready() -> void:
 	# Find and start watching all active sessions
@@ -69,7 +72,7 @@ func scan_for_sessions() -> void:
 	dir.list_dir_end()
 
 	# Remove stale sessions (not modified recently AND no pending agents)
-	var to_remove = []
+	var to_remove: Array[String] = []
 	for path in watched_sessions.keys():
 		var mod_time = FileAccess.get_modified_time(path)
 		if current_time - mod_time > ACTIVE_THRESHOLD:
@@ -121,9 +124,18 @@ func check_all_sessions() -> void:
 
 func check_session_for_entries(file_path: String) -> void:
 	var session = watched_sessions[file_path]
+
+	# Check if file was modified since last check - avoid unnecessary file opens
+	var current_mod_time = FileAccess.get_modified_time(file_path)
+	if current_mod_time == session.get("last_modified", 0):
+		return  # File hasn't changed, skip opening it
+
 	var file = FileAccess.open(file_path, FileAccess.READ)
 	if not file:
 		return
+
+	# Update last modified time
+	watched_sessions[file_path].last_modified = current_mod_time
 
 	# Seek to where we left off
 	file.seek(session.position)
@@ -218,7 +230,13 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 			"session_path": session_path
 		})
 	else:
-		# Regular tool use
+		# ALL tools can potentially wait for permission - track them all
+		pending_tools[tool_id] = {
+			"tool_name": tool_name,
+			"session_path": session_path
+		}
+
+		# Build tool description for display
 		var tool_desc = ""
 		match tool_name:
 			"Bash":
@@ -233,13 +251,16 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 		if tool_desc:
 			tool_desc = tool_desc.substr(0, 50)
 
+		print("[TranscriptWatcher] TOOL: %s (id: %s)" % [tool_name, tool_id.substr(0, 12)])
+
+		# Emit waiting_for_input - monitor turns red until result comes back
 		event_received.emit({
-			"event": "tool_use",
+			"event": "waiting_for_input",
 			"agent_id": "main",
 			"tool": tool_name,
 			"description": tool_desc,
 			"timestamp": timestamp,
-			"session_path": session_path  # Include session so we can find the orchestrator
+			"session_path": session_path
 		})
 
 func process_tool_result(item: Dictionary, entry: Dictionary) -> void:
@@ -251,13 +272,55 @@ func process_tool_result(item: Dictionary, entry: Dictionary) -> void:
 		var agent_info = pending_agents[tool_use_id]
 		pending_agents.erase(tool_use_id)
 
-		print("[TranscriptWatcher] COMPLETE: %s - %s (id: %s)" % [agent_info.agent_type, agent_info.description, tool_use_id.substr(0, 12)])
+		# Extract the result content - handle both string and array formats
+		var raw_content = item.get("content", "")
+		var result_content = ""
+
+		if raw_content is String:
+			result_content = raw_content
+		elif raw_content is Array:
+			# Content can be an array of content blocks - extract text
+			for block in raw_content:
+				if block is Dictionary:
+					if block.get("type") == "text":
+						result_content += block.get("text", "")
+					elif block.has("text"):
+						result_content += str(block.get("text", ""))
+				elif block is String:
+					result_content += block
+		else:
+			result_content = str(raw_content)
+
+		var is_error = item.get("is_error", false)
+
+		# Truncate long results for display (keep first ~200 chars)
+		var display_result = result_content.strip_edges()
+		if display_result.length() > 200:
+			display_result = display_result.substr(0, 197) + "..."
+
+		print("[TranscriptWatcher] COMPLETE: %s - %s (id: %s) result=%s" % [agent_info.agent_type, agent_info.description, tool_use_id.substr(0, 12), display_result.substr(0, 50)])
 
 		event_received.emit({
 			"event": "agent_complete",
 			"agent_id": tool_use_id.substr(0, 12),  # Match spawn ID length
-			"success": "true",
+			"success": str(not is_error),
+			"result": display_result,
 			"timestamp": timestamp
+		})
+
+	# Check if this clears a waiting state (tool completed)
+	if pending_tools.has(tool_use_id):
+		var tool_info = pending_tools[tool_use_id]
+		pending_tools.erase(tool_use_id)
+
+		print("[TranscriptWatcher] TOOL DONE: %s (id: %s)" % [tool_info.tool_name, tool_use_id.substr(0, 12)])
+
+		event_received.emit({
+			"event": "input_received",
+			"agent_id": "main",
+			"tool": tool_info.tool_name,
+			"timestamp": timestamp,
+			"session_path": tool_info.session_path
 		})
 
 func session_has_pending_agents(session_path: String) -> bool:

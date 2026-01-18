@@ -1,6 +1,14 @@
 class_name OfficeConstants
 
 # =============================================================================
+# DEBUG FLAGS
+# =============================================================================
+
+const DEBUG_EVENTS: bool = false      # Log all transcript events
+const DEBUG_TOOL_TRACKING: bool = false  # Log tool tracking to profiles
+const DEBUG_AGENT_LOOKUP: bool = false   # Log agent session lookups
+
+# =============================================================================
 # LAYOUT - Office Dimensions and Positions
 # =============================================================================
 
@@ -86,6 +94,11 @@ const MEETING_SPOTS: Array[Vector2] = [
 const TASKBOARD_SIZE: Vector2 = Vector2(170, 130)
 const TASKBOARD_OBSTACLE: Vector2 = Vector2(170, 130)  # Full board blocks navigation
 
+# Wall decorations (between windows and title sign)
+const ACHIEVEMENT_BOARD_POSITION: Vector2 = Vector2(50, 32)  # Far left on wall
+const VIP_PHOTO_POSITION: Vector2 = Vector2(510, 32)      # Left of title sign
+const ROSTER_CLIPBOARD_POSITION: Vector2 = Vector2(770, 32)  # Right of title sign
+
 # =============================================================================
 # Z-INDEX - Layer Ordering (lower = behind)
 # =============================================================================
@@ -102,7 +115,8 @@ const Z_WINDOW_SKY: int = 1
 const Z_WINDOW_CLOUD: int = 2
 const Z_WINDOW_FRAME: int = 3
 const Z_WINDOW_MASK: int = 4
-const Z_TASKBOARD: int = 5
+const Z_TASKBOARD: int = 700  # Wall-mounted, always in front of agents (who use Y position ~200-620)
+const Z_UI: int = 90          # UI elements (popups, overlays)
 const Z_UI_TOOLTIP: int = 100
 
 # =============================================================================
@@ -120,7 +134,6 @@ const FIDGET_DURATION: float = 1.5
 const NEXT_FIDGET_MIN: float = 5.0
 const NEXT_FIDGET_MAX: float = 15.0
 const TRANSCRIPT_POLL_INTERVAL: float = 0.5
-const SESSION_INACTIVE_TIMEOUT: float = 30.0
 
 # =============================================================================
 # MOVEMENT - Speeds (in pixels per second)
@@ -165,3 +178,16 @@ const GRID_ORIGIN: Vector2 = Vector2(0.0, 85.0)  # Top-left of walkable area
 
 # Work position offset from desk (where agent stands)
 const WORK_POSITION_OFFSET: float = 55.0  # Pixels in front of desk center
+
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
+
+# Snap a world position to the nearest grid cell center
+static func snap_to_grid(pos: Vector2) -> Vector2:
+	var gx = round((pos.x - GRID_ORIGIN.x) / CELL_SIZE)
+	var gy = round((pos.y - GRID_ORIGIN.y) / CELL_SIZE)
+	return Vector2(
+		gx * CELL_SIZE + GRID_ORIGIN.x + CELL_SIZE / 2.0,
+		gy * CELL_SIZE + GRID_ORIGIN.y + CELL_SIZE / 2.0
+	)
