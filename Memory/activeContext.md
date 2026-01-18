@@ -1,9 +1,9 @@
 ---
-version: "1.3"
-lastUpdated: "2026-01-16 UTC"
+version: "1.4"
+lastUpdated: "2026-01-17 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - z-index fix, smoke test, path recalculation"
+changeTrigger: "Session save - gamification verification, tool centralization, codebase review"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -12,15 +12,25 @@ dependencies: ["communicationStyle.md"]
 
 ## Current Project Status
 
-**Primary Focus**: Stable - z-index rendering fixed, smoke test infrastructure added
+**Primary Focus**: Gamification system stable, codebase improvements identified
 
 **Active Work**:
-- Z-index rendering fixed for all furniture
-- Smoke test script with furniture tour
-- Path recalculation on furniture movement
-- Graceful unreachable path handling
+- Gamification system (AgentProfile, AgentRoster, BadgeSystem) - functional
+- Tool tracking investigation and fixes
+- Codebase refactoring opportunities identified
 
 **Recent Activities** (last 7 days):
+- **2026-01-17 (Session 4)**: Gamification verification, codebase review:
+  - Verified lifetime stats ARE persisting (AgentProfile JSON in user://stable/)
+  - Diagnosed tool tracking delay - reduced SCAN_INTERVAL from 5s to 1s
+  - Added debug flags to OfficeConstants (DEBUG_EVENTS, DEBUG_TOOL_TRACKING, DEBUG_AGENT_LOOKUP)
+  - Centralized TOOL_ICONS and TOOL_COLORS in OfficePalette.gd (removed from Agent.gd)
+  - Comprehensive codebase exploration identifying refactoring opportunities:
+    - God Object issue: OfficeManager (1,226 lines), Agent (1,500+ lines)
+    - String-based method dispatch should use signals
+    - A* pathfinding could use priority queue
+  - Health Score: 6.1/10 - functional but monolithic classes limit maintainability
+
 - **2026-01-16 (Session 3)**: Z-index fix, smoke test, pathfinding improvements:
   - Fixed z-index for DraggableItem (water cooler, plant, cabinet, shredder, table)
     - Added `z_index = int(position.y)` in _ready() and _process()
@@ -89,15 +99,20 @@ Port 9999, JSON messages with `"event"` field:
 - [x] Z-index rendering fixed for furniture
 - [x] Smoke test with furniture tour
 - [x] Path recalculation on furniture move
-- [ ] Visual verification of furniture tour
+- [x] Gamification lifetime stats verified working
+- [x] Tool definitions centralized in OfficePalette
+- [ ] Test tool tracking with reduced scan interval
+- [ ] Verify subagents leaving properly
 
 **Blocked**:
 - None
 
 **Deferred**:
-- Sound/audio system (user mentioned but deferred for later)
+- Extract AgentSpawner from OfficeManager (reduces monolith)
+- EventBus pattern for decoupled communication
+- A* priority queue optimization
+- Sound/audio system
 - More furniture variety
-- Agent customization options
 
 ## Learnings
 
@@ -115,3 +130,9 @@ When agents walk to movable targets, track destination furniture name alongside 
 
 ### Graceful Pathfinding Failure
 Don't fall back to direct paths when A* fails - this causes agents to walk through walls. Instead return empty path and let agent handle gracefully (skip target, go idle, or leave).
+
+### Session Scan Timing
+TranscriptWatcher scans for new sessions at SCAN_INTERVAL. If too slow (5s), subagent sessions may be discovered after tool events have already happened, causing tool tracking to fail. Reduced to 1s.
+
+### Centralized Constants Pattern
+Tool definitions (icons, colors) scattered across files create maintenance burden. Centralize in OfficePalette.gd for single source of truth. Use debug flags in OfficeConstants.gd to gate verbose logging.
