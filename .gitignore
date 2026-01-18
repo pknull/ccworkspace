@@ -1,34 +1,24 @@
-# Godot 4+ specific ignores
-.godot/
-
-# Godot-specific ignores
-*.translation
-
-# Imported textures and samples
-.import/
-
-# Mono-specific ignores
-.mono/
-data_*/
-mono_crash.*.json
-
-# Export templates
-/export_presets.cfg
-
-# Log files
-*.log
-
-# macOS
-.DS_Store
-
-# IDE
-.idea/
-*.swp
-*.swo
-*~
-
 # Asha framework
 .asha/.venv/
 Memory/sessions/
 Memory/vector_db/
 Memory/reasoning_bank/
+
+# Godot 4+ specific ignores
+.godot/
+*.translation
+.import/
+.mono/
+data_*/
+mono_crash.*.json
+builds/
+
+# Logs
+*.log
+
+# macOS/IDE
+.DS_Store
+.idea/
+*.swp
+*.swo
+*~

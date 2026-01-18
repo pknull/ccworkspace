@@ -24,6 +24,9 @@ POLL_INTERVAL = 0.5  # seconds
 # Track tool_use_id -> agent info for matching with tool_result
 pending_agents = {}  # tool_use_id -> {agent_type, description, timestamp}
 
+# Track ALL pending tool calls - any tool can require permission
+pending_tools = {}  # tool_use_id -> {tool_name, timestamp}
+
 
 def send_to_godot(event: dict) -> bool:
     """Send event to Godot via TCP."""
@@ -141,7 +144,13 @@ def process_tool_use(item: dict, entry: dict):
             "timestamp": timestamp
         })
     else:
-        # Regular tool use
+        # ALL tools can potentially wait for permission - track them all
+        pending_tools[tool_id] = {
+            "tool_name": tool_name,
+            "timestamp": timestamp
+        }
+
+        # Build tool description
         tool_desc = ""
         if tool_name == "Bash":
             tool_desc = tool_input.get("description", tool_input.get("command", ""))[:50]
@@ -152,12 +161,11 @@ def process_tool_use(item: dict, entry: dict):
         elif tool_name in ("Glob", "Grep"):
             tool_desc = tool_input.get("pattern", "")
 
-        if tool_desc:
-            print(f"  [TOOL] {tool_name}: {tool_desc[:40]}")
+        print(f"  [TOOL] {tool_name}: {tool_desc[:40] if tool_desc else ''}")
 
-        # Send tool_use event to Godot
+        # Send waiting event - monitor turns red until result comes back
         send_to_godot({
-            "event": "tool_use",
+            "event": "waiting_for_input",
             "agent_id": "main",
             "tool": tool_name,
             "description": tool_desc[:50] if tool_desc else "",
@@ -181,6 +189,20 @@ def process_tool_result(item: dict, entry: dict):
             "event": "agent_complete",
             "agent_id": tool_use_id[:8],
             "success": "true",
+            "timestamp": timestamp
+        })
+
+    # Check if this clears a waiting state (tool completed)
+    if tool_use_id in pending_tools:
+        tool_info = pending_tools.pop(tool_use_id)
+
+        print(f"  [TOOL DONE] {tool_info['tool_name']}")
+
+        # Send input received event to Godot
+        send_to_godot({
+            "event": "input_received",
+            "agent_id": "main",
+            "tool": tool_info["tool_name"],
             "timestamp": timestamp
         })
 

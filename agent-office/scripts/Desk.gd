@@ -33,56 +33,56 @@ func _ready() -> void:
 
 func _create_visuals() -> void:
 	# Shallower desk - layout: [Item] [Keyboard] [Mouse]
-	var desk_width = 80
-	var desk_depth = 28  # Shallower
+	var desk_width = OfficeConstants.DESK_WIDTH
+	var desk_depth = OfficeConstants.DESK_DEPTH
 
 	# Shadow under desk
 	var shadow = ColorRect.new()
 	shadow.size = Vector2(desk_width + 5, desk_depth + 5)
 	shadow.position = Vector2(-desk_width/2 + 3, 3)
-	shadow.color = Color(0.0, 0.0, 0.0, 0.15)
+	shadow.color = OfficePalette.SHADOW
 	shadow.z_index = -1
 	add_child(shadow)
 
-	# Desk surface - beige laminate
+	# Desk surface - gruvbox light
 	desk_rect = ColorRect.new()
 	desk_rect.size = Vector2(desk_width, desk_depth)
 	desk_rect.position = Vector2(-desk_width/2, 0)
-	desk_rect.color = Color(0.76, 0.70, 0.60)
+	desk_rect.color = OfficePalette.DESK_SURFACE
 	add_child(desk_rect)
 
 	# Desk front edge (3D depth)
 	var desk_front = ColorRect.new()
 	desk_front.size = Vector2(desk_width, 5)
 	desk_front.position = Vector2(-desk_width/2, desk_depth - 2)
-	desk_front.color = Color(0.55, 0.50, 0.42)
+	desk_front.color = OfficePalette.DESK_EDGE
 	add_child(desk_front)
 
 	# Monitor (smaller, at back of desk)
 	var monitor_stand = ColorRect.new()
 	monitor_stand.size = Vector2(16, 6)
 	monitor_stand.position = Vector2(-8, -4)
-	monitor_stand.color = Color(0.22, 0.22, 0.25)
+	monitor_stand.color = OfficePalette.MONITOR_STAND
 	add_child(monitor_stand)
 
 	monitor = ColorRect.new()
 	monitor.size = Vector2(40, 30)
 	monitor.position = Vector2(-20, -32)
-	monitor.color = Color(0.18, 0.18, 0.20)
+	monitor.color = OfficePalette.MONITOR_FRAME
 	add_child(monitor)
 
 	# Monitor screen (dark when off)
 	screen = ColorRect.new()
 	screen.size = Vector2(36, 24)
 	screen.position = Vector2(-18, -30)
-	screen.color = Color(0.08, 0.08, 0.10)  # Dark/off
+	screen.color = OfficePalette.MONITOR_SCREEN_OFF
 	add_child(screen)
 
 	# Screen glow (only visible when on)
 	screen_glow = ColorRect.new()
 	screen_glow.size = Vector2(34, 22)
 	screen_glow.position = Vector2(-17, -29)
-	screen_glow.color = Color(0.08, 0.08, 0.10)  # Dark/off
+	screen_glow.color = OfficePalette.MONITOR_SCREEN_OFF
 	add_child(screen_glow)
 
 	# Layout on desk: [Personal Item spot] [Keyboard] [Mouse]
@@ -96,33 +96,33 @@ func _create_visuals() -> void:
 	var keyboard = ColorRect.new()
 	keyboard.size = Vector2(28, 10)
 	keyboard.position = Vector2(-14, 10)
-	keyboard.color = Color(0.25, 0.25, 0.28)
+	keyboard.color = OfficePalette.KEYBOARD_DARK
 	add_child(keyboard)
 
 	var keys = ColorRect.new()
 	keys.size = Vector2(24, 6)
 	keys.position = Vector2(-12, 12)
-	keys.color = Color(0.32, 0.32, 0.35)
+	keys.color = OfficePalette.KEYBOARD_KEYS
 	add_child(keys)
 
 	# Mouse (right side)
 	var mouse = ColorRect.new()
 	mouse.size = Vector2(8, 12)
 	mouse.position = Vector2(22, 9)
-	mouse.color = Color(0.25, 0.25, 0.28)
+	mouse.color = OfficePalette.KEYBOARD_DARK
 	add_child(mouse)
 
 	var mouse_highlight = ColorRect.new()
 	mouse_highlight.size = Vector2(6, 3)
 	mouse_highlight.position = Vector2(23, 10)
-	mouse_highlight.color = Color(0.35, 0.35, 0.38)
+	mouse_highlight.color = OfficePalette.MOUSE_HIGHLIGHT
 	add_child(mouse_highlight)
 
 	# Status indicator (power light on monitor - red when unoccupied)
 	status_indicator = ColorRect.new()
 	status_indicator.size = Vector2(4, 4)
 	status_indicator.position = Vector2(12, -8)
-	status_indicator.color = Color(0.8, 0.2, 0.2)  # Red when unoccupied
+	status_indicator.color = OfficePalette.STATUS_LED_RED
 	add_child(status_indicator)
 
 	# Tool display label (on monitor)
@@ -132,7 +132,7 @@ func _create_visuals() -> void:
 	tool_label.position = Vector2(-18, -30)
 	tool_label.size = Vector2(36, 24)
 	tool_label.add_theme_font_size_override("font_size", 14)
-	tool_label.add_theme_color_override("font_color", Color(0.3, 0.9, 0.4))
+	tool_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_GREEN_BRIGHT)
 	tool_label.visible = false
 	tool_label.z_index = 1
 	add_child(tool_label)
@@ -188,14 +188,7 @@ func _get_obstacle_rect(pos: Vector2) -> Rect2:
 	)
 
 func _snap_to_grid(pos: Vector2) -> Vector2:
-	var cell_size = OfficeConstants.CELL_SIZE
-	var origin = OfficeConstants.GRID_ORIGIN
-	var gx = round((pos.x - origin.x) / cell_size)
-	var gy = round((pos.y - origin.y) / cell_size)
-	return Vector2(
-		gx * cell_size + origin.x + cell_size / 2.0,
-		gy * cell_size + origin.y + cell_size / 2.0
-	)
+	return OfficeConstants.snap_to_grid(pos)
 
 func show_tool(tool_text: String, tool_color: Color) -> void:
 	if tool_label:
@@ -210,18 +203,18 @@ func hide_tool() -> void:
 		tool_label.visible = false
 
 func get_work_position() -> Vector2:
-	# Position where agent should stand (in front of shallower desk)
-	return global_position + Vector2(0, 45)
+	# Position where agent should stand (in front of desk)
+	return global_position + Vector2(0, OfficeConstants.WORK_POSITION_OFFSET)
 
 func set_occupied(occupied: bool) -> void:
 	is_occupied = occupied
 	# Only update indicator, not monitor - monitor is controlled by set_monitor_active
 	if occupied:
 		if status_indicator:
-			status_indicator.color = Color(0.8, 0.6, 0.2)  # Yellow/amber when reserved but worker not yet arrived
+			status_indicator.color = OfficePalette.GRUVBOX_YELLOW  # Yellow/amber when reserved but worker not yet arrived
 	else:
 		if status_indicator:
-			status_indicator.color = Color(0.8, 0.2, 0.2)  # Red when unoccupied
+			status_indicator.color = OfficePalette.STATUS_LED_RED  # Red when unoccupied
 		# Turn off monitor and clear items when desk is vacated
 		set_monitor_active(false)
 		clear_personal_items()
@@ -230,19 +223,37 @@ func set_monitor_active(active: bool) -> void:
 	if active:
 		# Worker arrived: green indicator, lit screen
 		if status_indicator:
-			status_indicator.color = Color(0.2, 0.8, 0.2)  # Green
+			status_indicator.color = OfficePalette.STATUS_LED_GREEN  # Green
 		if screen:
-			screen.color = Color(0.15, 0.25, 0.18)  # Light green background
+			screen.color = OfficePalette.MONITOR_SCREEN_ON
 		if screen_glow:
-			screen_glow.color = Color(0.2, 0.35, 0.22)  # Lighter green glow
+			screen_glow.color = OfficePalette.MONITOR_SCREEN_GLOW
 	else:
 		# Dark screen
 		if screen:
-			screen.color = Color(0.08, 0.08, 0.10)  # Dark/off
+			screen.color = OfficePalette.MONITOR_SCREEN_OFF
 		if screen_glow:
-			screen_glow.color = Color(0.08, 0.08, 0.10)  # Dark/off
+			screen_glow.color = OfficePalette.MONITOR_SCREEN_OFF
 		if tool_label:
 			tool_label.visible = false
+
+func set_monitor_waiting(waiting: bool) -> void:
+	if waiting:
+		# Red screen - waiting for user input
+		if status_indicator:
+			status_indicator.color = OfficePalette.STATUS_LED_RED
+		if screen:
+			screen.color = OfficePalette.MONITOR_SCREEN_WAITING
+		if screen_glow:
+			screen_glow.color = OfficePalette.MONITOR_SCREEN_WAITING_GLOW
+	else:
+		# Return to normal green
+		if status_indicator:
+			status_indicator.color = OfficePalette.STATUS_LED_GREEN
+		if screen:
+			screen.color = OfficePalette.MONITOR_SCREEN_ON
+		if screen_glow:
+			screen_glow.color = OfficePalette.MONITOR_SCREEN_GLOW
 
 func is_available() -> bool:
 	return not is_occupied
