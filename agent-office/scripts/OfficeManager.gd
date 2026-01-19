@@ -7,6 +7,9 @@ const OfficeCatScript = preload("res://scripts/OfficeCat.gd")
 const DraggableItemScript = preload("res://scripts/DraggableItem.gd")
 const GamificationManagerScript = preload("res://scripts/GamificationManager.gd")
 const PauseMenuScript = preload("res://scripts/PauseMenu.gd")
+const AudioManagerScript = preload("res://scripts/AudioManager.gd")
+const WallClockScript = preload("res://scripts/WallClock.gd")
+const DebugEventLogScript = preload("res://scripts/DebugEventLog.gd")
 # Note: OfficeConstants, OfficePalette, OfficeVisualFactory are accessed via class_name (no preload needed)
 
 @export var spawn_point: Vector2 = OfficeConstants.SPAWN_POINT
@@ -20,11 +23,18 @@ var door_position: Vector2 = OfficeConstants.DOOR_POSITION
 var shredder_position: Vector2 = OfficeConstants.SHREDDER_POSITION
 var taskboard_position: Vector2 = OfficeConstants.TASKBOARD_POSITION
 var meeting_table_position: Vector2 = OfficeConstants.MEETING_TABLE_POSITION
+var cat_bed_position: Vector2 = OfficeConstants.CAT_BED_POSITION
 
 # Meeting table overflow tracking
 var meeting_table: Node2D = null
 var meeting_spots_occupied: Array[bool] = []  # Track which spots are taken
 var agents_in_meeting: Dictionary = {}  # agent_id -> spot_index
+
+# Interaction points - standing positions at furniture
+# furniture_name -> Array[bool] (true = occupied)
+var interaction_points_occupied: Dictionary = {}
+# agent_id -> { "furniture": String, "point_idx": int }
+var agents_at_interaction_points: Dictionary = {}
 
 # Draggable furniture references
 var draggable_water_cooler: Node2D = null
@@ -32,6 +42,7 @@ var draggable_plant: Node2D = null
 var draggable_filing_cabinet: Node2D = null
 var draggable_shredder: Node2D = null
 var draggable_taskboard: Node2D = null
+var draggable_cat_bed: Node2D = null
 
 # Position persistence
 const POSITIONS_FILE: String = "user://furniture_positions.json"
@@ -48,41 +59,60 @@ var active_agents: Dictionary = {}  # agent_id -> Agent
 var agent_by_type: Dictionary = {}  # agent_type -> Array of agent_ids
 var agents_by_session: Dictionary = {}  # session_id -> [agent_ids]
 var completed_count: int = 0
+var known_agent_ids: Dictionary = {}  # agent_id -> true
+var completed_agent_ids: Dictionary = {}  # agent_id -> true
 
 # UI elements
 var status_label: Label
 var taskboard: Node2D
 var session_labels: Dictionary = {}  # session_path -> Label
+var profiler_label: Label
+var profiler_enabled: bool = false
+var profiler_update_timer: float = 0.0
+var debug_overlay_enabled: bool = false
 
 # Visual elements
 var connection_lines: Array[Line2D] = []
 var window_clouds: Array = []
+var window_skies: Array = []  # Sky ColorRects for day/night cycle
+var celestial_layer: Node2D = null  # Sun/moon layer
+var ambient_overlay: ColorRect = null  # Lighting overlay for day/night
 var office_cat: Node2D = null
 
 # Wall decorations
 var vip_photo: VIPPhoto = null
 var roster_clipboard: RosterClipboard = null
+var wall_clock = null  # WallClock instance
 
 # Popups
 var roster_popup: RosterPopup = null
 var profile_popup: ProfilePopup = null
 var achievement_popup: AchievementsListPopup = null
 var pause_menu: Node = null  # PauseMenuScript instance
+var event_log: Node = null  # DebugEventLogScript instance
 
 # Spontaneous bubble coordination
 var current_spontaneous_agent: Agent = null
 var spontaneous_bubble_cooldown: float = 0.0
 const GLOBAL_SPONTANEOUS_COOLDOWN: float = 5.0  # Minimum 5s between any spontaneous bubbles (was 8)
 
+# Audio
+var audio_manager = null  # AudioManager instance
+
 # Taskboard update throttling
 var taskboard_update_timer: float = 0.0
 const TASKBOARD_UPDATE_INTERVAL: float = 0.5  # Update taskboard every 0.5s instead of every frame
 
+# Auto-save safety
+var autosave_timer: float = 0.0
+
 # Agent interaction check throttling
 var interaction_check_timer: float = 0.0
 const INTERACTION_CHECK_INTERVAL: float = 0.5  # Check for agent-agent and agent-cat interactions
-const AGENT_CHAT_PROXIMITY: float = 50.0  # How close agents need to be to start chatting
+const AGENT_CHAT_PROXIMITY: float = 80.0  # How close agents need to be to start chatting
 const CAT_INTERACTION_PROXIMITY: float = 40.0  # How close to cat to trigger reaction
+const PROFILER_UPDATE_INTERVAL: float = 0.5  # Update profiler every 0.5s
+const AUTO_SAVE_INTERVAL: float = 60.0  # Periodic safety save
 
 # Obstacles for agent pathfinding (legacy - kept for cat)
 var office_obstacles: Array[Rect2] = []
@@ -100,6 +130,7 @@ const POSITION_SETTERS = {
 	"plant": "set_plant_position",
 	"filing_cabinet": "set_filing_cabinet_position",
 	"shredder": "set_shredder_position",
+	"taskboard": "set_taskboard_position",
 	"meeting_table": "set_meeting_table_position",
 }
 
@@ -111,6 +142,7 @@ const DEFAULT_POSITIONS = {
 	"shredder": OfficeConstants.SHREDDER_POSITION,
 	"taskboard": OfficeConstants.TASKBOARD_POSITION,
 	"meeting_table": OfficeConstants.MEETING_TABLE_POSITION,
+	"cat_bed": OfficeConstants.CAT_BED_POSITION,
 }
 
 func _ready() -> void:
@@ -131,6 +163,11 @@ func _ready() -> void:
 	add_child(gamification_manager)
 	gamification_manager.set_agent_roster(agent_roster)
 
+	# Initialize audio manager
+	audio_manager = AudioManagerScript.new()
+	add_child(audio_manager)
+	gamification_manager.audio_manager = audio_manager
+
 	# Initialize badge system
 	badge_system = BadgeSystem.new()
 	add_child(badge_system)
@@ -143,6 +180,7 @@ func _ready() -> void:
 	_create_desks()
 	_create_furniture()
 	_create_office_cat()
+	_init_interaction_points()
 
 	# Register desks and furniture with navigation grid
 	_register_with_navigation_grid()
@@ -189,6 +227,7 @@ func _process(delta: float) -> void:
 	if taskboard_update_timer >= TASKBOARD_UPDATE_INTERVAL:
 		taskboard_update_timer = 0.0
 		_update_taskboard()
+		_update_day_night_cycle()  # Check time changes (throttled with taskboard)
 
 	_animate_clouds(delta)
 	_update_spontaneous_cooldown(delta)
@@ -199,19 +238,58 @@ func _process(delta: float) -> void:
 		interaction_check_timer = 0.0
 		_check_agent_interactions()
 
+	# Auto-save safety
+	autosave_timer += delta
+	if autosave_timer >= AUTO_SAVE_INTERVAL:
+		autosave_timer = 0.0
+		_perform_autosave()
+
+	# Profiler overlay updates
+	if profiler_enabled:
+		profiler_update_timer += delta
+		if profiler_update_timer >= PROFILER_UPDATE_INTERVAL:
+			profiler_update_timer = 0.0
+			_update_profiler_overlay()
+
+	# Debug: show agent paths and interaction points
+	if OfficeConstants.DEBUG_INTERACTION_POINTS or debug_overlay_enabled:
+		_update_debug_visualizations()
+	elif debug_layer:
+		# Clear debug layer when disabled
+		for child in debug_layer.get_children():
+			child.queue_free()
+
 # =============================================================================
 # OFFICE SETUP - Uses OfficeVisualFactory
 # =============================================================================
 
 func _setup_office() -> void:
-	# Floor and walls
-	OfficeVisualFactory.create_floor(self)
-	OfficeVisualFactory.create_walls(self)
-
-	# Windows
 	var window_positions = [140, 380, 900, 1140]
+
+	# Floor (bottom layer)
+	OfficeVisualFactory.create_floor(self)
+
+	# Sky layers (behind wall, visible through window holes)
+	OfficeVisualFactory.create_sky_layer(self, window_skies)
+	celestial_layer = OfficeVisualFactory.create_celestial_layer(self)
+	OfficeVisualFactory.create_cloud_layer(self, window_clouds)
+	OfficeVisualFactory.create_foliage_layer(self)
+
+	# Walls (with transparent holes where windows are)
+	OfficeVisualFactory.create_walls(self, window_positions)
+
+	# Window frames (around the holes)
 	for wx in window_positions:
-		OfficeVisualFactory.create_window(self, wx, window_clouds)
+		OfficeVisualFactory.create_window_frame(self, wx)
+
+	# Ambient lighting overlay (for day/night cycle)
+	ambient_overlay = ColorRect.new()
+	ambient_overlay.size = Vector2(OfficeConstants.SCREEN_WIDTH, OfficeConstants.SCREEN_HEIGHT)
+	ambient_overlay.position = Vector2.ZERO
+	ambient_overlay.color = OfficePalette.AMBIENT_DAY
+	ambient_overlay.z_index = OfficeConstants.Z_AMBIENT_OVERLAY
+	ambient_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE  # Click-through
+	add_child(ambient_overlay)
 
 	# Door
 	OfficeVisualFactory.create_door(self, Vector2(640, 632))
@@ -220,6 +298,10 @@ func _setup_office() -> void:
 	OfficeVisualFactory.create_title_sign(self)
 
 	# Wall decorations (between windows and title sign)
+	wall_clock = OfficeVisualFactory.create_wall_clock()
+	wall_clock.position = OfficeConstants.WALL_CLOCK_POSITION
+	add_child(wall_clock)
+
 	vip_photo = OfficeVisualFactory.create_vip_photo()
 	add_child(vip_photo)
 	vip_photo.clicked.connect(_on_vip_photo_clicked)
@@ -238,6 +320,7 @@ func _setup_office() -> void:
 
 	# Status bar
 	status_label = OfficeVisualFactory.create_status_bar(self)
+	_create_profiler_overlay()
 
 	# Reset button and achievement board removed - access via pause menu (Escape key)
 
@@ -288,8 +371,18 @@ func _create_furniture() -> void:
 	# Register as obstacle
 	var table_size = OfficeConstants.MEETING_TABLE_OBSTACLE
 	office_obstacles.append(Rect2(meeting_table_position.x - table_size.x / 2, meeting_table_position.y - table_size.y / 2, table_size.x, table_size.y))
+
+	# Cat bed (draggable nap spot)
+	draggable_cat_bed = OfficeVisualFactory.create_cat_bed(DraggableItemScript)
+	draggable_cat_bed.position = cat_bed_position
+	draggable_cat_bed.navigation_grid = navigation_grid
+	draggable_cat_bed.obstacle_size = OfficeConstants.CAT_BED_OBSTACLE
+	draggable_cat_bed.position_changed.connect(_on_item_position_changed)
+	add_child(draggable_cat_bed)
+	var bed_size = OfficeConstants.CAT_BED_OBSTACLE
+	office_obstacles.append(Rect2(cat_bed_position.x - bed_size.x / 2, cat_bed_position.y - bed_size.y / 2, bed_size.x, bed_size.y))
 	# Initialize meeting spots (8 spots around the table)
-	meeting_spots_occupied.resize(OfficeConstants.MEETING_SPOTS.size())
+	meeting_spots_occupied.resize(OfficeConstants.MEETING_SPOT_OFFSETS.size())
 	meeting_spots_occupied.fill(false)
 
 func _create_desks() -> void:
@@ -317,6 +410,11 @@ func _create_desks() -> void:
 func _create_office_cat() -> void:
 	office_cat = OfficeCatScript.new()
 	office_cat.set_bounds(Vector2(30, 100), Vector2(OfficeConstants.FLOOR_MAX_X - 30, 620))
+	if office_cat.has_method("set_cat_bed_position"):
+		office_cat.set_cat_bed_position(cat_bed_position)
+	if office_cat.has_method("set_navigation_grid"):
+		office_cat.set_navigation_grid(navigation_grid)
+	office_cat.audio_manager = audio_manager
 	_update_cat_obstacles()
 	office_cat.z_index = OfficeConstants.Z_CAT
 	add_child(office_cat)
@@ -326,17 +424,23 @@ func _update_cat_obstacles() -> void:
 		return
 	office_cat.clear_obstacles()
 
-	# Add desk obstacles
+	# Add desk obstacles (same dimensions as navigation grid)
 	for desk in desks:
-		var rect = Rect2(desk.position - Vector2(50, 40), Vector2(100, 80))
-		office_cat.add_obstacle(rect)
+		var desk_rect = Rect2(
+			desk.position.x - OfficeConstants.DESK_WIDTH / 2,
+			desk.position.y,
+			OfficeConstants.DESK_WIDTH,
+			OfficeConstants.DESK_DEPTH
+		)
+		office_cat.add_obstacle(desk_rect)
 
-	# Add furniture obstacles
+	# Add furniture obstacles (same as navigation grid registrations)
 	office_cat.add_obstacle(_get_furniture_rect(water_cooler_position, OfficeConstants.WATER_COOLER_OBSTACLE))
 	office_cat.add_obstacle(_get_furniture_rect(plant_position, OfficeConstants.PLANT_OBSTACLE))
 	office_cat.add_obstacle(_get_furniture_rect(filing_cabinet_position, OfficeConstants.FILING_CABINET_OBSTACLE))
 	office_cat.add_obstacle(_get_furniture_rect(shredder_position, OfficeConstants.SHREDDER_OBSTACLE))
 	office_cat.add_obstacle(_get_furniture_rect(meeting_table_position, OfficeConstants.MEETING_TABLE_OBSTACLE))
+	office_cat.add_obstacle(_get_furniture_rect(cat_bed_position, OfficeConstants.CAT_BED_OBSTACLE))
 
 func _get_furniture_rect(pos: Vector2, size: Vector2) -> Rect2:
 	return Rect2(pos.x - size.x / 2, pos.y - size.y / 2, size.x, size.y)
@@ -361,10 +465,312 @@ func _register_with_navigation_grid() -> void:
 	_register_furniture_obstacle("filing_cabinet", filing_cabinet_position, OfficeConstants.FILING_CABINET_OBSTACLE)
 	_register_furniture_obstacle("shredder", shredder_position, OfficeConstants.SHREDDER_OBSTACLE)
 	_register_furniture_obstacle("meeting_table", meeting_table_position, OfficeConstants.MEETING_TABLE_OBSTACLE)
+	_register_furniture_obstacle("cat_bed", cat_bed_position, OfficeConstants.CAT_BED_OBSTACLE)
 
 func _register_furniture_obstacle(obstacle_id: String, pos: Vector2, size: Vector2) -> void:
 	var rect = Rect2(pos.x - size.x / 2, pos.y - size.y / 2, size.x, size.y)
 	navigation_grid.register_obstacle(rect, obstacle_id)
+
+# =============================================================================
+# INTERACTION POINTS - Standing positions at furniture
+# =============================================================================
+
+func _init_interaction_points() -> void:
+	# Initialize occupancy tracking for each furniture type
+	interaction_points_occupied["water_cooler"] = []
+	interaction_points_occupied["water_cooler"].resize(OfficeConstants.WATER_COOLER_POINTS.size())
+	interaction_points_occupied["water_cooler"].fill(false)
+
+	interaction_points_occupied["plant"] = []
+	interaction_points_occupied["plant"].resize(OfficeConstants.PLANT_POINTS.size())
+	interaction_points_occupied["plant"].fill(false)
+
+	interaction_points_occupied["filing_cabinet"] = []
+	interaction_points_occupied["filing_cabinet"].resize(OfficeConstants.FILING_CABINET_POINTS.size())
+	interaction_points_occupied["filing_cabinet"].fill(false)
+
+	interaction_points_occupied["shredder"] = []
+	interaction_points_occupied["shredder"].resize(OfficeConstants.SHREDDER_POINTS.size())
+	interaction_points_occupied["shredder"].fill(false)
+
+	interaction_points_occupied["taskboard"] = []
+	interaction_points_occupied["taskboard"].resize(OfficeConstants.TASKBOARD_POINTS.size())
+	interaction_points_occupied["taskboard"].fill(false)
+
+	# Debug markers are now drawn in _process to track furniture movement
+
+var debug_layer: Node2D = null
+
+func _update_debug_visualizations() -> void:
+	"""Draw debug markers for interaction points, desk positions, and agent paths."""
+	# Clear and recreate debug layer each frame
+	if debug_layer:
+		for child in debug_layer.get_children():
+			child.queue_free()
+	else:
+		debug_layer = Node2D.new()
+		debug_layer.name = "DebugLayer"
+		debug_layer.z_index = OfficeConstants.Z_UI - 1
+		add_child(debug_layer)
+
+	# Screen bounds for offscreen check
+	var screen_rect = Rect2(0, 0, OfficeConstants.SCREEN_WIDTH, OfficeConstants.SCREEN_HEIGHT)
+
+	# === OBSTACLE BOUNDING BOXES ===
+	for obstacle in office_obstacles:
+		var obs_rect = ColorRect.new()
+		obs_rect.size = obstacle.size
+		obs_rect.position = obstacle.position
+		obs_rect.color = Color(1.0, 0.0, 0.0, 0.15)  # Semi-transparent red
+		obs_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		debug_layer.add_child(obs_rect)
+
+		# Border outline
+		var border = Line2D.new()
+		border.add_point(obstacle.position)
+		border.add_point(obstacle.position + Vector2(obstacle.size.x, 0))
+		border.add_point(obstacle.position + obstacle.size)
+		border.add_point(obstacle.position + Vector2(0, obstacle.size.y))
+		border.add_point(obstacle.position)
+		border.width = 1.0
+		border.default_color = Color(1.0, 0.3, 0.3, 0.4)
+		debug_layer.add_child(border)
+
+	# === FURNITURE INTERACTION POINTS ===
+	# Use actual draggable node positions (not the position variables which may be stale)
+	var furniture_points = {
+		"water_cooler": {"node": draggable_water_cooler, "points": OfficeConstants.WATER_COOLER_POINTS, "color": Color.CYAN},
+		"plant": {"node": draggable_plant, "points": OfficeConstants.PLANT_POINTS, "color": Color.GREEN},
+		"filing_cabinet": {"node": draggable_filing_cabinet, "points": OfficeConstants.FILING_CABINET_POINTS, "color": Color.GRAY},
+		"shredder": {"node": draggable_shredder, "points": OfficeConstants.SHREDDER_POINTS, "color": Color.RED},
+		"taskboard": {"node": draggable_taskboard, "points": OfficeConstants.TASKBOARD_POINTS, "color": Color.YELLOW},
+	}
+
+	for furniture_name in furniture_points:
+		var data = furniture_points[furniture_name]
+		var node = data["node"]
+		if not node:
+			continue
+		var base_pos: Vector2 = node.position
+		var points: Array = data["points"]
+		var point_color: Color = data["color"]
+
+		# Draw line from furniture center to each point
+		for i in range(points.size()):
+			var offset: Vector2 = points[i]
+			var world_pos: Vector2 = base_pos + offset
+
+			# Check if endpoint is offscreen or collides with obstacle
+			var is_problem = _debug_point_has_problem(world_pos, screen_rect)
+			var alpha = 0.1 if is_problem else 0.5
+
+			# Connector line
+			var line = Line2D.new()
+			line.add_point(base_pos)
+			line.add_point(world_pos)
+			line.width = 1.0 if not is_problem else 2.0
+			line.default_color = point_color if not is_problem else Color.RED
+			line.default_color.a = alpha
+			debug_layer.add_child(line)
+
+			# Marker at standing position
+			var marker = ColorRect.new()
+			marker.size = Vector2(8, 8)
+			marker.position = world_pos - Vector2(4, 4)
+			marker.color = point_color if not is_problem else Color.RED
+			marker.color.a = 0.7 if not is_problem else 0.3
+			marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			debug_layer.add_child(marker)
+
+			# Label
+			var label = Label.new()
+			label.text = "%s[%d]%s" % [furniture_name.substr(0, 3), i, "!" if is_problem else ""]
+			label.position = world_pos + Vector2(5, -5)
+			label.add_theme_font_size_override("font_size", 8)
+			label.add_theme_color_override("font_color", Color.RED if is_problem else point_color)
+			label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			debug_layer.add_child(label)
+
+	# === MEETING SPOTS ===
+	# Use actual meeting table node position + relative offsets
+	var mtg_base = meeting_table.position if meeting_table else meeting_table_position
+	for i in range(OfficeConstants.MEETING_SPOT_OFFSETS.size()):
+		var offset: Vector2 = OfficeConstants.MEETING_SPOT_OFFSETS[i]
+		var spot: Vector2 = mtg_base + offset
+
+		var is_problem = _debug_point_has_problem(spot, screen_rect)
+		var alpha = 0.1 if is_problem else 0.5
+
+		# Line from meeting table center
+		var line = Line2D.new()
+		line.add_point(mtg_base)
+		line.add_point(spot)
+		line.width = 1.0 if not is_problem else 2.0
+		line.default_color = Color.MAGENTA if not is_problem else Color.RED
+		line.default_color.a = alpha
+		debug_layer.add_child(line)
+
+		var marker = ColorRect.new()
+		marker.size = Vector2(8, 8)
+		marker.position = spot - Vector2(4, 4)
+		marker.color = Color.MAGENTA if not is_problem else Color.RED
+		marker.color.a = 0.7 if not is_problem else 0.3
+		marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		debug_layer.add_child(marker)
+
+		var label = Label.new()
+		label.text = "mtg[%d]%s" % [i, "!" if is_problem else ""]
+		label.position = spot + Vector2(5, -5)
+		label.add_theme_font_size_override("font_size", 8)
+		label.add_theme_color_override("font_color", Color.RED if is_problem else Color.MAGENTA)
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		debug_layer.add_child(label)
+
+	# === DESK WORK POSITIONS ===
+	for i in range(desks.size()):
+		var desk: Desk = desks[i]
+		var desk_pos = desk.position
+		var work_pos = desk.get_work_position()
+
+		var is_problem = _debug_point_has_problem(work_pos, screen_rect)
+		var alpha = 0.1 if is_problem else 0.3
+
+		# Line from desk to work position
+		var line = Line2D.new()
+		line.add_point(desk_pos)
+		line.add_point(work_pos)
+		line.width = 1.0
+		line.default_color = Color.WHITE if not is_problem else Color.RED
+		line.default_color.a = alpha
+		debug_layer.add_child(line)
+
+		var marker = ColorRect.new()
+		marker.size = Vector2(6, 6)
+		marker.position = work_pos - Vector2(3, 3)
+		marker.color = Color.WHITE if not is_problem else Color.RED
+		marker.color.a = 0.5 if not is_problem else 0.3
+		marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		debug_layer.add_child(marker)
+
+	# Draw agent and cat paths
+	_draw_debug_paths()
+
+func _debug_point_has_problem(pos: Vector2, screen_rect: Rect2) -> bool:
+	"""Check if a standing position is offscreen or inside an obstacle."""
+	# Offscreen check
+	if not screen_rect.has_point(pos):
+		return true
+	# Obstacle collision check
+	for obstacle in office_obstacles:
+		if obstacle.has_point(pos):
+			return true
+	return false
+
+func _draw_debug_paths() -> void:
+	"""Draw agent and cat pathfinding lines."""
+	if not debug_layer:
+		return
+
+	# === AGENT PATHS ===
+	for agent_id in active_agents:
+		var agent: Agent = active_agents[agent_id]
+		if agent and agent.path_waypoints.size() > 0:
+			var line = Line2D.new()
+			line.width = 2.0
+			line.default_color = Agent.get_agent_color(agent.agent_type)
+			line.default_color.a = 0.4
+
+			line.add_point(agent.position)
+			for j in range(agent.current_waypoint_index, agent.path_waypoints.size()):
+				line.add_point(agent.path_waypoints[j])
+			debug_layer.add_child(line)
+
+	# === CAT PATH ===
+	if office_cat and office_cat.path_waypoints.size() > 0:
+		var cat_line = Line2D.new()
+		cat_line.width = 2.0
+		cat_line.default_color = Color.ORANGE
+		cat_line.default_color.a = 0.4
+
+		cat_line.add_point(office_cat.position)
+		for j in range(office_cat.current_waypoint_index, office_cat.path_waypoints.size()):
+			cat_line.add_point(office_cat.path_waypoints[j])
+		debug_layer.add_child(cat_line)
+
+func reserve_interaction_point(furniture_name: String, agent_id: String) -> int:
+	"""Reserve an available interaction point at furniture. Returns point index, or -1 if all occupied."""
+	if not interaction_points_occupied.has(furniture_name):
+		return -1
+
+	var points: Array = interaction_points_occupied[furniture_name]
+	for i in range(points.size()):
+		if not points[i]:
+			points[i] = true
+			agents_at_interaction_points[agent_id] = {
+				"furniture": furniture_name,
+				"point_idx": i
+			}
+			return i
+
+	# All points occupied
+	return -1
+
+func release_interaction_point(agent_id: String) -> void:
+	"""Release any interaction point held by this agent."""
+	if not agents_at_interaction_points.has(agent_id):
+		return
+
+	var info: Dictionary = agents_at_interaction_points[agent_id]
+	var furniture_name: String = info["furniture"]
+	var point_idx: int = info["point_idx"]
+
+	if interaction_points_occupied.has(furniture_name):
+		var points: Array = interaction_points_occupied[furniture_name]
+		if point_idx >= 0 and point_idx < points.size():
+			points[point_idx] = false
+
+	agents_at_interaction_points.erase(agent_id)
+
+func get_interaction_point_position(furniture_name: String, point_idx: int) -> Vector2:
+	"""Get world position for interaction point (furniture position + offset)."""
+	var base_position: Vector2 = _get_furniture_position(furniture_name)
+	var offset: Vector2 = _get_interaction_point_offset(furniture_name, point_idx)
+	return base_position + offset
+
+func has_available_interaction_point(furniture_name: String) -> bool:
+	"""Check if any interaction point is available at furniture."""
+	if not interaction_points_occupied.has(furniture_name):
+		return false
+
+	var points: Array = interaction_points_occupied[furniture_name]
+	for occupied in points:
+		if not occupied:
+			return true
+	return false
+
+func _get_furniture_position(furniture_name: String) -> Vector2:
+	match furniture_name:
+		"water_cooler": return water_cooler_position
+		"plant": return plant_position
+		"filing_cabinet": return filing_cabinet_position
+		"shredder": return shredder_position
+		"taskboard": return taskboard_position
+		"meeting_table": return meeting_table_position
+	return Vector2.ZERO
+
+func _get_interaction_point_offset(furniture_name: String, point_idx: int) -> Vector2:
+	var points: Array[Vector2]
+	match furniture_name:
+		"water_cooler": points = OfficeConstants.WATER_COOLER_POINTS
+		"plant": points = OfficeConstants.PLANT_POINTS
+		"filing_cabinet": points = OfficeConstants.FILING_CABINET_POINTS
+		"shredder": points = OfficeConstants.SHREDDER_POINTS
+		"taskboard": points = OfficeConstants.TASKBOARD_POINTS
+		_: return Vector2.ZERO
+
+	if point_idx >= 0 and point_idx < points.size():
+		return points[point_idx]
+	return Vector2.ZERO
 
 func _on_desk_position_changed(desk: Desk, new_position: Vector2) -> void:
 	print("[OfficeManager] Desk moved to %s" % new_position)
@@ -397,8 +803,99 @@ func _animate_clouds(delta: float) -> void:
 		if not is_instance_valid(cloud):
 			continue
 		cloud.position.x += data["speed"] * delta
-		if cloud.position.x > 40:
-			cloud.position.x = -40 - cloud.size.x
+		# Wrap at screen edges (clouds span full width now)
+		if cloud.position.x > OfficeConstants.SCREEN_WIDTH:
+			cloud.position.x = -cloud.size.x
+
+func _update_day_night_cycle() -> void:
+	# Get current time
+	var time_dict = Time.get_time_dict_from_system()
+	var hour = time_dict["hour"]
+	var minute = time_dict["minute"]
+	var time_of_day = hour + minute / 60.0  # e.g., 14.5 = 2:30pm
+
+	# Determine sky color based on time
+	var sky_color: Color
+	var ambient_color: Color
+
+	if time_of_day < 5.0:
+		# Night (midnight to 5am)
+		sky_color = OfficePalette.SKY_NIGHT
+		ambient_color = OfficePalette.AMBIENT_NIGHT
+	elif time_of_day < 6.0:
+		# Early dawn (5-6am) - transition night to dawn
+		var t = time_of_day - 5.0  # 0.0 to 1.0
+		sky_color = OfficePalette.SKY_NIGHT.lerp(OfficePalette.SKY_DAWN, t)
+		ambient_color = OfficePalette.AMBIENT_NIGHT.lerp(OfficePalette.AMBIENT_DAWN, t)
+	elif time_of_day < 7.0:
+		# Dawn (6-7am) - transition dawn to morning
+		var t = time_of_day - 6.0
+		sky_color = OfficePalette.SKY_DAWN.lerp(OfficePalette.SKY_MORNING, t)
+		ambient_color = OfficePalette.AMBIENT_DAWN.lerp(OfficePalette.AMBIENT_DAY, t)
+	elif time_of_day < 9.0:
+		# Morning (7-9am) - transition to full day
+		var t = (time_of_day - 7.0) / 2.0
+		sky_color = OfficePalette.SKY_MORNING.lerp(OfficePalette.SKY_DAY, t)
+		ambient_color = OfficePalette.AMBIENT_DAY
+	elif time_of_day < 16.0:
+		# Day (9am-4pm)
+		sky_color = OfficePalette.SKY_DAY
+		ambient_color = OfficePalette.AMBIENT_DAY
+	elif time_of_day < 17.0:
+		# Late afternoon (4-5pm) - transition to afternoon
+		var t = time_of_day - 16.0
+		sky_color = OfficePalette.SKY_DAY.lerp(OfficePalette.SKY_AFTERNOON, t)
+		ambient_color = OfficePalette.AMBIENT_DAY
+	elif time_of_day < 18.5:
+		# Dusk (5-6:30pm) - transition to sunset
+		var t = (time_of_day - 17.0) / 1.5
+		sky_color = OfficePalette.SKY_AFTERNOON.lerp(OfficePalette.SKY_DUSK, t)
+		ambient_color = OfficePalette.AMBIENT_DAY.lerp(OfficePalette.AMBIENT_DUSK, t)
+	elif time_of_day < 20.0:
+		# Evening (6:30-8pm) - transition to twilight
+		var t = (time_of_day - 18.5) / 1.5
+		sky_color = OfficePalette.SKY_DUSK.lerp(OfficePalette.SKY_EVENING, t)
+		ambient_color = OfficePalette.AMBIENT_DUSK.lerp(OfficePalette.AMBIENT_NIGHT, t)
+	elif time_of_day < 21.0:
+		# Twilight (8-9pm) - transition to night
+		var t = time_of_day - 20.0
+		sky_color = OfficePalette.SKY_EVENING.lerp(OfficePalette.SKY_NIGHT, t)
+		ambient_color = OfficePalette.AMBIENT_NIGHT
+	else:
+		# Night (9pm-midnight)
+		sky_color = OfficePalette.SKY_NIGHT
+		ambient_color = OfficePalette.AMBIENT_NIGHT
+
+	# Update all window sky backgrounds
+	for sky in window_skies:
+		if is_instance_valid(sky):
+			sky.color = sky_color
+
+	# Update ambient overlay
+	if ambient_overlay:
+		ambient_overlay.color = ambient_color
+
+	# Update sun/moon visibility and position
+	if celestial_layer:
+		var sun = celestial_layer.get_node_or_null("Sun")
+		var moon = celestial_layer.get_node_or_null("Moon")
+		var is_day = time_of_day >= 6.0 and time_of_day < 20.0
+
+		if sun:
+			sun.visible = is_day
+			if is_day:
+				# Sun position based on time (rises from left, sets to right)
+				var sun_progress = (time_of_day - 6.0) / 14.0  # 6am-8pm = 14 hours
+				sun.position.x = 100 + sun_progress * 1000
+				# Arc: higher at noon
+				var arc = sin(sun_progress * PI)
+				sun.position.y = 30 - arc * 20
+
+		if moon:
+			moon.visible = not is_day
+			if not is_day:
+				# Moon position (simple, mostly static)
+				moon.position = Vector2(900, 20)
 
 # =============================================================================
 # SPONTANEOUS BUBBLE COORDINATION
@@ -472,12 +969,13 @@ func _handle_session_start(data: Dictionary) -> void:
 	var session_id = data.get("session_id", "")
 	var session_path = data.get("session_path", "")
 	if session_id:
-		print("[OfficeManager] Session started: %s" % session_id.substr(0, 8))
+		var short_id = _get_session_short_id(session_id)
+		print("[OfficeManager] Session started: %s" % short_id)
 		# Spawn orchestrator as a regular agent (they'll stay until session ends)
 		var orch_data = {
-			"agent_id": "orch_" + session_id.substr(0, 8),
+			"agent_id": "orch_" + short_id,
 			"agent_type": "orchestrator",
-			"description": "Session: " + session_id.substr(0, 8),
+			"description": "Session: " + short_id,
 			"session_path": session_path,
 			"is_orchestrator": true
 		}
@@ -486,35 +984,39 @@ func _handle_session_start(data: Dictionary) -> void:
 
 func _handle_session_end(data: Dictionary) -> void:
 	var session_id = data.get("session_id", "")
+	var session_path = data.get("session_path", "")
 	if not session_id:
 		return
 
 	# Find the orchestrator for this session (agent_id starts with "orch_")
-	var orch_id = "orch_" + session_id.substr(0, 8)
+	var orch_id = "orch_" + _get_session_short_id(session_id)
 	if active_agents.has(orch_id):
 		var orchestrator = active_agents[orch_id] as Agent
 		if orchestrator and is_instance_valid(orchestrator):
-			print("[OfficeManager] Session ended: %s" % session_id.substr(0, 8))
+			print("[OfficeManager] Session ended: %s" % _get_session_short_id(session_id))
 			# Record orchestrator session completion for XP/stats
 			if agent_roster and orchestrator.profile_id >= 0:
 				agent_roster.record_orchestrator_session(orchestrator.profile_id)
 			# Complete like any other agent (goes to shredder, then leaves)
 			orchestrator.force_complete()
 	_update_taskboard()
+	_prune_session_agent_ids(session_path.get_file().get_basename() if session_path else session_id)
 
 func _handle_session_exit(data: Dictionary) -> void:
 	# User ran /exit or /quit - orchestrator should leave the office
 	var session_id = data.get("session_id", "")
+	var session_path = data.get("session_path", "")
 	if not session_id:
 		return
 
-	var orch_id = "orch_" + session_id.substr(0, 8)
+	var orch_id = "orch_" + _get_session_short_id(session_id)
 	if active_agents.has(orch_id):
 		var orchestrator = active_agents[orch_id] as Agent
 		if orchestrator and is_instance_valid(orchestrator):
-			print("[OfficeManager] Session exit - orchestrator leaving: %s" % session_id.substr(0, 8))
+			print("[OfficeManager] Session exit - orchestrator leaving: %s" % _get_session_short_id(session_id))
 			orchestrator.force_complete()
 		_update_taskboard()
+	_prune_session_agent_ids(session_path.get_file().get_basename() if session_path else session_id)
 
 func _handle_agent_spawn(data: Dictionary) -> void:
 	var agent_id = data.get("agent_id", "agent_%d" % Time.get_ticks_msec())
@@ -525,6 +1027,18 @@ func _handle_agent_spawn(data: Dictionary) -> void:
 	var session_id = session_path.get_file().get_basename() if session_path else "unknown"
 
 	print("[OfficeManager] Spawning agent: %s (%s)" % [agent_type, agent_id])
+	known_agent_ids[agent_id] = true
+
+	# Credit the orchestrator for delegating work to subagents
+	var is_orchestrator = agent_type == "orchestrator" or data.get("is_orchestrator", false)
+	if not is_orchestrator and session_id != "unknown":
+		var orch_id = "orch_" + _get_session_short_id(session_id)
+		if active_agents.has(orch_id):
+			var orchestrator = active_agents[orch_id] as Agent
+			if orchestrator and is_instance_valid(orchestrator) and orchestrator.profile_id >= 0:
+				if OfficeConstants.DEBUG_TOOL_TRACKING:
+					print("[OfficeManager] DELEGATE: orchestrator %s spawned %s" % [orch_id, agent_id])
+				agent_roster.record_tool_use(orchestrator.profile_id, "Delegate")
 
 	# Try to find a desk first
 	var desk = _find_available_desk()
@@ -558,10 +1072,11 @@ func _handle_agent_spawn(data: Dictionary) -> void:
 	agent.set_obstacles(office_obstacles)
 	agent.navigation_grid = navigation_grid  # Use grid-based pathfinding
 	agent.office_manager = self  # For spontaneous bubble coordination
+	agent.audio_manager = audio_manager  # For typing sounds
 	agent.work_completed.connect(_on_agent_completed)
 
 	# Assign agent profile from roster (orchestrators get the best/highest level agent)
-	var is_orchestrator = agent_type == "orchestrator" or data.get("is_orchestrator", false)
+	# Note: is_orchestrator already defined above for Task tool tracking
 	if agent_roster:
 		var profile = agent_roster.assign_agent_for_task(is_orchestrator)
 		if profile:
@@ -577,14 +1092,16 @@ func _handle_agent_spawn(data: Dictionary) -> void:
 	if desk != null:
 		# Normal desk assignment
 		agent.assign_desk(desk)
-		_draw_spawn_connection(spawn_pos, desk.get_work_position(), agent_type)
+		if OfficeConstants.DEBUG_INTERACTION_POINTS or debug_overlay_enabled:
+			_draw_spawn_connection(spawn_pos, desk.get_work_position(), agent_type)
 	else:
 		# Meeting table overflow
 		var meeting_spot = get_meeting_spot_position(meeting_spot_idx)
 		meeting_spots_occupied[meeting_spot_idx] = true
 		agents_in_meeting[agent_id] = meeting_spot_idx
 		agent.start_meeting(meeting_spot)
-		_draw_spawn_connection(spawn_pos, meeting_spot, agent_type)
+		if OfficeConstants.DEBUG_INTERACTION_POINTS or debug_overlay_enabled:
+			_draw_spawn_connection(spawn_pos, meeting_spot, agent_type)
 
 	# Track agent
 	active_agents[agent_id] = agent
@@ -630,12 +1147,28 @@ func _update_meeting_spots() -> void:
 					agent._build_path_to(new_spot)
 
 func get_meeting_spot_position(spot_idx: int) -> Vector2:
-	# Get meeting spot position adjusted for current table position
-	if spot_idx < 0 or spot_idx >= OfficeConstants.MEETING_SPOTS.size():
+	# Get meeting spot position: table position + relative offset
+	if spot_idx < 0 or spot_idx >= OfficeConstants.MEETING_SPOT_OFFSETS.size():
 		return meeting_table_position
-	var default_pos = OfficeConstants.MEETING_TABLE_POSITION
-	var offset = meeting_table_position - default_pos
-	return OfficeConstants.MEETING_SPOTS[spot_idx] + offset
+	return meeting_table_position + OfficeConstants.MEETING_SPOT_OFFSETS[spot_idx]
+
+func _find_agent_for_completion(agent_id: String) -> Agent:
+	if agent_id.is_empty():
+		return null
+	if active_agents.has(agent_id):
+		return active_agents[agent_id]
+
+	var matches: Array[String] = []
+	for key in active_agents.keys():
+		if agent_id.begins_with(key) or key.begins_with(agent_id):
+			matches.append(key)
+
+	if matches.size() == 1:
+		return active_agents[matches[0]]
+
+	if matches.size() > 1:
+		push_warning("[OfficeManager] Multiple agent matches for completion id '%s': %s" % [agent_id, str(matches)])
+	return null
 
 func _handle_agent_complete(data: Dictionary) -> void:
 	var agent_id = data.get("agent_id", "")
@@ -643,32 +1176,29 @@ func _handle_agent_complete(data: Dictionary) -> void:
 
 	if OfficeConstants.DEBUG_EVENTS:
 		print("[OfficeManager] _handle_agent_complete: looking for '%s'" % agent_id)
-	if active_agents.has(agent_id):
-		var agent = active_agents[agent_id]
-		if OfficeConstants.DEBUG_EVENTS:
-			print("[OfficeManager] Found agent '%s' in state %s" % [agent_id, Agent.State.keys()[agent.state]])
-		if result:
-			agent.set_result(result)
-		agent.force_complete()
-		print("[OfficeManager] Completed agent: %s" % agent_id)
-	else:
-		# Fallback: complete any active agent
-		print("[OfficeManager] Agent '%s' NOT in active_agents, using fallback" % agent_id)
-		for aid in active_agents.keys():
-			var agent = active_agents[aid] as Agent
-			if agent.state != Agent.State.COMPLETING and agent.state != Agent.State.DELIVERING:
-				if result:
-					agent.set_result(result)
-				agent.force_complete()
-				print("[OfficeManager] Completed agent (fallback): %s" % aid)
-				break
+	var agent = _find_agent_for_completion(agent_id)
+	if agent == null:
+		if completed_agent_ids.has(agent_id) or known_agent_ids.has(agent_id):
+			if OfficeConstants.DEBUG_EVENTS:
+				print("[OfficeManager] Completion for '%s' ignored (agent not active)" % agent_id)
+			return
+		push_warning("[OfficeManager] Agent '%s' not found for completion, skipping" % agent_id)
+		return
+
+	if OfficeConstants.DEBUG_EVENTS:
+		print("[OfficeManager] Found agent '%s' in state %s" % [agent_id, Agent.State.keys()[agent.state]])
+	if result:
+		agent.set_result(result)
+	agent.force_complete()
+	completed_agent_ids[agent_id] = true
+	print("[OfficeManager] Completed agent: %s" % agent_id)
 
 func _handle_waiting_for_input(data: Dictionary) -> void:
 	var tool_name = data.get("tool", "")
 	var session_path = data.get("session_path", "")
 	var session_id = session_path.get_file().get_basename() if session_path else ""
 
-	print("[OfficeManager] Waiting for input: %s (session: %s)" % [tool_name, session_id.substr(0, 8) if session_id else "unknown"])
+	print("[OfficeManager] Waiting for input: %s (session: %s)" % [tool_name, _get_session_short_id(session_id) if session_id else "unknown"])
 	status_label.text = "Tool: %s" % tool_name if tool_name else "Waiting..."
 
 	# Find the best agent for this session - prefer working sub-agents over orchestrator
@@ -709,14 +1239,14 @@ func _find_working_agent_for_session(session_id: String) -> Agent:
 			return agent
 
 	if OfficeConstants.DEBUG_AGENT_LOOKUP:
-		print("[OfficeManager] No working agent found for session '%s' (agents_by_session keys: %s, active: %s)" % [session_id.substr(0, 8) if session_id else "?", str(agents_by_session.keys()).substr(0, 50), str(active_agents.size())])
+		print("[OfficeManager] No working agent found for session '%s' (agents_by_session keys: %s, active: %s)" % [_get_session_short_id(session_id) if session_id else "?", str(agents_by_session.keys()).substr(0, 50), str(active_agents.size())])
 	return null
 
 func _handle_input_received(data: Dictionary) -> void:
 	var session_path = data.get("session_path", "")
 	var session_id = session_path.get_file().get_basename() if session_path else ""
 
-	print("[OfficeManager] Input received (session: %s)" % [session_id.substr(0, 8) if session_id else "unknown"])
+	print("[OfficeManager] Input received (session: %s)" % [_get_session_short_id(session_id) if session_id else "unknown"])
 	status_label.text = "Working..."
 
 	# Clear waiting state on all agents belonging to this session
@@ -822,12 +1352,17 @@ func _check_agent_cat_interactions() -> void:
 			# Make the cat meow back sometimes
 			if randf() < 0.5 and office_cat.has_method("_show_meow"):
 				office_cat._show_meow()
+			# Track for cat achievements
+			if gamification_manager:
+				gamification_manager.record_cat_interaction()
 
 func _configure_agent_positions(agent: Agent) -> void:
 	agent.set_shredder_position(shredder_position)
 	agent.set_water_cooler_position(water_cooler_position)
 	agent.set_plant_position(plant_position)
 	agent.set_filing_cabinet_position(filing_cabinet_position)
+	agent.set_taskboard_position(taskboard_position)
+	agent.set_meeting_table_position(meeting_table_position)
 
 func _find_available_desk() -> Desk:
 	for desk in desks:
@@ -844,20 +1379,54 @@ func _on_agent_completed(agent: Agent) -> void:
 		agent_roster.record_task_completed(agent.profile_id, agent.agent_type, agent.work_elapsed)
 		agent_roster.release_agent(agent.profile_id)
 
+	# Record task duration for speed achievements
+	if gamification_manager and agent.last_task_duration > 0:
+		gamification_manager.record_task_completed(agent.last_task_duration)
+
 	active_agents.erase(aid)
+	completed_agent_ids[aid] = true
 	if agent_by_type.has(agent.agent_type):
 		agent_by_type[agent.agent_type].erase(aid)
 	if agent.session_id and agents_by_session.has(agent.session_id):
 		agents_by_session[agent.session_id].erase(aid)
+		if agents_by_session[agent.session_id].is_empty():
+			agents_by_session.erase(agent.session_id)
+
+	# Safety: ensure desk is released before agent is freed
+	if agent.assigned_desk:
+		agent.assigned_desk.set_occupied(false)
+		agent.assigned_desk = null
 
 	# Release meeting spot if this agent was in a meeting
 	_release_meeting_spot(aid)
+
+	# Release any interaction point held by this agent
+	release_interaction_point(aid)
 
 	# Disconnect signal before freeing to prevent stale callbacks
 	if agent.work_completed.is_connected(_on_agent_completed):
 		agent.work_completed.disconnect(_on_agent_completed)
 
 	agent.queue_free()
+
+func _prune_session_agent_ids(session_id: String) -> void:
+	if session_id.is_empty():
+		return
+	if not agents_by_session.has(session_id):
+		return
+
+	var remaining: Array[String] = []
+	for aid in agents_by_session[session_id]:
+		if active_agents.has(aid):
+			remaining.append(aid)
+		else:
+			known_agent_ids.erase(aid)
+			completed_agent_ids.erase(aid)
+
+	if remaining.is_empty():
+		agents_by_session.erase(session_id)
+	else:
+		agents_by_session[session_id] = remaining
 
 # =============================================================================
 # FURNITURE POSITION UPDATES
@@ -892,6 +1461,13 @@ func _on_item_position_changed(item_name: String, new_position: Vector2) -> void
 			_update_obstacle(4, Rect2(new_position.x - ts.x / 2, new_position.y - ts.y / 2, ts.x, ts.y))
 			# Update meeting spots relative to new table position
 			_update_meeting_spots()
+		"cat_bed":
+			cat_bed_position = new_position
+			obstacle_size = OfficeConstants.CAT_BED_OBSTACLE
+			var bs = OfficeConstants.CAT_BED_OBSTACLE
+			_update_obstacle(5, Rect2(new_position.x - bs.x / 2, new_position.y - bs.y / 2, bs.x, bs.y))
+			if office_cat and office_cat.has_method("set_cat_bed_position"):
+				office_cat.set_cat_bed_position(new_position)
 		"taskboard":
 			taskboard_position = new_position
 			# Taskboard is on the wall, no floor navigation impact
@@ -934,6 +1510,25 @@ func _update_obstacle(index: int, new_rect: Rect2) -> void:
 # UI UPDATES
 # =============================================================================
 
+func _create_profiler_overlay() -> void:
+	profiler_label = Label.new()
+	profiler_label.position = Vector2(10, 10)
+	profiler_label.add_theme_font_size_override("font_size", 12)
+	profiler_label.add_theme_color_override("font_color", OfficePalette.UI_TEXT_DARK)
+	profiler_label.z_index = OfficeConstants.Z_UI
+	profiler_label.visible = false
+	add_child(profiler_label)
+
+func _update_profiler_overlay() -> void:
+	if not profiler_label:
+		return
+	var fps = Engine.get_frames_per_second()
+	var agent_count = active_agents.size()
+	var session_count = 0
+	if transcript_watcher and transcript_watcher.has_method("get_watched_count"):
+		session_count = transcript_watcher.get_watched_count()
+	profiler_label.text = "FPS: %d | Agents: %d | Sessions: %d" % [fps, agent_count, session_count]
+
 func _update_taskboard() -> void:
 	if not transcript_watcher or not taskboard:
 		return
@@ -957,7 +1552,7 @@ func _update_taskboard() -> void:
 			break
 		var session_id = path.get_file().get_basename()
 		var agent_count = agents_by_session.get(session_id, []).size()
-		var text = "• %s [%d]" % [session_id.substr(0, 8), agent_count]
+		var text = "• %s [%d]" % [_get_session_short_id(session_id), agent_count]
 
 		if session_labels.has(path):
 			session_labels[path].text = text
@@ -973,6 +1568,13 @@ func _update_taskboard() -> void:
 
 		y_offset += 12
 		count += 1
+
+func _get_session_short_id(session_id: String) -> String:
+	if session_id.is_empty():
+		return "unknown"
+	if session_id.length() <= 8:
+		return session_id
+	return session_id.substr(session_id.length() - 8)
 
 func _draw_spawn_connection(from_pos: Vector2, to_pos: Vector2, agent_type: String) -> void:
 	var line = Line2D.new()
@@ -990,6 +1592,16 @@ func _draw_spawn_connection(from_pos: Vector2, to_pos: Vector2, agent_type: Stri
 		line.queue_free()
 		connection_lines.erase(line)
 	)
+
+# =============================================================================
+# DATA HYGIENE
+# =============================================================================
+
+func _perform_autosave() -> void:
+	if agent_roster:
+		agent_roster.save_roster()
+	if gamification_manager:
+		gamification_manager.save_all()
 
 # =============================================================================
 # POSITION PERSISTENCE
@@ -1032,6 +1644,8 @@ func _load_positions() -> void:
 		taskboard_position = Vector2(data["taskboard"]["x"], data["taskboard"]["y"])
 	if data.has("meeting_table"):
 		meeting_table_position = Vector2(data["meeting_table"]["x"], data["meeting_table"]["y"])
+	if data.has("cat_bed"):
+		cat_bed_position = Vector2(data["cat_bed"]["x"], data["cat_bed"]["y"])
 
 	print("[OfficeManager] Loaded saved furniture positions")
 
@@ -1043,6 +1657,7 @@ func _save_positions() -> void:
 		"shredder": {"x": shredder_position.x, "y": shredder_position.y},
 		"taskboard": {"x": taskboard_position.x, "y": taskboard_position.y},
 		"meeting_table": {"x": meeting_table_position.x, "y": meeting_table_position.y},
+		"cat_bed": {"x": cat_bed_position.x, "y": cat_bed_position.y},
 	}
 
 	var json_string = JSON.stringify(data, "\t")
@@ -1065,6 +1680,7 @@ func _on_reset_button_pressed() -> void:
 	shredder_position = DEFAULT_POSITIONS["shredder"]
 	taskboard_position = DEFAULT_POSITIONS["taskboard"]
 	meeting_table_position = DEFAULT_POSITIONS["meeting_table"]
+	cat_bed_position = DEFAULT_POSITIONS["cat_bed"]
 
 	# Update draggable furniture positions
 	if draggable_water_cooler:
@@ -1084,6 +1700,9 @@ func _on_reset_button_pressed() -> void:
 	if meeting_table:
 		meeting_table.position = meeting_table_position
 		_on_item_position_changed("meeting_table", meeting_table_position)
+	if draggable_cat_bed:
+		draggable_cat_bed.position = cat_bed_position
+		_on_item_position_changed("cat_bed", cat_bed_position)
 
 	# Delete saved positions file
 	if FileAccess.file_exists(POSITIONS_FILE):
@@ -1134,6 +1753,7 @@ func _show_roster_popup() -> void:
 	roster_popup.show_roster(agent_roster)
 	roster_popup.close_requested.connect(_on_roster_popup_closed)
 	roster_popup.agent_selected.connect(_on_roster_popup_agent_selected)
+	roster_popup.agent_fired.connect(_on_roster_popup_agent_fired)
 
 func _on_roster_popup_closed() -> void:
 	if roster_popup:
@@ -1143,6 +1763,15 @@ func _on_roster_popup_closed() -> void:
 func _on_roster_popup_agent_selected(agent_id: int) -> void:
 	_on_roster_popup_closed()
 	_show_agent_profile(agent_id)
+
+func _on_roster_popup_agent_fired(agent_id: int) -> void:
+	if not agent_roster:
+		return
+	var success = agent_roster.fire_agent(agent_id)
+	if not success:
+		print("[OfficeManager] Failed to fire agent %d (busy or missing)" % agent_id)
+	if roster_popup:
+		roster_popup.show_roster(agent_roster)
 
 func _show_agent_profile(agent_id: int) -> void:
 	if profile_popup != null:
@@ -1195,11 +1824,18 @@ func _show_pause_menu() -> void:
 		return
 
 	pause_menu = PauseMenuScript.new()
+	pause_menu.profiler_enabled = profiler_enabled
+	pause_menu.debug_enabled = debug_overlay_enabled
+	pause_menu.audio_manager = audio_manager
 	add_child(pause_menu)
+	pause_menu.sync_volume_sliders()
 	pause_menu.resume_requested.connect(_on_pause_resume)
 	pause_menu.roster_requested.connect(_on_pause_roster)
 	pause_menu.reset_layout_requested.connect(_on_pause_reset_layout)
 	pause_menu.achievements_requested.connect(_on_pause_achievements)
+	pause_menu.profiler_toggled.connect(_on_pause_profiler_toggled)
+	pause_menu.debug_toggled.connect(_on_pause_debug_toggled)
+	pause_menu.event_log_requested.connect(_on_pause_event_log)
 	pause_menu.quit_requested.connect(_on_pause_quit)
 
 func _close_pause_menu() -> void:
@@ -1222,6 +1858,39 @@ func _on_pause_achievements() -> void:
 	_close_pause_menu()
 	_show_achievement_popup()
 
+func _on_pause_profiler_toggled(enabled: bool) -> void:
+	profiler_enabled = enabled
+	if profiler_label:
+		profiler_label.visible = profiler_enabled
+	profiler_update_timer = 0.0
+	if profiler_enabled:
+		_update_profiler_overlay()
+
+func _on_pause_debug_toggled(enabled: bool) -> void:
+	debug_overlay_enabled = enabled
+	if debug_overlay_enabled:
+		_update_debug_visualizations()
+	elif debug_layer:
+		# Clear debug visuals when disabled
+		for child in debug_layer.get_children():
+			child.queue_free()
+
+func _on_pause_event_log() -> void:
+	_close_pause_menu()
+	_show_event_log()
+
+func _show_event_log() -> void:
+	if event_log != null:
+		return
+	event_log = DebugEventLogScript.new()
+	add_child(event_log)
+	event_log.close_requested.connect(_close_event_log)
+
+func _close_event_log() -> void:
+	if event_log:
+		event_log.queue_free()
+		event_log = null
+
 func _on_pause_quit() -> void:
 	# Save data before quitting
 	_save_positions()
@@ -1230,4 +1899,3 @@ func _on_pause_quit() -> void:
 	if gamification_manager:
 		gamification_manager.save_all()
 	get_tree().quit()
-

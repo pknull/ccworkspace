@@ -9,11 +9,12 @@ class_name AchievementSystem
 const ACHIEVEMENTS_FILE: String = "user://achievements.json"
 
 # Category definitions (single source of truth)
-const CATEGORY_ORDER: Array[String] = ["tasks", "time", "social", "tools", "milestones"]
+const CATEGORY_ORDER: Array[String] = ["tasks", "time", "social", "cat", "tools", "milestones"]
 const CATEGORY_NAMES: Dictionary = {
 	"tasks": "Task Completion",
 	"time": "Work Time",
 	"social": "Social",
+	"cat": "Cat Lover",
 	"tools": "Tool Usage",
 	"milestones": "Milestones",
 }
@@ -90,6 +91,16 @@ func _define_achievements() -> void:
 	# Tool usage achievements
 	_add_achievement("tool_explorer", "Tool Explorer", "See 5 different tools used", "[E]", "tools", 5)
 	_add_achievement("tool_master", "Tool Master", "See 10 different tools used", "[!]", "tools", 10)
+
+	# Cat achievements
+	_add_achievement("cat_petter", "Cat Petter", "Witness an agent interact with the cat", "[=^.^=]", "cat", 1)
+	_add_achievement("cat_friend", "Cat Friend", "Witness 10 agent-cat interactions", "[=^w^=]", "cat", 10)
+	_add_achievement("crazy_cat_office", "Crazy Cat Office", "Witness 50 agent-cat interactions", "[=^o^=]", "cat", 50)
+
+	# Speed achievements (task duration in seconds)
+	_add_achievement("quick_task", "Quick Task", "Complete a task in under 30 seconds", "[>]", "tasks", 1)
+	_add_achievement("lightning_fast", "Lightning Fast", "Complete a task in under 10 seconds", "[>>]", "tasks", 1)
+	_add_achievement("speed_demon", "Speed Demon", "Complete 10 quick tasks (under 30s)", "[>>>]", "tasks", 10)
 
 func _add_achievement(id: String, name: String, desc: String, icon: String, category: String, threshold: float) -> void:
 	achievements[id] = Achievement.new(id, name, desc, icon, category, threshold)

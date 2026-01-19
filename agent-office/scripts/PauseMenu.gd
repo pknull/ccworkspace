@@ -10,6 +10,9 @@ signal resume_requested()
 signal roster_requested()
 signal reset_layout_requested()
 signal achievements_requested()
+signal profiler_toggled(enabled: bool)
+signal debug_toggled(enabled: bool)
+signal event_log_requested()
 signal quit_requested()
 
 # Container for all visual elements
@@ -23,17 +26,37 @@ var resume_button: Button
 var roster_button: Button
 var reset_button: Button
 var achievements_button: Button
+var profiler_button: Button
+var debug_button: Button
+var event_log_button: Button
 var quit_button: Button
+var profiler_enabled: bool = false
+var debug_enabled: bool = false
+
+# Volume sliders
+var typing_slider: HSlider
+var meow_slider: HSlider
+var achievement_slider: HSlider
+var typing_label: Label
+var meow_label: Label
+var achievement_label: Label
+
+# Audio manager reference (set by OfficeManager)
+var audio_manager = null
 
 # Layout constants
-const PANEL_WIDTH: float = 250
-const PANEL_HEIGHT: float = 260
+const PANEL_WIDTH: float = 280
+const PANEL_HEIGHT: float = 560
 const BUTTON_WIDTH: float = 200
 const BUTTON_HEIGHT: float = 32
 const BUTTON_SPACING: float = 8
+const SLIDER_HEIGHT: float = 20
+const VOLUME_SECTION_SPACING: float = 12
+const VOLUME_LABEL_WIDTH: float = 70
+const VOLUME_LABEL_HEIGHT: float = 22
 
 func _init() -> void:
-	layer = 100
+	layer = OfficeConstants.Z_UI_POPUP_LAYER
 
 func _ready() -> void:
 	_create_visuals()
@@ -41,6 +64,7 @@ func _ready() -> void:
 func _create_visuals() -> void:
 	container = Control.new()
 	container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	container.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(container)
 
 	var screen_center = Vector2(OfficeConstants.SCREEN_WIDTH / 2, OfficeConstants.SCREEN_HEIGHT / 2)
@@ -52,6 +76,7 @@ func _create_visuals() -> void:
 	background.size = Vector2(OfficeConstants.SCREEN_WIDTH, OfficeConstants.SCREEN_HEIGHT)
 	background.position = Vector2.ZERO
 	background.color = Color(0, 0, 0, 0.7)
+	background.mouse_filter = Control.MOUSE_FILTER_STOP
 	container.add_child(background)
 
 	# Panel border
@@ -66,6 +91,7 @@ func _create_visuals() -> void:
 	panel.size = Vector2(PANEL_WIDTH, PANEL_HEIGHT)
 	panel.position = Vector2(panel_x, panel_y)
 	panel.color = OfficePalette.GRUVBOX_BG
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	container.add_child(panel)
 
 	# Title
@@ -86,7 +112,57 @@ func _create_visuals() -> void:
 	resume_button = _create_button("Resume", button_x, button_y)
 	resume_button.pressed.connect(_on_resume_pressed)
 	container.add_child(resume_button)
-	button_y += BUTTON_HEIGHT + BUTTON_SPACING
+	button_y += BUTTON_HEIGHT + BUTTON_SPACING + VOLUME_SECTION_SPACING
+
+	# Volume controls section
+	var volume_label = Label.new()
+	volume_label.text = "— Volume —"
+	volume_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	volume_label.position = Vector2(panel_x, button_y)
+	volume_label.size = Vector2(PANEL_WIDTH, 20)
+	volume_label.add_theme_font_size_override("font_size", 12)
+	volume_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_GRAY)
+	container.add_child(volume_label)
+	button_y += VOLUME_LABEL_HEIGHT
+
+	# Typing volume
+	typing_label = Label.new()
+	typing_label.text = "Typing"
+	typing_label.position = Vector2(button_x, button_y)
+	typing_label.size = Vector2(VOLUME_LABEL_WIDTH, SLIDER_HEIGHT)
+	typing_label.add_theme_font_size_override("font_size", 12)
+	typing_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT1)
+	container.add_child(typing_label)
+	typing_slider = _create_slider(button_x + VOLUME_LABEL_WIDTH + 5, button_y, BUTTON_WIDTH - VOLUME_LABEL_WIDTH - 5)
+	typing_slider.value_changed.connect(_on_typing_volume_changed)
+	container.add_child(typing_slider)
+	button_y += SLIDER_HEIGHT + BUTTON_SPACING
+
+	# Cat volume
+	meow_label = Label.new()
+	meow_label.text = "Meow"
+	meow_label.position = Vector2(button_x, button_y)
+	meow_label.size = Vector2(VOLUME_LABEL_WIDTH, SLIDER_HEIGHT)
+	meow_label.add_theme_font_size_override("font_size", 12)
+	meow_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT1)
+	container.add_child(meow_label)
+	meow_slider = _create_slider(button_x + VOLUME_LABEL_WIDTH + 5, button_y, BUTTON_WIDTH - VOLUME_LABEL_WIDTH - 5)
+	meow_slider.value_changed.connect(_on_meow_volume_changed)
+	container.add_child(meow_slider)
+	button_y += SLIDER_HEIGHT + BUTTON_SPACING
+
+	# Achievement volume
+	achievement_label = Label.new()
+	achievement_label.text = "Chime"
+	achievement_label.position = Vector2(button_x, button_y)
+	achievement_label.size = Vector2(VOLUME_LABEL_WIDTH, SLIDER_HEIGHT)
+	achievement_label.add_theme_font_size_override("font_size", 12)
+	achievement_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT1)
+	container.add_child(achievement_label)
+	achievement_slider = _create_slider(button_x + VOLUME_LABEL_WIDTH + 5, button_y, BUTTON_WIDTH - VOLUME_LABEL_WIDTH - 5)
+	achievement_slider.value_changed.connect(_on_achievement_volume_changed)
+	container.add_child(achievement_slider)
+	button_y += SLIDER_HEIGHT + BUTTON_SPACING + VOLUME_SECTION_SPACING
 
 	# Roster button
 	roster_button = _create_button("Roster", button_x, button_y)
@@ -106,6 +182,24 @@ func _create_visuals() -> void:
 	container.add_child(reset_button)
 	button_y += BUTTON_HEIGHT + BUTTON_SPACING
 
+	# Profiler toggle button
+	profiler_button = _create_button(_get_profiler_button_text(), button_x, button_y)
+	profiler_button.pressed.connect(_on_profiler_pressed)
+	container.add_child(profiler_button)
+	button_y += BUTTON_HEIGHT + BUTTON_SPACING
+
+	# Debug overlay toggle button
+	debug_button = _create_button(_get_debug_button_text(), button_x, button_y)
+	debug_button.pressed.connect(_on_debug_pressed)
+	container.add_child(debug_button)
+	button_y += BUTTON_HEIGHT + BUTTON_SPACING
+
+	# Event Log button
+	event_log_button = _create_button("Event Log", button_x, button_y)
+	event_log_button.pressed.connect(_on_event_log_pressed)
+	container.add_child(event_log_button)
+	button_y += BUTTON_HEIGHT + BUTTON_SPACING
+
 	# Quit button
 	quit_button = _create_button("Quit", button_x, button_y)
 	quit_button.pressed.connect(_on_quit_pressed)
@@ -119,6 +213,16 @@ func _create_button(text: String, x: float, y: float) -> Button:
 	button.add_theme_font_size_override("font_size", 14)
 	return button
 
+func _create_slider(x: float, y: float, width: float) -> HSlider:
+	var slider = HSlider.new()
+	slider.position = Vector2(x, y)
+	slider.size = Vector2(width, SLIDER_HEIGHT)
+	slider.min_value = 0.0
+	slider.max_value = 1.0
+	slider.step = 0.05
+	slider.value = 0.5
+	return slider
+
 func _on_resume_pressed() -> void:
 	resume_requested.emit()
 
@@ -131,6 +235,21 @@ func _on_reset_pressed() -> void:
 func _on_achievements_pressed() -> void:
 	achievements_requested.emit()
 
+func _on_profiler_pressed() -> void:
+	profiler_enabled = not profiler_enabled
+	if profiler_button:
+		profiler_button.text = _get_profiler_button_text()
+	profiler_toggled.emit(profiler_enabled)
+
+func _on_debug_pressed() -> void:
+	debug_enabled = not debug_enabled
+	if debug_button:
+		debug_button.text = _get_debug_button_text()
+	debug_toggled.emit(debug_enabled)
+
+func _on_event_log_pressed() -> void:
+	event_log_requested.emit()
+
 func _on_quit_pressed() -> void:
 	quit_requested.emit()
 
@@ -139,3 +258,32 @@ func _input(event: InputEvent) -> void:
 		if event.pressed and event.keycode == KEY_ESCAPE:
 			resume_requested.emit()
 			get_viewport().set_input_as_handled()
+
+func _get_profiler_button_text() -> String:
+	return "Profiler: On" if profiler_enabled else "Profiler: Off"
+
+func _get_debug_button_text() -> String:
+	return "Debug: On" if debug_enabled else "Debug: Off"
+
+# Volume callbacks
+func _on_typing_volume_changed(value: float) -> void:
+	if audio_manager:
+		audio_manager.set_typing_volume(value)
+
+func _on_meow_volume_changed(value: float) -> void:
+	if audio_manager:
+		audio_manager.set_meow_volume(value)
+
+func _on_achievement_volume_changed(value: float) -> void:
+	if audio_manager:
+		audio_manager.set_achievement_volume(value)
+
+# Initialize sliders from AudioManager values
+func sync_volume_sliders() -> void:
+	if audio_manager:
+		if typing_slider:
+			typing_slider.set_value_no_signal(audio_manager.get_typing_volume())
+		if meow_slider:
+			meow_slider.set_value_no_signal(audio_manager.get_meow_volume())
+		if achievement_slider:
+			achievement_slider.set_value_no_signal(audio_manager.get_achievement_volume())

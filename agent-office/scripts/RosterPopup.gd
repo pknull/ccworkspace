@@ -9,6 +9,7 @@ class_name RosterPopup
 
 signal close_requested()
 signal agent_selected(agent_id: int)
+signal agent_fired(agent_id: int)
 
 # Container for all visual elements
 var container: Control
@@ -29,7 +30,14 @@ var header_level: Label
 var header_xp: Label
 var header_tasks: Label
 var header_title: Label
+var header_status: Label
+var header_fire: Label
 var header_divider: ColorRect
+
+var fire_confirm_overlay: Control
+var fire_confirm_panel: ColorRect
+var fire_confirm_label: Label
+var fire_confirm_agent_id: int = -1
 
 # Layout constants
 const PANEL_WIDTH: float = 500
@@ -51,7 +59,7 @@ var roster: AgentRoster = null
 func _init() -> void:
 	# Set canvas layer to render above game (layer 0)
 	# Must be set in _init before node is added to tree
-	layer = 100
+	layer = OfficeConstants.Z_UI_POPUP_LAYER
 
 func _ready() -> void:
 	_create_visuals()
@@ -60,6 +68,7 @@ func _create_visuals() -> void:
 	# Create a Control container for all UI elements
 	container = Control.new()
 	container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	container.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(container)
 
 	var screen_center = Vector2(OfficeConstants.SCREEN_WIDTH / 2, OfficeConstants.SCREEN_HEIGHT / 2)
@@ -71,6 +80,7 @@ func _create_visuals() -> void:
 	background.size = Vector2(OfficeConstants.SCREEN_WIDTH, OfficeConstants.SCREEN_HEIGHT)
 	background.position = Vector2.ZERO
 	background.color = Color(0, 0, 0, 0.85)
+	background.mouse_filter = Control.MOUSE_FILTER_STOP
 	container.add_child(background)
 
 	# Panel border (behind panel)
@@ -85,6 +95,7 @@ func _create_visuals() -> void:
 	panel.size = Vector2(PANEL_WIDTH, panel_height)
 	panel.position = Vector2(panel_x, panel_y)
 	panel.color = OfficePalette.GRUVBOX_BG
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	container.add_child(panel)
 
 	# Title
@@ -113,6 +124,7 @@ func _create_visuals() -> void:
 	scroll_container.position = Vector2(panel_x + 10, header_y + 25)
 	scroll_container.size = Vector2(PANEL_WIDTH - 20, panel_height - HEADER_HEIGHT)
 	scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll_container.mouse_filter = Control.MOUSE_FILTER_STOP
 	container.add_child(scroll_container)
 
 	# Agent container inside scroll
@@ -141,30 +153,30 @@ func _create_header_row(panel_x: float, y: float) -> void:
 	header_name = Label.new()
 	header_name.text = "Name"
 	header_name.position = Vector2(panel_x + 40, y)
-	header_name.size = Vector2(100, 20)
+	header_name.size = Vector2(90, 20)
 	header_name.add_theme_font_size_override("font_size", FONT_SIZE_SMALL)
 	header_name.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
 	container.add_child(header_name)
 
 	header_level = Label.new()
 	header_level.text = "Level"
-	header_level.position = Vector2(panel_x + 145, y)
-	header_level.size = Vector2(60, 20)
+	header_level.position = Vector2(panel_x + 130, y)
+	header_level.size = Vector2(50, 20)
 	header_level.add_theme_font_size_override("font_size", FONT_SIZE_SMALL)
 	header_level.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
 	container.add_child(header_level)
 
 	header_xp = Label.new()
 	header_xp.text = "XP"
-	header_xp.position = Vector2(panel_x + 210, y)
-	header_xp.size = Vector2(60, 20)
+	header_xp.position = Vector2(panel_x + 180, y)
+	header_xp.size = Vector2(50, 20)
 	header_xp.add_theme_font_size_override("font_size", FONT_SIZE_SMALL)
 	header_xp.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
 	container.add_child(header_xp)
 
 	header_tasks = Label.new()
 	header_tasks.text = "Tasks"
-	header_tasks.position = Vector2(panel_x + 275, y)
+	header_tasks.position = Vector2(panel_x + 230, y)
 	header_tasks.size = Vector2(50, 20)
 	header_tasks.add_theme_font_size_override("font_size", FONT_SIZE_SMALL)
 	header_tasks.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
@@ -172,11 +184,27 @@ func _create_header_row(panel_x: float, y: float) -> void:
 
 	header_title = Label.new()
 	header_title.text = "Title"
-	header_title.position = Vector2(panel_x + 360, y)
-	header_title.size = Vector2(80, 20)
+	header_title.position = Vector2(panel_x + 285, y)
+	header_title.size = Vector2(90, 20)
 	header_title.add_theme_font_size_override("font_size", FONT_SIZE_SMALL)
 	header_title.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
 	container.add_child(header_title)
+
+	header_status = Label.new()
+	header_status.text = "Status"
+	header_status.position = Vector2(panel_x + 380, y)
+	header_status.size = Vector2(50, 20)
+	header_status.add_theme_font_size_override("font_size", FONT_SIZE_SMALL)
+	header_status.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
+	container.add_child(header_status)
+
+	header_fire = Label.new()
+	header_fire.text = "Fire"
+	header_fire.position = Vector2(panel_x + 445, y)
+	header_fire.size = Vector2(40, 20)
+	header_fire.add_theme_font_size_override("font_size", FONT_SIZE_SMALL)
+	header_fire.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
+	container.add_child(header_fire)
 
 func show_roster(agent_roster: AgentRoster) -> void:
 	roster = agent_roster
@@ -207,11 +235,12 @@ func _populate_rows() -> void:
 
 func _create_agent_row(profile: AgentProfile, rank: int) -> Control:
 	var row = Control.new()
-	row.custom_minimum_size = Vector2(PANEL_WIDTH - 20, ROW_HEIGHT)
+	var row_width = PANEL_WIDTH - 20
+	row.custom_minimum_size = Vector2(row_width, ROW_HEIGHT)
 
 	# Row background (alternating)
 	var row_bg = ColorRect.new()
-	row_bg.size = Vector2(PANEL_WIDTH - 20, ROW_HEIGHT - 2)
+	row_bg.size = Vector2(row_width, ROW_HEIGHT - 2)
 	row_bg.position = Vector2(0, 0)
 	row_bg.color = OfficePalette.GRUVBOX_BG1 if rank % 2 == 0 else OfficePalette.GRUVBOX_BG
 	row.add_child(row_bg)
@@ -219,7 +248,7 @@ func _create_agent_row(profile: AgentProfile, rank: int) -> Control:
 	# Make row clickable
 	var click_button = Button.new()
 	click_button.flat = true
-	click_button.size = Vector2(PANEL_WIDTH - 20, ROW_HEIGHT - 2)
+	click_button.size = Vector2(row_width, ROW_HEIGHT - 2)
 	click_button.position = Vector2(0, 0)
 	click_button.pressed.connect(func(): agent_selected.emit(profile.id))
 	row.add_child(click_button)
@@ -238,7 +267,7 @@ func _create_agent_row(profile: AgentProfile, rank: int) -> Control:
 	var name_label = Label.new()
 	name_label.text = profile.agent_name
 	name_label.position = Vector2(30, 8)
-	name_label.size = Vector2(100, 20)
+	name_label.size = Vector2(90, 20)
 	name_label.add_theme_font_size_override("font_size", FONT_SIZE_ROW)
 	name_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT)
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -247,8 +276,8 @@ func _create_agent_row(profile: AgentProfile, rank: int) -> Control:
 	# Level
 	var level_label = Label.new()
 	level_label.text = "%d" % profile.level
-	level_label.position = Vector2(135, 8)
-	level_label.size = Vector2(60, 20)
+	level_label.position = Vector2(120, 8)
+	level_label.size = Vector2(50, 20)
 	level_label.add_theme_font_size_override("font_size", FONT_SIZE_ROW)
 	level_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_AQUA)
 	level_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -257,8 +286,8 @@ func _create_agent_row(profile: AgentProfile, rank: int) -> Control:
 	# XP
 	var xp_label = Label.new()
 	xp_label.text = "%d" % profile.xp
-	xp_label.position = Vector2(200, 8)
-	xp_label.size = Vector2(60, 20)
+	xp_label.position = Vector2(170, 8)
+	xp_label.size = Vector2(50, 20)
 	xp_label.add_theme_font_size_override("font_size", FONT_SIZE_ROW)
 	xp_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_YELLOW)
 	xp_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -267,7 +296,7 @@ func _create_agent_row(profile: AgentProfile, rank: int) -> Control:
 	# Tasks
 	var tasks_label = Label.new()
 	tasks_label.text = "%d" % profile.tasks_completed
-	tasks_label.position = Vector2(265, 8)
+	tasks_label.position = Vector2(220, 8)
 	tasks_label.size = Vector2(50, 20)
 	tasks_label.add_theme_font_size_override("font_size", FONT_SIZE_ROW)
 	tasks_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_GREEN)
@@ -277,12 +306,34 @@ func _create_agent_row(profile: AgentProfile, rank: int) -> Control:
 	# Title (agent title like "Junior", "Senior", etc.)
 	var agent_title_label = Label.new()
 	agent_title_label.text = profile.get_title()
-	agent_title_label.position = Vector2(350, 8)
-	agent_title_label.size = Vector2(100, 20)
+	agent_title_label.position = Vector2(285, 8)
+	agent_title_label.size = Vector2(90, 20)
 	agent_title_label.add_theme_font_size_override("font_size", FONT_SIZE_SMALL)
 	agent_title_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_PURPLE)
 	agent_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(agent_title_label)
+
+	var is_working = roster and roster.is_working(profile.id)
+	var status_label = Label.new()
+	status_label.text = "Busy" if is_working else "Idle"
+	status_label.position = Vector2(380, 8)
+	status_label.size = Vector2(50, 20)
+	status_label.add_theme_font_size_override("font_size", FONT_SIZE_SMALL)
+	status_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_RED_BRIGHT if is_working else OfficePalette.GRUVBOX_GREEN)
+	status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(status_label)
+
+	# Fire button
+	var fire_button = Button.new()
+	fire_button.size = Vector2(44, 20)
+	fire_button.position = Vector2(row_width - 50, 8)
+	fire_button.add_theme_font_size_override("font_size", FONT_SIZE_SMALL)
+	fire_button.text = "Fire"
+	if is_working:
+		fire_button.disabled = true
+	else:
+		fire_button.pressed.connect(func(): _show_fire_confirm(profile.id, profile.agent_name))
+	row.add_child(fire_button)
 
 	return row
 
@@ -307,14 +358,25 @@ func _resize_panel() -> void:
 	var header_y = panel_y + 45
 	header_rank.position = Vector2(panel_x + 15, header_y)
 	header_name.position = Vector2(panel_x + 40, header_y)
-	header_level.position = Vector2(panel_x + 145, header_y)
-	header_xp.position = Vector2(panel_x + 210, header_y)
-	header_tasks.position = Vector2(panel_x + 275, header_y)
-	header_title.position = Vector2(panel_x + 360, header_y)
+	header_level.position = Vector2(panel_x + 130, header_y)
+	header_xp.position = Vector2(panel_x + 180, header_y)
+	header_tasks.position = Vector2(panel_x + 230, header_y)
+	header_title.position = Vector2(panel_x + 285, header_y)
+	if header_status:
+		header_status.position = Vector2(panel_x + 380, header_y)
+	if header_fire:
+		header_fire.position = Vector2(panel_x + 445, header_y)
 	header_divider.position = Vector2(panel_x + 10, header_y + 20)
 
 	scroll_container.position = Vector2(panel_x + 10, header_y + 25)
 	scroll_container.size = Vector2(PANEL_WIDTH - 20, panel_height - HEADER_HEIGHT)
+
+	if fire_confirm_panel:
+		var confirm_size = fire_confirm_panel.size
+		fire_confirm_panel.position = Vector2(
+			(OfficeConstants.SCREEN_WIDTH - confirm_size.x) / 2,
+			(OfficeConstants.SCREEN_HEIGHT - confirm_size.y) / 2
+		)
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey:
@@ -331,3 +393,75 @@ func _input(event: InputEvent) -> void:
 			if not panel_rect.has_point(event.position):
 				close_requested.emit()
 				get_viewport().set_input_as_handled()
+
+func _ensure_fire_confirm() -> void:
+	if fire_confirm_overlay:
+		return
+
+	fire_confirm_overlay = Control.new()
+	fire_confirm_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	fire_confirm_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	fire_confirm_overlay.visible = false
+	add_child(fire_confirm_overlay)
+
+	var overlay_bg = ColorRect.new()
+	overlay_bg.size = Vector2(OfficeConstants.SCREEN_WIDTH, OfficeConstants.SCREEN_HEIGHT)
+	overlay_bg.color = Color(0, 0, 0, 0.6)
+	overlay_bg.mouse_filter = Control.MOUSE_FILTER_STOP
+	fire_confirm_overlay.add_child(overlay_bg)
+
+	var panel_size = Vector2(260, 120)
+	fire_confirm_panel = ColorRect.new()
+	fire_confirm_panel.size = panel_size
+	fire_confirm_panel.color = OfficePalette.GRUVBOX_BG
+	fire_confirm_panel.position = Vector2(
+		(OfficeConstants.SCREEN_WIDTH - panel_size.x) / 2,
+		(OfficeConstants.SCREEN_HEIGHT - panel_size.y) / 2
+	)
+	fire_confirm_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	fire_confirm_overlay.add_child(fire_confirm_panel)
+
+	var border = ColorRect.new()
+	border.size = panel_size + Vector2(4, 4)
+	border.position = Vector2(-2, -2)
+	border.color = OfficePalette.GRUVBOX_RED_BRIGHT
+	border.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fire_confirm_panel.add_child(border)
+
+	fire_confirm_label = Label.new()
+	fire_confirm_label.position = Vector2(10, 16)
+	fire_confirm_label.size = Vector2(panel_size.x - 20, 40)
+	fire_confirm_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	fire_confirm_label.add_theme_font_size_override("font_size", FONT_SIZE_ROW)
+	fire_confirm_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT)
+	fire_confirm_panel.add_child(fire_confirm_label)
+
+	var cancel_button = Button.new()
+	cancel_button.text = "Cancel"
+	cancel_button.position = Vector2(30, 70)
+	cancel_button.size = Vector2(90, 28)
+	cancel_button.pressed.connect(_hide_fire_confirm)
+	fire_confirm_panel.add_child(cancel_button)
+
+	var confirm_button = Button.new()
+	confirm_button.text = "Fire"
+	confirm_button.position = Vector2(panel_size.x - 120, 70)
+	confirm_button.size = Vector2(90, 28)
+	confirm_button.pressed.connect(_confirm_fire_agent)
+	fire_confirm_panel.add_child(confirm_button)
+
+func _show_fire_confirm(agent_id: int, agent_name: String) -> void:
+	_ensure_fire_confirm()
+	fire_confirm_agent_id = agent_id
+	fire_confirm_label.text = "Fire %s?" % agent_name
+	fire_confirm_overlay.visible = true
+
+func _hide_fire_confirm() -> void:
+	fire_confirm_agent_id = -1
+	if fire_confirm_overlay:
+		fire_confirm_overlay.visible = false
+
+func _confirm_fire_agent() -> void:
+	if fire_confirm_agent_id >= 0:
+		agent_fired.emit(fire_confirm_agent_id)
+	_hide_fire_confirm()

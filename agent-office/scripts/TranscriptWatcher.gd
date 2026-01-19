@@ -4,6 +4,8 @@ class_name TranscriptWatcher
 signal event_received(event_data: Dictionary)
 
 const CLAUDE_PROJECTS_DIR = "/.claude/projects"
+const CODEX_SESSIONS_DIR = "/.codex/sessions"
+const CODEX_MAX_SCAN_DEPTH = 3  # root + YYYY/MM/DD
 const POLL_INTERVAL = OfficeConstants.TRANSCRIPT_POLL_INTERVAL
 const SCAN_INTERVAL = 1.0  # seconds - how often to scan for new sessions (fast to catch subagent sessions)
 const ACTIVE_THRESHOLD = 300  # seconds - consider sessions active if modified within this time (longer than SESSION_INACTIVE_TIMEOUT)
@@ -37,9 +39,15 @@ func _process(delta: float) -> void:
 		scan_for_sessions()
 
 func scan_for_sessions() -> void:
+	var current_time = Time.get_unix_time_from_system()
+
+	_scan_claude_sessions(current_time)
+	_scan_codex_sessions(current_time)
+	_remove_stale_sessions(current_time)
+
+func _scan_claude_sessions(current_time: float) -> void:
 	var home_dir = OS.get_environment("HOME")
 	var projects_dir = home_dir + CLAUDE_PROJECTS_DIR
-	var current_time = Time.get_unix_time_from_system()
 
 	var dir = DirAccess.open(projects_dir)
 	if not dir:
@@ -71,6 +79,44 @@ func scan_for_sessions() -> void:
 		subdir_name = dir.get_next()
 	dir.list_dir_end()
 
+func _scan_codex_sessions(current_time: float) -> void:
+	var sessions_dir = _get_codex_sessions_dir()
+	var dir = DirAccess.open(sessions_dir)
+	if not dir:
+		return
+	_scan_jsonl_recursive(sessions_dir, current_time, CODEX_MAX_SCAN_DEPTH)
+
+func _scan_jsonl_recursive(dir_path: String, current_time: float, depth: int) -> void:
+	if depth < 0:
+		return
+	var dir = DirAccess.open(dir_path)
+	if not dir:
+		return
+	dir.list_dir_begin()
+	var entry_name = dir.get_next()
+	while entry_name != "":
+		if entry_name.begins_with("."):
+			entry_name = dir.get_next()
+			continue
+		var entry_path = dir_path + "/" + entry_name
+		if dir.current_is_dir():
+			_scan_jsonl_recursive(entry_path, current_time, depth - 1)
+		elif entry_name.ends_with(".jsonl"):
+			var mod_time = FileAccess.get_modified_time(entry_path)
+			if current_time - mod_time < ACTIVE_THRESHOLD:
+				if not watched_sessions.has(entry_path):
+					start_watching_session(entry_path)
+		entry_name = dir.get_next()
+	dir.list_dir_end()
+
+func _get_codex_sessions_dir() -> String:
+	var codex_home = OS.get_environment("CODEX_HOME")
+	if codex_home.is_empty():
+		var home_dir = OS.get_environment("HOME")
+		codex_home = home_dir + "/.codex"
+	return codex_home + "/sessions"
+
+func _remove_stale_sessions(current_time: float) -> void:
 	# Remove stale sessions (not modified recently AND no pending agents)
 	var to_remove: Array[String] = []
 	for path in watched_sessions.keys():
@@ -82,7 +128,8 @@ func scan_for_sessions() -> void:
 
 	for path in to_remove:
 		print("[TranscriptWatcher] Stopped watching inactive: %s" % path.get_file())
-		var session_id = path.get_file().get_basename()
+		var session_id = _derive_session_id(path)
+		_cleanup_pending_for_session(path)
 		watched_sessions.erase(path)
 		# Emit session_end so orchestrator can take a break
 		event_received.emit({
@@ -105,7 +152,7 @@ func start_watching_session(file_path: String) -> void:
 		print("[TranscriptWatcher] Watching: %s" % file_path.get_file())
 
 		# Emit session_start event so orchestrator (Claude) appears (deferred to ensure signal is connected)
-		var session_id = file_path.get_file().get_basename()
+		var session_id = _derive_session_id(file_path)
 		call_deferred("_emit_session_start", session_id, file_path)
 	else:
 		push_warning("[TranscriptWatcher] Cannot open: %s" % file_path)
@@ -161,6 +208,8 @@ func process_line(line: String, session_path: String = "") -> void:
 	var entry = json.data
 	if not entry is Dictionary:
 		return
+	if _process_codex_entry(entry, session_path):
+		return
 
 	# Check for /exit or /quit commands in user messages
 	var entry_type = entry.get("type", "")
@@ -171,7 +220,7 @@ func process_line(line: String, session_path: String = "") -> void:
 			if user_content is String:
 				if user_content.contains("<command-name>/exit</command-name>") or \
 				   user_content.contains("<command-name>/quit</command-name>"):
-					var session_id = session_path.get_file().get_basename()
+					var session_id = _derive_session_id(session_path)
 					print("[TranscriptWatcher] EXIT detected for session: %s" % session_id)
 					event_received.emit({
 						"event": "session_exit",
@@ -199,6 +248,59 @@ func process_line(line: String, session_path: String = "") -> void:
 			process_tool_use(item, entry, session_path)
 		elif item_type == "tool_result":
 			process_tool_result(item, entry)
+
+func _process_codex_entry(entry: Dictionary, session_path: String) -> bool:
+	var entry_type = entry.get("type", "")
+	if entry_type == "response_item":
+		var payload = entry.get("payload", {})
+		if not payload is Dictionary:
+			return true
+		var payload_type = payload.get("type", "")
+		if payload_type == "function_call":
+			_process_codex_tool_use(payload, entry, session_path)
+		elif payload_type == "function_call_output":
+			_process_codex_tool_result(payload, entry)
+		return true
+	if entry_type == "session_meta" or entry_type == "event_msg" or entry_type == "turn_context":
+		return true
+	return false
+
+func _process_codex_tool_use(payload: Dictionary, entry: Dictionary, session_path: String) -> void:
+	var tool_name = payload.get("name", "")
+	var tool_id = payload.get("call_id", "")
+	var tool_input = _parse_codex_tool_input(payload.get("arguments", {}))
+	var timestamp = entry.get("timestamp", "")
+
+	var item = {
+		"name": tool_name,
+		"id": tool_id,
+		"input": tool_input
+	}
+	var normalized_entry = {"timestamp": timestamp}
+	process_tool_use(item, normalized_entry, session_path)
+
+func _process_codex_tool_result(payload: Dictionary, entry: Dictionary) -> void:
+	var tool_use_id = payload.get("call_id", "")
+	var timestamp = entry.get("timestamp", "")
+	var output = payload.get("output", "")
+
+	var item = {
+		"tool_use_id": tool_use_id,
+		"content": output,
+		"is_error": false
+	}
+	var normalized_entry = {"timestamp": timestamp}
+	process_tool_result(item, normalized_entry)
+
+func _parse_codex_tool_input(raw_args) -> Dictionary:
+	if raw_args is Dictionary:
+		return raw_args
+	if raw_args is String:
+		var json = JSON.new()
+		if json.parse(raw_args) == OK and json.data is Dictionary:
+			return json.data
+		return {"raw": raw_args}
+	return {"raw": str(raw_args)}
 
 func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String = "") -> void:
 	var tool_name = item.get("name", "")
@@ -239,11 +341,9 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 		# Build tool description for display
 		var tool_desc = ""
 		match tool_name:
-			"Bash":
+			"Bash", "shell":
 				tool_desc = str(tool_input.get("description", tool_input.get("command", "")))
-			"Read":
-				tool_desc = str(tool_input.get("file_path", ""))
-			"Edit", "Write":
+			"Read", "Edit", "Write":
 				tool_desc = str(tool_input.get("file_path", ""))
 			"Glob", "Grep":
 				tool_desc = str(tool_input.get("pattern", ""))
@@ -329,6 +429,31 @@ func session_has_pending_agents(session_path: String) -> bool:
 		if agent_info.get("session_path", "") == session_path:
 			return true
 	return false
+
+func _cleanup_pending_for_session(session_path: String) -> void:
+	var agent_keys: Array = []
+	for tool_id in pending_agents.keys():
+		var agent_info = pending_agents[tool_id]
+		if agent_info.get("session_path", "") == session_path:
+			agent_keys.append(tool_id)
+	for tool_id in agent_keys:
+		pending_agents.erase(tool_id)
+
+	var tool_keys: Array = []
+	for tool_id in pending_tools.keys():
+		var tool_info = pending_tools[tool_id]
+		if tool_info.get("session_path", "") == session_path:
+			tool_keys.append(tool_id)
+	for tool_id in tool_keys:
+		pending_tools.erase(tool_id)
+
+func _derive_session_id(file_path: String) -> String:
+	var basename = file_path.get_file().get_basename()
+	if basename.begins_with("rollout-"):
+		var trimmed = basename.substr(8)
+		if not trimmed.is_empty():
+			return trimmed
+	return basename
 
 func get_watched_count() -> int:
 	return watched_sessions.size()

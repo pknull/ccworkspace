@@ -3,6 +3,8 @@ class_name OfficeVisualFactory
 # Factory class for creating office furniture and decorations
 # Extracts visual creation logic from OfficeManager for better separation of concerns
 
+const WallClockScript = preload("res://scripts/WallClock.gd")
+
 static func create_water_cooler(draggable_script: Script) -> Node2D:
 	var cooler = draggable_script.new()
 	cooler.item_name = "water_cooler"
@@ -232,6 +234,50 @@ static func create_shredder(draggable_script: Script) -> Node2D:
 
 	return shredder
 
+static func create_cat_bed(draggable_script: Script) -> Node2D:
+	var bed = draggable_script.new()
+	bed.item_name = "cat_bed"
+	bed.set_click_area(Rect2(-30, -18, 60, 36))
+	bed.use_dynamic_z_index = false
+	bed.z_index = OfficeConstants.Z_CAT - 5
+
+	# Shadow
+	var shadow = ColorRect.new()
+	shadow.size = Vector2(46, 10)
+	shadow.position = Vector2(-23, 10)
+	shadow.color = OfficePalette.SHADOW
+	bed.add_child(shadow)
+
+	# Bed base
+	var base = ColorRect.new()
+	base.size = Vector2(60, 28)
+	base.position = Vector2(-30, -14)
+	base.color = OfficePalette.WOOD_DOOR
+	bed.add_child(base)
+
+	# Inner rim
+	var rim = ColorRect.new()
+	rim.size = Vector2(56, 24)
+	rim.position = Vector2(-28, -12)
+	rim.color = OfficePalette.WOOD_DOOR_LIGHT
+	bed.add_child(rim)
+
+	# Cushion
+	var cushion = ColorRect.new()
+	cushion.size = Vector2(50, 18)
+	cushion.position = Vector2(-25, -9)
+	cushion.color = OfficePalette.GRUVBOX_RED_FADED
+	bed.add_child(cushion)
+
+	# Pillow
+	var pillow = ColorRect.new()
+	pillow.size = Vector2(16, 10)
+	pillow.position = Vector2(-8, -7)
+	pillow.color = OfficePalette.GRUVBOX_LIGHT2
+	bed.add_child(pillow)
+
+	return bed
+
 static func create_meeting_table(draggable_script: Script) -> Node2D:
 	var table = draggable_script.new()
 	table.item_name = "meeting_table"
@@ -342,48 +388,15 @@ static func create_door(parent: Node2D, pos: Vector2) -> Node2D:
 
 	return door
 
-static func create_window(parent: Node2D, wx: float, window_clouds: Array) -> Node2D:
+static func create_window_frame(parent: Node2D, wx: float) -> Node2D:
+	# Window frame only - sky/clouds/foliage are now separate full-width layers
 	var window = Node2D.new()
 	window.position = Vector2(wx, 8)
 	parent.add_child(window)
 
-	# Sky background (bright blue to be clearly visible)
-	var sky = ColorRect.new()
-	sky.size = Vector2(OfficeConstants.WINDOW_WIDTH, OfficeConstants.WINDOW_HEIGHT)
-	sky.position = Vector2(-OfficeConstants.WINDOW_WIDTH / 2, 0)
-	sky.color = OfficePalette.SKY_BLUE
-	sky.z_index = OfficeConstants.Z_WINDOW_SKY
-	window.add_child(sky)
-
-	# Clouds (multiple per window, animated)
-	for c in range(2):
-		var cloud = ColorRect.new()
-		var cloud_width = 15 + randi() % 15
-		cloud.size = Vector2(cloud_width, 4 + randi() % 4)
-		var start_x = -35 + randi() % 50
-		cloud.position = Vector2(start_x, 4 + c * 12 + randi() % 6)
-		cloud.color = OfficePalette.CLOUD_WHITE
-		cloud.z_index = OfficeConstants.Z_WINDOW_CLOUD
-		window.add_child(cloud)
-		# Track for animation
-		window_clouds.append({
-			"cloud": cloud,
-			"window_x": wx,
-			"start_x": start_x,
-			"speed": OfficeConstants.CLOUD_SPEED_MIN + randf() * (OfficeConstants.CLOUD_SPEED_MAX - OfficeConstants.CLOUD_SPEED_MIN)
-		})
-
-	# Trees/bushes at bottom
-	var tree = ColorRect.new()
-	tree.size = Vector2(15, 12)
-	tree.position = Vector2(-25 + randi() % 30, 30)
-	tree.color = OfficePalette.TREE_GREEN
-	tree.z_index = OfficeConstants.Z_WINDOW_CLOUD
-	window.add_child(tree)
-
-	# Window frame (on top of everything)
 	var frame_thickness = OfficeConstants.WINDOW_FRAME_THICKNESS
 
+	# Top frame
 	var frame_top = ColorRect.new()
 	frame_top.size = Vector2(OfficeConstants.WINDOW_WIDTH + frame_thickness, frame_thickness)
 	frame_top.position = Vector2(-OfficeConstants.WINDOW_WIDTH / 2 - 2, -2)
@@ -391,6 +404,7 @@ static func create_window(parent: Node2D, wx: float, window_clouds: Array) -> No
 	frame_top.z_index = OfficeConstants.Z_WINDOW_FRAME
 	window.add_child(frame_top)
 
+	# Bottom frame
 	var frame_bottom = ColorRect.new()
 	frame_bottom.size = Vector2(OfficeConstants.WINDOW_WIDTH + frame_thickness, frame_thickness)
 	frame_bottom.position = Vector2(-OfficeConstants.WINDOW_WIDTH / 2 - 2, OfficeConstants.WINDOW_HEIGHT)
@@ -398,6 +412,7 @@ static func create_window(parent: Node2D, wx: float, window_clouds: Array) -> No
 	frame_bottom.z_index = OfficeConstants.Z_WINDOW_FRAME
 	window.add_child(frame_bottom)
 
+	# Left frame
 	var frame_left = ColorRect.new()
 	frame_left.size = Vector2(frame_thickness, OfficeConstants.WINDOW_HEIGHT + 6)
 	frame_left.position = Vector2(-OfficeConstants.WINDOW_WIDTH / 2 - 2, -2)
@@ -405,6 +420,7 @@ static func create_window(parent: Node2D, wx: float, window_clouds: Array) -> No
 	frame_left.z_index = OfficeConstants.Z_WINDOW_FRAME
 	window.add_child(frame_left)
 
+	# Right frame
 	var frame_right = ColorRect.new()
 	frame_right.size = Vector2(frame_thickness, OfficeConstants.WINDOW_HEIGHT + 6)
 	frame_right.position = Vector2(OfficeConstants.WINDOW_WIDTH / 2 - 2, -2)
@@ -412,28 +428,13 @@ static func create_window(parent: Node2D, wx: float, window_clouds: Array) -> No
 	frame_right.z_index = OfficeConstants.Z_WINDOW_FRAME
 	window.add_child(frame_right)
 
-	# Window divider
+	# Center divider
 	var divider = ColorRect.new()
 	divider.size = Vector2(2, OfficeConstants.WINDOW_HEIGHT)
 	divider.position = Vector2(-1, 0)
 	divider.color = OfficePalette.WOOD_FRAME
 	divider.z_index = OfficeConstants.Z_WINDOW_FRAME
 	window.add_child(divider)
-
-	# Wall masking pieces on each side to hide cloud overflow
-	var mask_left = ColorRect.new()
-	mask_left.size = Vector2(50, 70)
-	mask_left.position = Vector2(-92, -10)
-	mask_left.color = OfficePalette.WALL_BEIGE
-	mask_left.z_index = OfficeConstants.Z_WINDOW_MASK
-	window.add_child(mask_left)
-
-	var mask_right = ColorRect.new()
-	mask_right.size = Vector2(50, 70)
-	mask_right.position = Vector2(42, -10)
-	mask_right.color = OfficePalette.WALL_BEIGE
-	mask_right.z_index = OfficeConstants.Z_WINDOW_MASK
-	window.add_child(mask_right)
 
 	return window
 
@@ -447,15 +448,17 @@ static func create_taskboard(draggable_script: Script) -> Node2D:
 	taskboard.drag_bounds_min = Vector2(30, 100)
 	taskboard.drag_bounds_max = Vector2(1100, 520)  # Can go on floor, but leave room for legs
 
-	# Easel legs (behind frame)
+	# Easel legs (use absolute z_index so agents can appear in front)
 	var leg_color = OfficePalette.TASKBOARD_EASEL_LEG
+	var leg_z = OfficeConstants.Z_TASKBOARD_LEGS
 
 	# Left leg
 	var left_leg = ColorRect.new()
 	left_leg.size = Vector2(6, 70)
 	left_leg.position = Vector2(25, 125)
 	left_leg.color = leg_color
-	left_leg.z_index = -1
+	left_leg.z_as_relative = false
+	left_leg.z_index = leg_z
 	taskboard.add_child(left_leg)
 
 	# Right leg
@@ -463,7 +466,8 @@ static func create_taskboard(draggable_script: Script) -> Node2D:
 	right_leg.size = Vector2(6, 70)
 	right_leg.position = Vector2(139, 125)
 	right_leg.color = leg_color
-	right_leg.z_index = -1
+	right_leg.z_as_relative = false
+	right_leg.z_index = leg_z
 	taskboard.add_child(right_leg)
 
 	# Cross brace between legs
@@ -471,7 +475,8 @@ static func create_taskboard(draggable_script: Script) -> Node2D:
 	brace.size = Vector2(100, 4)
 	brace.position = Vector2(38, 165)
 	brace.color = leg_color
-	brace.z_index = -1
+	brace.z_as_relative = false
+	brace.z_index = leg_z
 	taskboard.add_child(brace)
 
 	# Whiteboard frame (silver/aluminum)
@@ -538,7 +543,7 @@ static func create_title_sign(parent: Node2D) -> void:
 	parent.add_child(sign_bg)
 
 	var title = Label.new()
-	title.text = "Claude Office"
+	title.text = "Inference Inc."
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.position = Vector2(560, 15)
 	title.size = Vector2(160, 30)
@@ -575,21 +580,163 @@ static func create_floor(parent: Node2D) -> void:
 		hline.z_index = OfficeConstants.Z_FLOOR_DETAIL
 		parent.add_child(hline)
 
-static func create_walls(parent: Node2D) -> void:
-	# Back wall (top) - extends off sides, meets seam at y=68
-	var wall = ColorRect.new()
-	wall.size = Vector2(OfficeConstants.SCREEN_WIDTH, OfficeConstants.BACK_WALL_HEIGHT)
-	wall.position = Vector2(0, 0)
-	wall.color = OfficePalette.WALL_BEIGE
-	wall.z_index = OfficeConstants.Z_WALL
-	parent.add_child(wall)
+# =============================================================================
+# SKY AND BACKGROUND LAYERS (behind wall, visible through window holes)
+# =============================================================================
+
+static func create_sky_layer(parent: Node2D, window_skies: Array) -> Node2D:
+	var sky_layer = Node2D.new()
+	sky_layer.name = "SkyLayer"
+	sky_layer.z_index = OfficeConstants.Z_SKY
+	parent.add_child(sky_layer)
+
+	# Full-width sky backdrop (behind wall, visible through window holes)
+	var sky = ColorRect.new()
+	sky.name = "SkyBackground"
+	sky.size = Vector2(OfficeConstants.SCREEN_WIDTH, OfficeConstants.BACK_WALL_HEIGHT)
+	sky.position = Vector2(0, 0)
+	sky.color = OfficePalette.SKY_BLUE
+	sky_layer.add_child(sky)
+
+	# Track for day/night cycle
+	window_skies.append(sky)
+
+	return sky_layer
+
+static func create_celestial_layer(parent: Node2D) -> Node2D:
+	var celestial = Node2D.new()
+	celestial.name = "CelestialLayer"
+	celestial.z_index = OfficeConstants.Z_CELESTIAL
+	parent.add_child(celestial)
+
+	# Sun (shown during day, positioned based on time)
+	var sun = ColorRect.new()
+	sun.name = "Sun"
+	sun.size = Vector2(20, 20)
+	sun.position = Vector2(200, 15)  # Default position
+	sun.color = OfficePalette.SUN_YELLOW
+	celestial.add_child(sun)
+
+	# Moon (hidden during day)
+	var moon = ColorRect.new()
+	moon.name = "Moon"
+	moon.size = Vector2(16, 16)
+	moon.position = Vector2(1000, 20)
+	moon.color = OfficePalette.MOON_SILVER
+	moon.visible = false  # Hidden by default (day)
+	celestial.add_child(moon)
+
+	return celestial
+
+static func create_cloud_layer(parent: Node2D, window_clouds: Array) -> Node2D:
+	var cloud_layer = Node2D.new()
+	cloud_layer.name = "CloudLayer"
+	cloud_layer.z_index = OfficeConstants.Z_CLOUDS
+	parent.add_child(cloud_layer)
+
+	# Full-width clouds (8 clouds spanning the entire sky width)
+	for i in range(8):
+		var cloud = ColorRect.new()
+		var cloud_width = 20 + randi() % 30
+		var cloud_height = 5 + randi() % 6
+		cloud.size = Vector2(cloud_width, cloud_height)
+		cloud.position = Vector2(randi() % 1280, 8 + randi() % 40)
+		cloud.color = OfficePalette.CLOUD_WHITE
+		cloud_layer.add_child(cloud)
+
+		# Track for animation (now wraps at screen edges, not window edges)
+		window_clouds.append({
+			"cloud": cloud,
+			"speed": OfficeConstants.CLOUD_SPEED_MIN + randf() * (OfficeConstants.CLOUD_SPEED_MAX - OfficeConstants.CLOUD_SPEED_MIN)
+		})
+
+	return cloud_layer
+
+static func create_foliage_layer(parent: Node2D) -> Node2D:
+	var foliage = Node2D.new()
+	foliage.name = "FoliageLayer"
+	foliage.z_index = OfficeConstants.Z_FOLIAGE
+	parent.add_child(foliage)
+
+	# Static tree silhouettes at bottom of sky area (visible through windows)
+	# Create a row of trees across the full width
+	var tree_positions = [50, 150, 280, 420, 550, 700, 850, 980, 1100, 1200]
+	for tx in tree_positions:
+		var tree = ColorRect.new()
+		var tree_width = 20 + randi() % 25
+		var tree_height = 15 + randi() % 10
+		tree.size = Vector2(tree_width, tree_height)
+		tree.position = Vector2(tx, 55 - tree_height)  # Bottom of sky area
+		tree.color = OfficePalette.TREE_GREEN
+		foliage.add_child(tree)
+
+	return foliage
+
+# =============================================================================
+# WALLS (with transparent holes for windows)
+# =============================================================================
+
+static func create_walls(parent: Node2D, window_positions: Array = [140, 380, 900, 1140]) -> void:
+	# Back wall segments (with gaps for windows)
+	# Windows are 80px wide, positioned by center X
+	var wall_y = 0
+	var wall_height = OfficeConstants.BACK_WALL_HEIGHT
+	var window_width = OfficeConstants.WINDOW_WIDTH
+	var half_window = window_width / 2
+
+	# Calculate wall segments between windows
+	var segments: Array = []
+	var prev_end = 0
+
+	for wx in window_positions:
+		var window_start = wx - half_window
+		var window_end = wx + half_window
+		if window_start > prev_end:
+			segments.append({"x": prev_end, "width": window_start - prev_end})
+		prev_end = window_end
+
+	# Final segment after last window
+	if prev_end < OfficeConstants.SCREEN_WIDTH:
+		segments.append({"x": prev_end, "width": OfficeConstants.SCREEN_WIDTH - prev_end})
+
+	# Create wall pieces (horizontal segments between windows)
+	for seg in segments:
+		var wall_piece = ColorRect.new()
+		wall_piece.size = Vector2(seg.width, wall_height)
+		wall_piece.position = Vector2(seg.x, wall_y)
+		wall_piece.color = OfficePalette.WALL_BEIGE
+		wall_piece.z_index = OfficeConstants.Z_WALL
+		parent.add_child(wall_piece)
+
+	# Add wall strips above and below each window
+	# Window frames start at Y=8 and are WINDOW_HEIGHT tall (44px)
+	# Wall is 76px tall, so we need strips at top (0-6) and bottom (54-76)
+	var window_top_y = 6  # Where window frame starts
+	var window_bottom_y = window_top_y + OfficeConstants.WINDOW_HEIGHT + 4  # Where window frame ends
+
+	for wx in window_positions:
+		# Wall strip above window
+		var top_strip = ColorRect.new()
+		top_strip.size = Vector2(window_width + 8, window_top_y)
+		top_strip.position = Vector2(wx - half_window - 4, 0)
+		top_strip.color = OfficePalette.WALL_BEIGE
+		top_strip.z_index = OfficeConstants.Z_WALL
+		parent.add_child(top_strip)
+
+		# Wall strip below window
+		var bottom_strip = ColorRect.new()
+		bottom_strip.size = Vector2(window_width + 8, wall_height - window_bottom_y)
+		bottom_strip.position = Vector2(wx - half_window - 4, window_bottom_y)
+		bottom_strip.color = OfficePalette.WALL_BEIGE
+		bottom_strip.z_index = OfficeConstants.Z_WALL
+		parent.add_child(bottom_strip)
 
 	# Back wall-to-floor seam - dark border at bottom of back wall
 	var back_wall_seam = ColorRect.new()
 	back_wall_seam.size = Vector2(OfficeConstants.SCREEN_WIDTH, 8)
 	back_wall_seam.position = Vector2(0, OfficeConstants.BACK_WALL_SEAM_Y)
 	back_wall_seam.color = OfficePalette.WALL_SEAM_DARK
-	back_wall_seam.z_index = OfficeConstants.Z_SEAM
+	back_wall_seam.z_index = OfficeConstants.Z_WALL_SEAM
 	parent.add_child(back_wall_seam)
 
 	# Wall-to-floor seam - dark border showing the edge where wall meets floor
@@ -597,7 +744,7 @@ static func create_walls(parent: Node2D) -> void:
 	wall_floor_seam.size = Vector2(OfficeConstants.SCREEN_WIDTH, 8)
 	wall_floor_seam.position = Vector2(0, OfficeConstants.BOTTOM_WALL_Y)
 	wall_floor_seam.color = OfficePalette.WALL_SEAM_DARK
-	wall_floor_seam.z_index = OfficeConstants.Z_SEAM
+	wall_floor_seam.z_index = OfficeConstants.Z_WALL_SEAM
 	parent.add_child(wall_floor_seam)
 
 	# Bottom wall - same color as back wall
@@ -627,17 +774,22 @@ static func create_status_bar(parent: Node2D) -> Label:
 static func create_vip_photo() -> VIPPhoto:
 	var photo = VIPPhoto.new()
 	photo.position = OfficeConstants.VIP_PHOTO_POSITION
-	photo.z_index = OfficeConstants.Z_WINDOW_FRAME  # Same layer as window frames (wall-mounted)
+	photo.z_index = OfficeConstants.Z_WALL_DECORATION
 	return photo
 
 static func create_roster_clipboard() -> RosterClipboard:
 	var clipboard = RosterClipboard.new()
 	clipboard.position = OfficeConstants.ROSTER_CLIPBOARD_POSITION
-	clipboard.z_index = OfficeConstants.Z_WINDOW_FRAME  # Same layer as window frames (wall-mounted)
+	clipboard.z_index = OfficeConstants.Z_WALL_DECORATION
 	return clipboard
 
 static func create_achievement_board() -> AchievementBoard:
 	var board = AchievementBoard.new()
 	board.position = OfficeConstants.ACHIEVEMENT_BOARD_POSITION
-	board.z_index = OfficeConstants.Z_WINDOW_FRAME  # Same layer as window frames (wall-mounted)
+	board.z_index = OfficeConstants.Z_WALL_DECORATION
 	return board
+
+static func create_wall_clock() -> Node2D:
+	var clock = WallClockScript.new()
+	clock.z_index = OfficeConstants.Z_WALL_DECORATION
+	return clock

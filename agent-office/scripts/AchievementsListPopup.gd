@@ -26,7 +26,7 @@ var achievement_container: VBoxContainer
 const PANEL_WIDTH: float = 450
 const PANEL_MIN_HEIGHT: float = 150
 const PANEL_MAX_HEIGHT: float = 500
-const ROW_HEIGHT: float = 50
+const ROW_HEIGHT: float = 64
 const HEADER_HEIGHT: float = 75  # Title + progress + divider
 
 var panel_height: float = PANEL_MIN_HEIGHT
@@ -40,7 +40,7 @@ const FONT_SIZE_DESC: int = 10
 var achievement_system: AchievementSystem = null
 
 func _init() -> void:
-	layer = 100
+	layer = OfficeConstants.Z_UI_POPUP_LAYER
 
 func _ready() -> void:
 	_create_visuals()
@@ -48,6 +48,7 @@ func _ready() -> void:
 func _create_visuals() -> void:
 	container = Control.new()
 	container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	container.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(container)
 
 	var screen_center = Vector2(OfficeConstants.SCREEN_WIDTH / 2, OfficeConstants.SCREEN_HEIGHT / 2)
@@ -59,6 +60,7 @@ func _create_visuals() -> void:
 	background.size = Vector2(OfficeConstants.SCREEN_WIDTH, OfficeConstants.SCREEN_HEIGHT)
 	background.position = Vector2.ZERO
 	background.color = Color(0, 0, 0, 0.85)
+	background.mouse_filter = Control.MOUSE_FILTER_STOP
 	container.add_child(background)
 
 	# Panel border
@@ -73,6 +75,7 @@ func _create_visuals() -> void:
 	panel.size = Vector2(PANEL_WIDTH, panel_height)
 	panel.position = Vector2(panel_x, panel_y)
 	panel.color = OfficePalette.GRUVBOX_BG
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	container.add_child(panel)
 
 	# Title
@@ -107,11 +110,14 @@ func _create_visuals() -> void:
 	scroll_container.position = Vector2(panel_x + 10, panel_y + 65)
 	scroll_container.size = Vector2(PANEL_WIDTH - 20, panel_height - HEADER_HEIGHT)
 	scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll_container.mouse_filter = Control.MOUSE_FILTER_STOP
 	container.add_child(scroll_container)
 
 	# Achievement container inside scroll
 	achievement_container = VBoxContainer.new()
 	achievement_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	achievement_container.add_theme_constant_override("separation", 4)
+	achievement_container.mouse_filter = Control.MOUSE_FILTER_STOP
 	scroll_container.add_child(achievement_container)
 
 	# Close button
@@ -179,56 +185,82 @@ func _resize_panel() -> void:
 func _create_achievement_row(achievement) -> Control:
 	var row = Control.new()
 	row.custom_minimum_size = Vector2(PANEL_WIDTH - 20, ROW_HEIGHT)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.mouse_filter = Control.MOUSE_FILTER_STOP
 
 	# Row background
 	var row_bg = ColorRect.new()
-	row_bg.size = Vector2(PANEL_WIDTH - 20, ROW_HEIGHT - 4)
+	row_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	row_bg.color = OfficePalette.GRUVBOX_BG1 if achievement.is_unlocked else OfficePalette.GRUVBOX_BG
+	row_bg.z_index = -1
+	row_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(row_bg)
+
+	var content = MarginContainer.new()
+	content.set_anchors_preset(Control.PRESET_FULL_RECT)
+	content.add_theme_constant_override("margin_left", 8)
+	content.add_theme_constant_override("margin_right", 8)
+	content.add_theme_constant_override("margin_top", 6)
+	content.add_theme_constant_override("margin_bottom", 6)
+	row.add_child(content)
+
+	var hbox = HBoxContainer.new()
+	hbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	hbox.add_theme_constant_override("separation", 10)
+	content.add_child(hbox)
 
 	# Icon/status
 	var icon = Label.new()
+	icon.custom_minimum_size = Vector2(24, 20)
+	icon.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	icon.add_theme_font_size_override("font_size", 12)
 	if achievement.is_unlocked:
 		icon.text = "[x]"
 		icon.add_theme_color_override("font_color", OfficePalette.GRUVBOX_GREEN)
 	else:
 		icon.text = "[ ]"
 		icon.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
-	icon.position = Vector2(8, 12)
-	icon.add_theme_font_size_override("font_size", 12)
-	row.add_child(icon)
+	hbox.add_child(icon)
+
+	var text_box = VBoxContainer.new()
+	text_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	text_box.add_theme_constant_override("separation", 2)
+	hbox.add_child(text_box)
 
 	# Name
 	var name_label = Label.new()
 	name_label.text = achievement.name
-	name_label.position = Vector2(40, 6)
-	name_label.size = Vector2(300, 20)
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.clip_text = true
 	name_label.add_theme_font_size_override("font_size", FONT_SIZE_NAME)
 	if achievement.is_unlocked:
 		name_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT)
 	else:
 		name_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
-	row.add_child(name_label)
+	text_box.add_child(name_label)
 
 	# Description
 	var desc_label = Label.new()
 	desc_label.text = achievement.description
-	desc_label.position = Vector2(40, 24)
-	desc_label.size = Vector2(350, 20)
+	desc_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	desc_label.clip_text = true
+	desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	desc_label.add_theme_font_size_override("font_size", FONT_SIZE_DESC)
 	desc_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
-	row.add_child(desc_label)
+	text_box.add_child(desc_label)
 
 	# Unlock date (if unlocked)
 	if achievement.is_unlocked and achievement.unlocked_at:
 		var date_label = Label.new()
 		date_label.text = _format_date(achievement.unlocked_at)
-		date_label.position = Vector2(PANEL_WIDTH - 100, 15)
-		date_label.size = Vector2(70, 16)
+		date_label.custom_minimum_size = Vector2(70, 0)
 		date_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		date_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		date_label.add_theme_font_size_override("font_size", 9)
 		date_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_AQUA)
-		row.add_child(date_label)
+		hbox.add_child(date_label)
 
 	return row
 
@@ -260,4 +292,6 @@ func _input(event: InputEvent) -> void:
 			var panel_rect = Rect2(panel.position.x, panel.position.y, PANEL_WIDTH, panel_height)
 			if not panel_rect.has_point(event.position):
 				close_requested.emit()
+				get_viewport().set_input_as_handled()
+			else:
 				get_viewport().set_input_as_handled()

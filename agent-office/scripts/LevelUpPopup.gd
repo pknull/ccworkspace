@@ -67,12 +67,14 @@ func _create_visuals() -> void:
 	border.size = Vector2(POPUP_WIDTH + 4, POPUP_HEIGHT + 4)
 	border.position = Vector2(-2, -2)
 	border.color = OfficePalette.GRUVBOX_YELLOW
+	border.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(border)
 
 	# Main background
 	background = ColorRect.new()
 	background.size = Vector2(POPUP_WIDTH, POPUP_HEIGHT)
 	background.color = OfficePalette.GRUVBOX_BG1
+	background.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(background)
 
 	# Inner highlight
@@ -80,6 +82,7 @@ func _create_visuals() -> void:
 	highlight.size = Vector2(POPUP_WIDTH - 4, 3)
 	highlight.position = Vector2(2, 2)
 	highlight.color = OfficePalette.GRUVBOX_YELLOW_BRIGHT
+	highlight.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(highlight)
 
 	# Star icon background
@@ -87,6 +90,7 @@ func _create_visuals() -> void:
 	portrait_bg.size = Vector2(44, 44)
 	portrait_bg.position = Vector2(10, 13)
 	portrait_bg.color = OfficePalette.GRUVBOX_YELLOW
+	portrait_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(portrait_bg)
 
 	# Star label
@@ -98,6 +102,7 @@ func _create_visuals() -> void:
 	star_label.size = Vector2(44, 44)
 	star_label.add_theme_font_size_override("font_size", FONT_SIZE_STAR)
 	star_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_BG)
+	star_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(star_label)
 
 	# "LEVEL UP!" header
@@ -106,6 +111,7 @@ func _create_visuals() -> void:
 	header.position = Vector2(64, 8)
 	header.add_theme_font_size_override("font_size", FONT_SIZE_TITLE)
 	header.add_theme_color_override("font_color", OfficePalette.GRUVBOX_YELLOW_BRIGHT)
+	header.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(header)
 
 	# Agent name
@@ -115,6 +121,7 @@ func _create_visuals() -> void:
 	name_label.size = Vector2(POPUP_WIDTH - 74, 20)
 	name_label.add_theme_font_size_override("font_size", FONT_SIZE_NAME)
 	name_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT)
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(name_label)
 
 	# Level text
@@ -123,6 +130,7 @@ func _create_visuals() -> void:
 	level_label.position = Vector2(64, 42)
 	level_label.add_theme_font_size_override("font_size", FONT_SIZE_LEVEL)
 	level_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT3)
+	level_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(level_label)
 
 	# Title text
@@ -131,6 +139,7 @@ func _create_visuals() -> void:
 	title_label.position = Vector2(140, 42)
 	title_label.add_theme_font_size_override("font_size", FONT_SIZE_LEVEL)
 	title_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_AQUA_BRIGHT)
+	title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(title_label)
 
 func _process(delta: float) -> void:

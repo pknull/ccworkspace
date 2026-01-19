@@ -76,11 +76,15 @@ func load_roster() -> void:
 		used_name_indices.append(int(idx))
 
 	# Load each agent profile
+	print("[AgentRoster] Index lists %d agents: %s" % [agent_ids.size(), agent_ids])
 	for agent_id in agent_ids:
 		var profile = _load_agent_profile(int(agent_id))
 		if profile:
 			agents[profile.id] = profile
 			agents_by_name[profile.agent_name] = profile
+			print("[AgentRoster] Loaded: %s (id=%d)" % [profile.agent_name, profile.id])
+		else:
+			print("[AgentRoster] FAILED to load agent id=%d" % agent_id)
 
 	print("[AgentRoster] Loaded %d agents" % agents.size())
 	roster_changed.emit()
@@ -226,6 +230,34 @@ func _assign_available_agent() -> AgentProfile:
 
 func release_agent(agent_id: int) -> void:
 	working_agents.erase(agent_id)
+
+func is_working(agent_id: int) -> bool:
+	return working_agents.has(agent_id)
+
+func fire_agent(agent_id: int) -> bool:
+	if not agents.has(agent_id):
+		return false
+	if working_agents.has(agent_id):
+		push_warning("[AgentRoster] Cannot fire agent %d while working" % agent_id)
+		return false
+
+	var profile = agents[agent_id]
+	agents.erase(agent_id)
+	agents_by_name.erase(profile.agent_name)
+	working_agents.erase(agent_id)
+
+	var name_index = AgentProfile.NAMES.find(profile.agent_name)
+	if name_index != -1 and name_index in used_name_indices:
+		used_name_indices.erase(name_index)
+
+	var path = "%s/agent_%03d.json" % [STABLE_DIR, profile.id]
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(path)
+
+	save_roster()
+	roster_changed.emit()
+	print("[AgentRoster] Fired agent: %s (#%d)" % [profile.agent_name, profile.id])
+	return true
 
 # =============================================================================
 # STATS UPDATES (with level-up detection)

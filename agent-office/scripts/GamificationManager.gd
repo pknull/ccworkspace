@@ -20,6 +20,15 @@ var popup_container: CanvasLayer  # Render popups above everything
 # Reference to AgentRoster (set by OfficeManager)
 var agent_roster: AgentRoster = null
 
+# Reference to AudioManager for achievement sound
+var audio_manager = null  # AudioManager instance
+
+# Cat interaction tracking
+var cat_interactions: int = 0
+
+# Speed task tracking
+var quick_tasks_count: int = 0  # Tasks completed in under 30 seconds
+
 # Signals
 signal achievement_unlocked(achievement_id: String)
 
@@ -30,7 +39,7 @@ func _ready() -> void:
 
 	# Create popup container (CanvasLayer to render above everything)
 	popup_container = CanvasLayer.new()
-	popup_container.layer = 100  # High layer to be on top
+	popup_container.layer = OfficeConstants.Z_UI_POPUP_LAYER
 	add_child(popup_container)
 
 	# Load persisted achievements
@@ -135,6 +144,10 @@ func _process_popup_queue() -> void:
 		_show_achievement_popup(achievement)
 
 func _show_achievement_popup(achievement: AchievementSystem.Achievement) -> void:
+	# Play achievement sound
+	if audio_manager:
+		audio_manager.play_achievement()
+
 	current_popup = AchievementPopupScript.new()
 	current_popup.popup_finished.connect(_on_popup_finished)
 	popup_container.add_child(current_popup)  # Must add to tree before setup() so _ready() creates labels
@@ -157,6 +170,27 @@ func save_all() -> void:
 # PUBLIC API
 # =============================================================================
 
+func record_cat_interaction() -> void:
+	cat_interactions += 1
+	# Check cat achievements
+	achievement_system.check_achievement("cat_petter", cat_interactions)
+	achievement_system.check_achievement("cat_friend", cat_interactions)
+	achievement_system.check_achievement("crazy_cat_office", cat_interactions)
+
+func record_task_completed(duration_seconds: float) -> void:
+	# Check speed achievements
+	if duration_seconds < 10.0:
+		# Lightning fast - under 10 seconds
+		achievement_system.check_achievement("lightning_fast", 1)
+		quick_tasks_count += 1
+	elif duration_seconds < 30.0:
+		# Quick task - under 30 seconds
+		achievement_system.check_achievement("quick_task", 1)
+		quick_tasks_count += 1
+
+	# Check accumulated quick tasks
+	achievement_system.check_achievement("speed_demon", quick_tasks_count)
+
 func get_stats_summary() -> Dictionary:
 	var total_agents = agent_roster.get_agent_count() if agent_roster else 0
 	var total_tasks = _get_total_tasks_from_roster()
@@ -166,6 +200,8 @@ func get_stats_summary() -> Dictionary:
 		"total_agents": total_agents,
 		"total_tasks": total_tasks,
 		"total_work_time": total_time,
+		"cat_interactions": cat_interactions,
+		"quick_tasks": quick_tasks_count,
 		"achievements_unlocked": achievement_system.get_unlocked_count(),
 		"achievements_total": achievement_system.get_total_count(),
 	}
