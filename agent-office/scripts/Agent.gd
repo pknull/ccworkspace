@@ -219,7 +219,6 @@ var document: ColorRect = null
 
 # Visual nodes
 var body: ColorRect
-var shirt: ColorRect
 var tie: ColorRect
 var head: ColorRect
 var hair: ColorRect
@@ -291,6 +290,37 @@ func _ready() -> void:
 	next_fidget_time = randf_range(OfficeConstants.FIDGET_TIME_MIN, OfficeConstants.FIDGET_TIME_MAX)
 	walk_speed_multiplier = randf_range(0.9, 1.1)
 	walk_last_position = position
+
+func _exit_tree() -> void:
+	# Release any reserved interaction points
+	if is_instance_valid(office_manager):
+		if current_interaction_furniture and office_manager.has_method("release_interaction_point"):
+			office_manager.release_interaction_point(agent_id)
+		if is_in_meeting and office_manager.has_method("_release_meeting_spot"):
+			office_manager._release_meeting_spot(agent_id)
+
+	# Release desk reservation
+	if is_instance_valid(assigned_desk):
+		assigned_desk.set_occupied(false)
+		if assigned_desk.has_method("hide_tool"):
+			assigned_desk.hide_tool()
+		if assigned_desk.has_method("clear_personal_items"):
+			assigned_desk.clear_personal_items()
+	assigned_desk = null
+
+	# Clear agent-to-agent chat reference
+	chatting_with = null
+
+	# Free dynamically created nodes
+	if is_instance_valid(document):
+		document.queue_free()
+		document = null
+	if is_instance_valid(reaction_bubble):
+		reaction_bubble.queue_free()
+		reaction_bubble = null
+	if is_instance_valid(mood_indicator):
+		mood_indicator.queue_free()
+		mood_indicator = null
 
 func _create_visuals() -> void:
 	_ensure_ui_nodes()
@@ -763,7 +793,6 @@ func _clear_visual_nodes() -> void:
 	head = null
 	hair = null
 	tie = null
-	shirt = null
 
 func _update_visual_colors(new_skin_color: Color, new_hair_color: Color) -> void:
 	# Update colors on existing visual nodes
@@ -1159,7 +1188,7 @@ func _process_spawning(delta: float) -> void:
 	modulate.a = 1.0 - (spawn_timer / OfficeConstants.AGENT_SPAWN_FADE_TIME)
 	if spawn_timer <= 0:
 		modulate.a = 1.0
-		if assigned_desk:
+		if is_instance_valid(assigned_desk):
 			start_walking_to_desk()
 			if pending_completion and status_label:
 				status_label.text = "Finishing up..."
@@ -1264,21 +1293,26 @@ func _on_path_complete() -> void:
 
 	match state:
 		State.WALKING_TO_DESK:
+			# Verify desk is still valid before starting work
+			if not is_instance_valid(assigned_desk):
+				_log_debug_event("STATE", "Desk became invalid during walk - going idle")
+				state = State.IDLE
+				if status_label:
+					status_label.text = "Desk unavailable"
+				return
 			# Arrived at desk, start working
 			work_elapsed = 0.0
 			state = State.WORKING
 			_log_debug_event("STATE", "Started working at desk")
 			# Turn on monitor now that agent has arrived
-			if assigned_desk and assigned_desk.has_method("set_monitor_active"):
-				assigned_desk.set_monitor_active(true)
+			assigned_desk.set_monitor_active(true)
 			# Place personal items on desk
 			_place_personal_items_on_desk()
-			print("[Agent %s] Reached desk, starting work (pending_completion=%s)" % [agent_id, pending_completion])
 			if status_label:
 				status_label.text = "Working..."
 		State.DELIVERING:
 			# Arrived at shredder, deliver document
-			print("[Agent %s] Reached shredder at %s, delivering document" % [agent_id, position])
+			_log_debug_event("STATE", "Delivering document at shredder")
 			_deliver_document()
 			# Pick next action: socialize somewhere or leave
 			_pick_post_work_action()
@@ -1296,9 +1330,14 @@ func _furniture_tour_arrived() -> void:
 	if not furniture_tour_active:
 		return
 
+	# Bounds check before array access
+	if furniture_tour_index >= furniture_tour_targets.size():
+		furniture_tour_active = false
+		return
+
 	# Brief pause at each furniture item
 	var current_target = furniture_tour_targets[furniture_tour_index]
-	print("[Agent %s] Furniture tour: arrived at %s" % [agent_id, current_target.get("name", "unknown")])
+	_log_debug_event("TOUR", "Arrived at %s" % current_target.get("name", "unknown"))
 	if status_label:
 		status_label.text = current_target.get("status", "Inspecting...")
 
@@ -1309,15 +1348,17 @@ func _furniture_tour_arrived() -> void:
 		await get_tree().create_timer(1.0).timeout
 		if not is_instance_valid(self) or not furniture_tour_active:
 			return
+		# Re-validate child nodes after await
+		if furniture_tour_index >= furniture_tour_targets.size():
+			return
 		var next_target = furniture_tour_targets[furniture_tour_index]
-		if status_label:
+		if is_instance_valid(status_label):
 			status_label.text = "Walking to " + next_target.get("name", "next")
 		_build_path_to(next_target["pos"])
 	else:
 		# Tour complete
-		print("[Agent %s] Furniture tour complete!" % agent_id)
 		furniture_tour_active = false
-		if status_label:
+		if is_instance_valid(status_label):
 			status_label.text = "Tour complete!"
 		# Leave the office
 		await get_tree().create_timer(1.0).timeout
@@ -1382,7 +1423,7 @@ func _order_tour_targets_by_distance(targets: Array) -> Array:
 
 func start_furniture_tour(meeting_table_pos: Vector2 = Vector2.ZERO) -> void:
 	"""Start a furniture tour visiting all furniture items."""
-	print("[Agent %s] Starting furniture tour" % agent_id)
+	_log_debug_event("TOUR", "Starting furniture tour")
 	furniture_tour_active = true
 	furniture_tour_index = 0
 
@@ -1538,7 +1579,7 @@ func _start_socializing_at(target_pos: Vector2, status_text: String, furniture_n
 	_release_current_interaction_point()
 
 	# Check if this furniture uses interaction points
-	if office_manager and _is_tracked_furniture(furniture_name):
+	if is_instance_valid(office_manager) and _is_tracked_furniture(furniture_name):
 		var point_idx = office_manager.reserve_interaction_point(furniture_name, agent_id)
 		if point_idx == -1:
 			# All points occupied - start wandering
@@ -1570,7 +1611,7 @@ func _is_tracked_furniture(furniture_name: String) -> bool:
 
 func _release_current_interaction_point() -> void:
 	"""Release any interaction point we're currently holding."""
-	if office_manager and current_interaction_furniture:
+	if is_instance_valid(office_manager) and current_interaction_furniture:
 		office_manager.release_interaction_point(agent_id)
 		current_interaction_furniture = ""
 		current_interaction_point_idx = -1
@@ -1625,11 +1666,11 @@ func _start_leaving() -> void:
 
 	state = State.LEAVING
 	# Release desk and turn off monitor before leaving
-	if assigned_desk:
+	if is_instance_valid(assigned_desk):
 		if assigned_desk.has_method("hide_tool"):
 			assigned_desk.hide_tool()
 		assigned_desk.set_occupied(false)
-		assigned_desk = null
+	assigned_desk = null
 	_build_path_to(door_position)
 	if status_label:
 		status_label.text = "Heading out..."
@@ -1770,7 +1811,7 @@ func _process_meeting(delta: float) -> void:
 	# Check if we have a pending completion
 	if pending_completion:
 		if work_elapsed >= min_work_time:
-			print("[Agent %s] Meeting done, completing" % agent_id)
+			_log_debug_event("STATE", "Meeting complete, delivering")
 			pending_completion = false
 			is_in_meeting = false
 			_start_delivering()
@@ -1819,7 +1860,7 @@ func _process_working(delta: float) -> void:
 	# Check if we have a pending completion and met minimum work time
 	if pending_completion:
 		if work_elapsed >= min_work_time:
-			print("[Agent %s] Min work time reached (%.1f >= %.1f), completing" % [agent_id, work_elapsed, min_work_time])
+			_log_debug_event("STATE", "Work complete after %.1fs" % work_elapsed)
 			pending_completion = false
 			complete_work()
 
@@ -1845,7 +1886,6 @@ func _build_path_to(destination: Vector2, furniture_name: String = "") -> bool:
 				return true
 			# Path is unreachable - give up and go idle
 			_log_debug_event("PATH", "FAILED: Cannot reach %s" % destination)
-			print("[Agent %s] Cannot reach destination %s - going idle" % [agent_id, destination])
 			_handle_unreachable_destination()
 			return false
 		for waypoint in path:
@@ -1885,7 +1925,7 @@ func _handle_unreachable_destination() -> void:
 	current_destination = Vector2.ZERO
 	nav_nudge_retries = 0
 	# Release any reserved resources to avoid blocking other agents.
-	if state == State.WALKING_TO_DESK and assigned_desk:
+	if state == State.WALKING_TO_DESK and is_instance_valid(assigned_desk):
 		assigned_desk.set_occupied(false)
 		assigned_desk = null
 	elif state == State.MEETING:
@@ -1922,7 +1962,6 @@ func on_furniture_moved(furniture_name: String, new_position: Vector2) -> void:
 		return
 
 	_log_debug_event("NAV", "Furniture moved: %s -> recalc path" % furniture_name)
-	print("[Agent %s] Recalculating path - %s moved to %s" % [agent_id, furniture_name, new_position])
 
 	# Recalculate path to new position (with some offset for approach)
 	var approach_offset = Vector2(randf_range(30, 50), randf_range(-20, 20))
@@ -1941,7 +1980,7 @@ func complete_work() -> void:
 	_create_document()
 	# Clear personal items and tool display from desk
 	_clear_personal_items_from_desk()
-	if assigned_desk:
+	if is_instance_valid(assigned_desk):
 		if assigned_desk.has_method("hide_tool"):
 			assigned_desk.hide_tool()
 		assigned_desk.set_occupied(false)
@@ -2041,7 +2080,7 @@ func assign_desk(desk: Node2D) -> void:
 	target_position = desk.get_work_position()
 
 func start_walking_to_desk() -> void:
-	if assigned_desk:
+	if is_instance_valid(assigned_desk):
 		state = State.WALKING_TO_DESK
 		_build_path_to(assigned_desk.get_work_position())
 		if status_label:
@@ -2119,7 +2158,7 @@ func show_tool(tool_name: String) -> void:
 	var color = OfficePalette.TOOL_COLORS.get(tool_name, OfficePalette.TOOL_DEFAULT)
 
 	# Show on desk monitor if we have an assigned desk
-	if assigned_desk and assigned_desk.has_method("show_tool"):
+	if is_instance_valid(assigned_desk) and assigned_desk.has_method("show_tool"):
 		assigned_desk.show_tool(icon, color)
 	else:
 		# Fallback to floating label if no desk
@@ -2135,7 +2174,7 @@ func show_tool(tool_name: String) -> void:
 func _hide_tool() -> void:
 	current_tool = ""
 	# Hide desk tool display
-	if assigned_desk and assigned_desk.has_method("hide_tool"):
+	if is_instance_valid(assigned_desk) and assigned_desk.has_method("hide_tool"):
 		assigned_desk.hide_tool()
 	# Also hide floating label if used
 	if tool_label:
@@ -2143,16 +2182,13 @@ func _hide_tool() -> void:
 	if tool_bg:
 		tool_bg.visible = false
 
-# Personal items functions
+# Personal items functions (uses PersonalItemFactory for item creation)
 func _generate_personal_items() -> void:
-	# Each worker has just 1 personal item
-	var all_items = ["coffee_mug", "photo_frame", "plant", "pencil_cup", "stress_ball", "snack", "water_bottle", "figurine"]
 	personal_item_types.clear()
-	all_items.shuffle()
-	personal_item_types.append(all_items[0])  # Just one item
+	personal_item_types.append(PersonalItemFactory.get_random_item_type())
 
 func _place_personal_items_on_desk() -> void:
-	if not assigned_desk:
+	if not is_instance_valid(assigned_desk):
 		return
 
 	# Clear any existing items first (defensive - in case previous agent didn't clean up)
@@ -2163,152 +2199,16 @@ func _place_personal_items_on_desk() -> void:
 	if personal_item_types.is_empty():
 		_generate_personal_items()
 
-	# Place single item on desk (left side, personal_items container is pre-positioned)
+	# Place single item on desk
 	if personal_item_types.size() > 0:
-		var item = _create_personal_item(personal_item_types[0])
+		var item = PersonalItemFactory.create_item(personal_item_types[0])
 		if item:
-			item.position = Vector2(0, 0)  # Container is already positioned
+			item.position = Vector2(0, 0)
 			assigned_desk.add_personal_item(item)
 
 func _clear_personal_items_from_desk() -> void:
-	if assigned_desk:
+	if is_instance_valid(assigned_desk):
 		assigned_desk.clear_personal_items()
-
-func _create_personal_item(item_type: String) -> Node2D:
-	var item = Node2D.new()
-
-	match item_type:
-		"coffee_mug":
-			# Mug body
-			var mug = ColorRect.new()
-			mug.size = Vector2(10, 14)
-			mug.position = Vector2(0, 0)
-			# Random mug color (using palette)
-			var mug_colors = [OfficePalette.MUG_WHITE, OfficePalette.MUG_RED, OfficePalette.MUG_BLUE, OfficePalette.MUG_GREEN, OfficePalette.MUG_YELLOW]
-			mug.color = mug_colors[randi() % mug_colors.size()]
-			item.add_child(mug)
-			# Handle
-			var handle = ColorRect.new()
-			handle.size = Vector2(4, 8)
-			handle.position = Vector2(10, 3)
-			handle.color = mug.color
-			item.add_child(handle)
-
-		"photo_frame":
-			# Frame
-			var frame = ColorRect.new()
-			frame.size = Vector2(14, 16)
-			frame.position = Vector2(0, -4)
-			frame.color = OfficePalette.PHOTO_FRAME_WOOD
-			item.add_child(frame)
-			# Photo inside
-			var photo = ColorRect.new()
-			photo.size = Vector2(10, 10)
-			photo.position = Vector2(2, 2)
-			photo.color = OfficePalette.PHOTO_SKY
-			item.add_child(photo)
-
-		"plant":
-			# Small terracotta pot
-			var pot = ColorRect.new()
-			pot.size = Vector2(14, 10)
-			pot.position = Vector2(0, 4)
-			pot.color = OfficePalette.POT_TERRACOTTA
-			item.add_child(pot)
-			# Pot rim
-			var rim = ColorRect.new()
-			rim.size = Vector2(16, 3)
-			rim.position = Vector2(-1, 2)
-			rim.color = OfficePalette.POT_TERRACOTTA_DARK
-			item.add_child(rim)
-			# Soil
-			var soil = ColorRect.new()
-			soil.size = Vector2(12, 3)
-			soil.position = Vector2(1, 3)
-			soil.color = OfficePalette.SOIL_DARK
-			item.add_child(soil)
-			# Succulent/cactus body
-			var cactus = ColorRect.new()
-			cactus.size = Vector2(8, 10)
-			cactus.position = Vector2(3, -6)
-			cactus.color = OfficePalette.LEAF_GREEN
-			item.add_child(cactus)
-			# Small arm/leaf
-			var leaf = ColorRect.new()
-			leaf.size = Vector2(4, 6)
-			leaf.position = Vector2(10, -4)
-			leaf.color = OfficePalette.LEAF_GREEN_LIGHT
-			item.add_child(leaf)
-
-		"pencil_cup":
-			# Cup
-			var cup = ColorRect.new()
-			cup.size = Vector2(10, 14)
-			cup.position = Vector2(0, 0)
-			cup.color = OfficePalette.PENCIL_CUP
-			item.add_child(cup)
-			# Pencils
-			var pencil1 = ColorRect.new()
-			pencil1.size = Vector2(2, 8)
-			pencil1.position = Vector2(2, -6)
-			pencil1.color = OfficePalette.PENCIL_YELLOW
-			item.add_child(pencil1)
-			var pencil2 = ColorRect.new()
-			pencil2.size = Vector2(2, 6)
-			pencil2.position = Vector2(6, -4)
-			pencil2.color = OfficePalette.PENCIL_BLUE
-			item.add_child(pencil2)
-
-		"stress_ball":
-			var ball = ColorRect.new()
-			ball.size = Vector2(12, 12)
-			ball.position = Vector2(0, 2)
-			var ball_colors = [OfficePalette.GRUVBOX_RED_BRIGHT, OfficePalette.GRUVBOX_BLUE_BRIGHT, OfficePalette.GRUVBOX_YELLOW_BRIGHT, OfficePalette.GRUVBOX_AQUA_BRIGHT]
-			ball.color = ball_colors[randi() % ball_colors.size()]
-			item.add_child(ball)
-
-		"snack":
-			# Snack wrapper/bag
-			var wrapper = ColorRect.new()
-			wrapper.size = Vector2(14, 10)
-			wrapper.position = Vector2(0, 4)
-			var snack_colors = [OfficePalette.GRUVBOX_RED_BRIGHT, OfficePalette.GRUVBOX_BLUE, OfficePalette.GRUVBOX_ORANGE_BRIGHT]
-			wrapper.color = snack_colors[randi() % snack_colors.size()]
-			item.add_child(wrapper)
-
-		"water_bottle":
-			# Bottle
-			var bottle = ColorRect.new()
-			bottle.size = Vector2(8, 18)
-			bottle.position = Vector2(0, -4)
-			bottle.color = OfficePalette.WATER_BOTTLE
-			item.add_child(bottle)
-			# Cap
-			var cap = ColorRect.new()
-			cap.size = Vector2(6, 4)
-			cap.position = Vector2(1, -6)
-			cap.color = OfficePalette.WATER_BOTTLE_CAP
-			item.add_child(cap)
-
-		"figurine":
-			# Base
-			var base = ColorRect.new()
-			base.size = Vector2(10, 4)
-			base.position = Vector2(0, 10)
-			base.color = OfficePalette.FIGURINE_BASE
-			item.add_child(base)
-			# Figure body
-			var fig = ColorRect.new()
-			fig.size = Vector2(8, 14)
-			fig.position = Vector2(1, -4)
-			var fig_colors = [OfficePalette.GRUVBOX_RED_BRIGHT, OfficePalette.GRUVBOX_GREEN, OfficePalette.GRUVBOX_BLUE, OfficePalette.GRUVBOX_YELLOW_BRIGHT]
-			fig.color = fig_colors[randi() % fig_colors.size()]
-			item.add_child(fig)
-
-		_:
-			return null
-
-	return item
 
 # Click reaction functions
 func _generate_reaction_phrases() -> void:

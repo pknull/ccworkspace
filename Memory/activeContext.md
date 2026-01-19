@@ -1,9 +1,9 @@
 ---
-version: "1.5"
-lastUpdated: "2026-01-18 UTC"
+version: "1.6"
+lastUpdated: "2026-01-19 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - major feature additions, bug fixes, audio system"
+changeTrigger: "Session save - comprehensive code review, bug fixes, refactor start"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -21,6 +21,27 @@ dependencies: ["communicationStyle.md"]
 - Enhanced achievement system with cat and speed achievements
 
 **Recent Activities** (last 7 days):
+- **2026-01-19 (Session 6)**: Comprehensive code review and refactor start:
+  - Full code review of Agent.gd (2880 lines) and ProfilePopup.gd (660 lines)
+  - **Fixed CRITICAL issues**:
+    - Added `_exit_tree()` to Agent.gd for proper cleanup (interaction points, desk, chat references)
+    - Fixed post-await validity checks with `is_instance_valid(status_label)`
+  - **Fixed HIGH issues**:
+    - Added `is_instance_valid(office_manager)` in 2 locations
+    - Removed 8 debug print statements (replaced with `_log_debug_event()`)
+    - Added null profile guard in ProfilePopup.gd `show_profile()`
+    - Fixed division by zero in ProfilePopup.gd `_create_bar()`
+    - Added `is_instance_valid()` for roster and badge_system
+    - Added `get_viewport().set_input_as_handled()` for ESC key
+  - **Fixed MEDIUM/LOW issues**:
+    - Added bounds check in `_furniture_tour_arrived()`
+    - Removed unused `shirt` variable and `stats_container`
+  - **Refactor started**:
+    - Created REFACTOR_PLAN.md documenting extraction strategy
+    - Extracted PersonalItemFactory.gd (169 lines) - static utility for desk items
+    - Agent.gd reduced from ~2880 to 2776 lines (~100 line reduction)
+  - Remaining refactor: AgentVisuals (~400 lines), AgentBubbles (~350), AgentSocial (~200), AgentNavigation (~150), AgentMood (~80)
+
 - **2026-01-18 (Session 5)**: Major feature additions and bug fixes:
   - Code review via `/local-review` identified issues across 19 files
   - Fixed bugs:
@@ -126,6 +147,9 @@ Port 9999, JSON messages with `"event"` field:
 - [x] Day/night cycle
 - [x] Agent mood system
 - [x] Cat and speed achievements
+- [x] Code review and critical bug fixes
+- [x] PersonalItemFactory extraction
+- [ ] Continue Agent.gd refactor (AgentVisuals is largest remaining)
 - [ ] Test tool tracking with reduced scan interval
 - [ ] Verify subagents leaving properly
 
@@ -138,6 +162,7 @@ Port 9999, JSON messages with `"event"` field:
 - A* priority queue optimization
 - Weather effects (user noted back wall layering issues)
 - More furniture variety
+- Complete Agent.gd refactor (5 more extractions documented in REFACTOR_PLAN.md)
 
 ## Learnings
 
@@ -173,3 +198,21 @@ Using `_unhandled_input` for drag operations caused furniture dragging to break 
 
 ### Godot Audio Import
 Audio files placed in `res://audio/` require Godot editor to scan and import them. Running headless editor (`godot --editor --headless`) triggers the import without opening the full GUI.
+
+### is_instance_valid() for Node References
+In GDScript, checking `if node:` does NOT verify if the object has been freed. Always use `is_instance_valid(node)` before accessing properties/methods on node references that may have been queue_free()'d. Critical for: assigned_desk, office_manager, chatting_with, roster, badge_system.
+
+### _exit_tree() Cleanup Pattern
+Nodes that hold external references or reservations MUST implement `_exit_tree()` to release resources. Without it, interaction points stay reserved, desks stay "occupied", and memory leaks occur when agents are freed. Pattern:
+```gdscript
+func _exit_tree() -> void:
+    if is_instance_valid(external_ref):
+        external_ref.release()
+    external_ref = null
+```
+
+### Post-await Validity Checks
+After `await get_tree().create_timer().timeout`, the node and its children may have been freed. Always re-validate with `is_instance_valid(self)` AND check child nodes before accessing them.
+
+### Static Utility Classes for Factories
+Large factory methods (like personal item creation with 140+ lines of item types) are good candidates for extraction to static utility classes with `class_name`. Reduces main class size and improves maintainability. Pattern: `PersonalItemFactory.create_item(type)` instead of inline match statements.
