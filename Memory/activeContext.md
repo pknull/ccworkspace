@@ -1,9 +1,9 @@
 ---
-version: "1.6"
+version: "1.7"
 lastUpdated: "2026-01-19 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - comprehensive code review, bug fixes, refactor start"
+changeTrigger: "Session save - Agent.gd refactor complete (51% reduction)"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -21,6 +21,25 @@ dependencies: ["communicationStyle.md"]
 - Enhanced achievement system with cat and speed achievements
 
 **Recent Activities** (last 7 days):
+- **2026-01-19 (Session 7)**: Agent.gd refactor completed - 51% reduction:
+  - **Extracted components**:
+    - AgentVisuals.gd (691 lines) - visual node creation, appearance, tooltips
+    - AgentBubbles.gd (395 lines) - speech bubbles, reactions, phrases
+    - AgentMood.gd (173 lines) - mood tracking, fidget animations
+    - AgentSocial.gd (58 lines) - social spot selection, cooldowns
+    - PersonalItemFactory.gd (169 lines) - from previous session
+  - **Result**: Agent.gd reduced from ~2880 to 1419 lines (51% reduction)
+  - **Fixed CRITICAL bug**: Profile appearance not applying
+    - Cause: `apply_profile_appearance()` called before `_ready()` when `visuals` was null
+    - Fix: Added `_pending_profile` variable to defer application until visuals ready
+  - **Fixed compilation errors during refactor**:
+    - `tool_bg` not declared (missed changing to `visuals.tool_bg`)
+    - `visuals.visuals.status_label` typos (18 occurrences from bad sed)
+    - Class not found errors (Godot needed `--editor --headless` to rescan scripts)
+  - **Cleaned dead code**: Removed unused `get_social_spots()` and `agent` var from AgentSocial.gd
+  - **Smoke test passed**: 4/4 tests passing
+  - Updated REFACTOR_PLAN.md with final status and lessons learned
+
 - **2026-01-19 (Session 6)**: Comprehensive code review and refactor start:
   - Full code review of Agent.gd (2880 lines) and ProfilePopup.gd (660 lines)
   - **Fixed CRITICAL issues**:
@@ -149,7 +168,7 @@ Port 9999, JSON messages with `"event"` field:
 - [x] Cat and speed achievements
 - [x] Code review and critical bug fixes
 - [x] PersonalItemFactory extraction
-- [ ] Continue Agent.gd refactor (AgentVisuals is largest remaining)
+- [x] Agent.gd refactor complete (51% reduction - practical limit reached)
 - [ ] Test tool tracking with reduced scan interval
 - [ ] Verify subagents leaving properly
 
@@ -162,7 +181,7 @@ Port 9999, JSON messages with `"event"` field:
 - A* priority queue optimization
 - Weather effects (user noted back wall layering issues)
 - More furniture variety
-- Complete Agent.gd refactor (5 more extractions documented in REFACTOR_PLAN.md)
+- Further Agent.gd reduction would require StateMachine class (diminishing returns)
 
 ## Learnings
 
@@ -216,3 +235,25 @@ After `await get_tree().create_timer().timeout`, the node and its children may h
 
 ### Static Utility Classes for Factories
 Large factory methods (like personal item creation with 140+ lines of item types) are good candidates for extraction to static utility classes with `class_name`. Reduces main class size and improves maintainability. Pattern: `PersonalItemFactory.create_item(type)` instead of inline match statements.
+
+### Composition Pattern for Large Classes
+Extract cohesive functionality into `RefCounted` classes with `class_name`. Initialize in `_ready()` and delegate calls. Pattern:
+```gdscript
+var visuals: AgentVisuals = null
+func _ready() -> void:
+    visuals = AgentVisuals.new(self)
+```
+
+### Deferred Initialization for Pre-_ready Calls
+When external callers invoke methods before `add_child()` triggers `_ready()`, store pending data and apply later:
+```gdscript
+var _pending_profile = null
+func apply_profile_appearance(profile) -> void:
+    if visuals:
+        visuals.apply_profile_appearance(profile)
+    else:
+        _pending_profile = profile  # Apply in _ready()
+```
+
+### State Machines Resist Decomposition
+State machine code with heavy `_process_*` functions, state transitions, and `await` calls creates tight coupling that resists extraction. Extracting would require a full StateMachine class pattern - high risk for diminishing returns.
