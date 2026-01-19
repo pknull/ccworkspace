@@ -19,6 +19,8 @@ var meow_cooldown: float = 0.0
 const MEOW_CHECK_INTERVAL: float = 20.0  # Check every 20 seconds
 const MEOW_CHANCE: float = 0.18  # 18% chance when checked
 const MEOW_COOLDOWN: float = 40.0  # Minimum 40s between meows
+const PATH_REROUTE_ATTEMPTS: int = 8  # Attempts to find alternate path before giving up
+const STEER_MULTIPLIER: float = 3.0  # How far to steer perpendicular (frames worth)
 
 const MEOW_PHRASES = [
 	"meow", "mrrp?", "prrrr", "mew!", "nya~", "*purr*",
@@ -43,17 +45,38 @@ var bounds_max: Vector2 = Vector2(1250, 620)  # Full width like other furniture
 
 # Obstacles to avoid (desks, furniture, etc.)
 var obstacle_rects: Array[Rect2] = []
-const DESK_SIZE: Vector2 = Vector2(100, 80)  # Desk footprint including work area
+const DESK_SIZE: Vector2 = Vector2(80, 28)  # Matches OfficeConstants.DESK_WIDTH x DESK_DEPTH
+const CAT_COLLIDER_SIZE: Vector2 = Vector2(22, 10)
+const STUCK_DISTANCE_EPS: float = 0.75
+const STUCK_TIMEOUT: float = 1.5
+const CAT_WALL_MARGIN: float = 18.0
+const CAT_NUDGE_RADIUS: float = 18.0
 
 # Dragging
 var is_being_dragged: bool = false
 var drag_offset: Vector2 = Vector2.ZERO
+var last_position: Vector2 = Vector2.ZERO
+var stuck_timer: float = 0.0
+var nap_spot: Vector2 = Vector2.ZERO
+var pending_sleep: bool = false
+var cat_bed_position: Vector2 = Vector2.ZERO
+var consecutive_blocks: int = 0  # Track how many frames we've been blocked
+
+# A* Pathfinding (uses same grid as agents)
+var navigation_grid: NavigationGrid = null
+var path_waypoints: Array[Vector2] = []
+var current_waypoint_index: int = 0
+
+# Audio
+var audio_manager = null  # AudioManager instance
 
 func _ready() -> void:
 	_randomize_appearance()
 	_create_visuals()
 	position = Vector2(randf_range(bounds_min.x, bounds_max.x), randf_range(bounds_min.y, bounds_max.y))
 	next_action_time = randf_range(2.0, 5.0)
+	last_position = position
+	nap_spot = _find_valid_nap_spot()
 
 func _randomize_appearance() -> void:
 	# Random cat colors (using Gruvbox palette)
@@ -189,6 +212,10 @@ func _process(delta: float) -> void:
 	if state != State.SLEEPING:
 		_process_meow_bubble(delta)
 
+	if state != State.WALKING:
+		stuck_timer = 0.0
+		last_position = position
+
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
@@ -204,11 +231,20 @@ func _input(event: InputEvent) -> void:
 						for eye in eyes:
 							eye.visible = true
 					state = State.IDLE
+					get_viewport().set_input_as_handled()  # Prevent other nodes from receiving this click
 			else:
 				if is_being_dragged:
 					is_being_dragged = false
-					# Pick new random action after being moved
-					_pick_next_action()
+					# Sleep if dropped onto the bed, otherwise pick a new action
+					if cat_bed_position != Vector2.ZERO and position.distance_to(cat_bed_position) <= 24.0:
+						state_timer = 0.0
+						pending_sleep = false
+						state = State.SLEEPING
+						sleeping_z.visible = true
+						next_action_time = randf_range(8.0, 20.0)
+					else:
+						_pick_next_action()
+					get_viewport().set_input_as_handled()
 
 	elif event is InputEventMouseMotion and is_being_dragged:
 		var new_pos = get_global_mouse_position() + drag_offset
@@ -216,47 +252,142 @@ func _input(event: InputEvent) -> void:
 		new_pos.x = clamp(new_pos.x, bounds_min.x, bounds_max.x)
 		new_pos.y = clamp(new_pos.y, bounds_min.y, bounds_max.y)
 		position = new_pos
+		get_viewport().set_input_as_handled()
 
 func _process_idle(delta: float) -> void:
 	if state_timer >= next_action_time:
 		_pick_next_action()
 
 func _process_walking(delta: float) -> void:
-	var direction = target_position - position
-	if direction.length() < 5:
-		position = target_position
-		_pick_next_action()
-		return
-
-	# Calculate next position
-	var move_dir = direction.normalized()
-	var next_pos = position + move_dir * speed * delta
-
-	# Check if next position is blocked by a desk
-	if _is_position_blocked(next_pos):
-		# Steer around: try perpendicular directions
-		var perp1 = Vector2(-move_dir.y, move_dir.x)  # Perpendicular
-		var perp2 = Vector2(move_dir.y, -move_dir.x)  # Other perpendicular
-
-		var alt_pos1 = position + perp1 * speed * delta
-		var alt_pos2 = position + perp2 * speed * delta
-
-		if not _is_position_blocked(alt_pos1):
-			next_pos = alt_pos1
-		elif not _is_position_blocked(alt_pos2):
-			next_pos = alt_pos2
+	# If we're inside an obstacle, nudge out gradually instead of teleporting
+	if _is_position_blocked(position):
+		var nudge_dir = _find_nudge_direction()
+		if nudge_dir != Vector2.ZERO:
+			position += nudge_dir * speed * delta * 2.0  # Move out at double speed
+			_log_event("STUCK", "Inside obstacle, nudging out")
+			return
 		else:
-			# Stuck - pick new destination
+			# Can't find a way out - only then teleport as last resort
+			_log_event("STUCK", "No nudge direction found, teleporting")
+			position = _find_valid_position()
 			target_position = _find_valid_position()
+			_build_path_to(target_position)
+			stuck_timer = 0.0
+			last_position = position
 			return
 
-	position = next_pos
+	# Follow waypoints if we have them
+	if path_waypoints.size() > 0 and current_waypoint_index < path_waypoints.size():
+		var current_waypoint = path_waypoints[current_waypoint_index]
+		var direction = current_waypoint - position
 
-	# Face direction of movement (left if moving left, right if moving right)
-	if abs(direction.x) > 1:  # Only change facing if significant horizontal movement
+		# Reached current waypoint?
+		if direction.length() < 8:
+			current_waypoint_index += 1
+			if current_waypoint_index >= path_waypoints.size():
+				# Reached final destination
+				path_waypoints.clear()
+				current_waypoint_index = 0
+				if pending_sleep:
+					pending_sleep = false
+					state = State.SLEEPING
+					sleeping_z.visible = true
+					next_action_time = randf_range(8.0, 20.0)
+				else:
+					_pick_next_action()
+				return
+			return
+
+		# Move toward current waypoint
+		var move_dir = direction.normalized()
+		var step_size = speed * delta
+		var next_pos = position + move_dir * step_size
+
+		# Boundary check
+		if _is_out_of_bounds(next_pos):
+			_log_event("NAV", "Hit boundary, rebuilding path")
+			consecutive_blocks = 0
+			target_position = _find_valid_position()
+			_build_path_to(target_position)
+			return
+
+		# Check if next position is blocked BEFORE moving
+		if _is_position_blocked(next_pos):
+			consecutive_blocks += 1
+			_log_event("NAV", "Path blocked (count: %d)" % consecutive_blocks)
+
+			# Try perpendicular dodge first
+			var perp = Vector2(-move_dir.y, move_dir.x)  # Perpendicular direction
+			var dodge_pos = position + perp * step_size * 2.0
+			if not _is_position_blocked(dodge_pos) and not _is_out_of_bounds(dodge_pos):
+				position = dodge_pos
+				consecutive_blocks = 0
+				return
+			# Try other perpendicular
+			dodge_pos = position - perp * step_size * 2.0
+			if not _is_position_blocked(dodge_pos) and not _is_out_of_bounds(dodge_pos):
+				position = dodge_pos
+				consecutive_blocks = 0
+				return
+
+			# If blocked multiple times, rebuild path
+			if consecutive_blocks >= 3:
+				_log_event("NAV", "Rebuilding path after %d blocks" % consecutive_blocks)
+				consecutive_blocks = 0
+				# Skip current waypoint and try to path to next one or final destination
+				if current_waypoint_index < path_waypoints.size() - 1:
+					current_waypoint_index += 1
+					_build_path_to(path_waypoints[path_waypoints.size() - 1])
+				else:
+					target_position = _find_valid_position()
+					_build_path_to(target_position)
+			return
+
+		consecutive_blocks = 0
+		position = next_pos
+
+		# Stuck detection
+		if position.distance_to(last_position) < STUCK_DISTANCE_EPS:
+			stuck_timer += delta
+			if stuck_timer >= STUCK_TIMEOUT:
+				_log_event("STUCK", "No progress for %.1fs, finding new destination" % STUCK_TIMEOUT)
+				target_position = _find_valid_position()
+				_build_path_to(target_position)
+				stuck_timer = 0.0
+		else:
+			stuck_timer = 0.0
+		last_position = position
+
+		# Face direction of movement
+		if abs(direction.x) > 1:
+			_set_facing(direction.x < 0)
+
+		# Subtle bobbing while walking
+		if body:
+			body.position.y = sin(animation_timer * 12.0) * 1.5
+		return
+
+	# No waypoints - we must have reached target or path was empty
+	# This handles the fallback case where pathfinding failed
+	var direction = target_position - position
+	if direction.length() < 5:
+		if pending_sleep:
+			pending_sleep = false
+			state = State.SLEEPING
+			sleeping_z.visible = true
+			next_action_time = randf_range(8.0, 20.0)
+		else:
+			_pick_next_action()
+		return
+
+	# Direct movement fallback (shouldn't happen often with pathfinding)
+	var move_dir = direction.normalized()
+	position += move_dir * speed * delta
+	last_position = position
+
+	if abs(direction.x) > 1:
 		_set_facing(direction.x < 0)
 
-	# Subtle bobbing while walking
 	if body:
 		body.position.y = sin(animation_timer * 12.0) * 1.5
 
@@ -322,6 +453,7 @@ func _process_stretching(delta: float) -> void:
 
 func _pick_next_action() -> void:
 	state_timer = 0.0
+	consecutive_blocks = 0
 
 	# Weight different actions
 	var roll = randf()
@@ -330,6 +462,8 @@ func _pick_next_action() -> void:
 		# Walk somewhere (avoiding desks)
 		state = State.WALKING
 		target_position = _find_valid_position()
+		_build_path_to(target_position)
+		_log_event("NAV", "Walking to (%.0f, %.0f)" % [target_position.x, target_position.y])
 		next_action_time = 999  # Walk until destination
 	elif roll < 0.50:
 		# Sit and look around
@@ -340,10 +474,14 @@ func _pick_next_action() -> void:
 		state = State.GROOMING
 		next_action_time = randf_range(2.0, 5.0)
 	elif roll < 0.85:
-		# Sleep
-		state = State.SLEEPING
-		sleeping_z.visible = true
-		next_action_time = randf_range(8.0, 20.0)  # Cats sleep a lot
+		# Sleep (walk to nap spot first)
+		state = State.WALKING
+		nap_spot = _find_valid_nap_spot()
+		target_position = nap_spot
+		_build_path_to(target_position)
+		pending_sleep = true
+		_log_event("NAV", "Walking to nap spot (%.0f, %.0f)" % [target_position.x, target_position.y])
+		next_action_time = 999
 	elif roll < 0.88:
 		# Idle (small chance - just stand there)
 		state = State.IDLE
@@ -377,6 +515,9 @@ func set_bounds(min_pos: Vector2, max_pos: Vector2) -> void:
 	bounds_min = min_pos
 	bounds_max = max_pos
 
+func set_cat_bed_position(pos: Vector2) -> void:
+	cat_bed_position = pos
+
 func set_desk_positions(positions: Array[Vector2]) -> void:
 	# Add desk obstacles (keep for backwards compatibility)
 	for pos in positions:
@@ -389,23 +530,135 @@ func add_obstacle(rect: Rect2) -> void:
 func clear_obstacles() -> void:
 	obstacle_rects.clear()
 
+func set_navigation_grid(grid: NavigationGrid) -> void:
+	navigation_grid = grid
+
+func _build_path_to(destination: Vector2) -> void:
+	"""Build A* path to destination using navigation grid."""
+	path_waypoints.clear()
+	current_waypoint_index = 0
+
+	if navigation_grid:
+		var path = navigation_grid.find_path(position, destination)
+		if path.size() > 0:
+			for point in path:
+				path_waypoints.append(point)
+			return
+
+	# Fallback: direct path if no grid or path failed
+	path_waypoints.append(destination)
+
 func _is_position_blocked(pos: Vector2) -> bool:
+	var cat_rect = Rect2(pos - CAT_COLLIDER_SIZE / 2, CAT_COLLIDER_SIZE)
 	for rect in obstacle_rects:
-		if rect.has_point(pos):
+		if rect.intersects(cat_rect):
 			return true
 	return false
 
+func _find_nudge_direction() -> Vector2:
+	"""Find the best direction to nudge the cat out of an obstacle."""
+	# Try 8 directions and find the one that leads to unblocked space fastest
+	var directions = [
+		Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1),
+		Vector2(1, 1).normalized(), Vector2(-1, 1).normalized(),
+		Vector2(1, -1).normalized(), Vector2(-1, -1).normalized(),
+	]
+
+	var best_dir = Vector2.ZERO
+	var best_dist = INF
+
+	for dir in directions:
+		# Check how far we need to go in this direction to be clear
+		for dist in [10, 20, 30, 40, 50]:
+			var test_pos = position + dir * dist
+			if not _is_position_blocked(test_pos) and not _is_out_of_bounds(test_pos):
+				if dist < best_dist:
+					best_dist = dist
+					best_dir = dir
+				break
+
+	return best_dir
+
+func _is_out_of_bounds(pos: Vector2) -> bool:
+	return pos.x < bounds_min.x + CAT_WALL_MARGIN or pos.x > bounds_max.x - CAT_WALL_MARGIN or pos.y < bounds_min.y + CAT_WALL_MARGIN or pos.y > bounds_max.y - CAT_WALL_MARGIN
+
 func _find_valid_position() -> Vector2:
-	# Try to find a position not inside a desk
-	for _i in range(20):  # Max attempts
+	# Try to find a position with clearance around it (not just barely valid)
+	var clearance = 30.0  # Prefer positions with this much clearance
+
+	# First pass: try to find position with good clearance
+	for _i in range(20):
 		var test_pos = Vector2(
-			randf_range(bounds_min.x, bounds_max.x),
-			randf_range(bounds_min.y, bounds_max.y)
+			randf_range(bounds_min.x + CAT_WALL_MARGIN, bounds_max.x - CAT_WALL_MARGIN),
+			randf_range(bounds_min.y + CAT_WALL_MARGIN, bounds_max.y - CAT_WALL_MARGIN)
 		)
-		if not _is_position_blocked(test_pos):
+		if _has_clearance(test_pos, clearance):
 			return test_pos
-	# Fallback: return position in a known safe corridor
-	return Vector2(randf_range(100, 180), randf_range(bounds_min.y, bounds_max.y))
+
+	# Second pass: accept any valid position
+	for _i in range(20):
+		var test_pos = Vector2(
+			randf_range(bounds_min.x + CAT_WALL_MARGIN, bounds_max.x - CAT_WALL_MARGIN),
+			randf_range(bounds_min.y + CAT_WALL_MARGIN, bounds_max.y - CAT_WALL_MARGIN)
+		)
+		if not _is_position_blocked(test_pos) and not _is_out_of_bounds(test_pos):
+			return test_pos
+
+	# Fallback: return position in a known safe corridor (left side of room)
+	_log_event("NAV", "Using fallback corridor position")
+	return Vector2(randf_range(100, 180), randf_range(bounds_min.y + CAT_WALL_MARGIN, bounds_max.y - CAT_WALL_MARGIN))
+
+func _has_clearance(pos: Vector2, clearance: float) -> bool:
+	# Check if position has clearance in all directions
+	if _is_position_blocked(pos) or _is_out_of_bounds(pos):
+		return false
+
+	# Check cardinal directions
+	var offsets = [
+		Vector2(clearance, 0), Vector2(-clearance, 0),
+		Vector2(0, clearance), Vector2(0, -clearance),
+		Vector2(clearance * 0.7, clearance * 0.7),  # Diagonals
+		Vector2(-clearance * 0.7, clearance * 0.7),
+		Vector2(clearance * 0.7, -clearance * 0.7),
+		Vector2(-clearance * 0.7, -clearance * 0.7),
+	]
+
+	for offset in offsets:
+		if _is_position_blocked(pos + offset) or _is_out_of_bounds(pos + offset):
+			return false
+
+	return true
+
+func _log_event(category: String, message: String) -> void:
+	var script = load("res://scripts/DebugEventLog.gd")
+	if script and script.has_meta("instance"):
+		var inst = script.get_meta("instance")
+		if inst and inst.has_method("add_event"):
+			inst.add_event(category, message, "cat")
+
+func _find_valid_nap_spot() -> Vector2:
+	if cat_bed_position != Vector2.ZERO:
+		var center = cat_bed_position
+		# Try center first if it has clearance
+		if _has_clearance(center, 15.0):
+			return center
+		# Try nearby positions
+		for _i in range(20):
+			var test_pos = center + Vector2(randf_range(-12, 12), randf_range(-8, 8))
+			if not _is_position_blocked(test_pos) and not _is_out_of_bounds(test_pos):
+				return test_pos
+		if not _is_position_blocked(center) and not _is_out_of_bounds(center):
+			return center
+
+	# Fallback: find a cozy corner
+	var center = Vector2(bounds_min.x + 90, bounds_max.y - 70)
+	for _i in range(20):
+		var test_pos = center + Vector2(randf_range(-40, 40), randf_range(-30, 30))
+		if _has_clearance(test_pos, 20.0):
+			return test_pos
+
+	# Last resort
+	return _find_valid_position()
 
 # =============================================================================
 # MEOW SPEECH BUBBLES
@@ -439,6 +692,10 @@ func _process_meow_bubble(delta: float) -> void:
 func _show_meow() -> void:
 	if meow_bubble:
 		meow_bubble.queue_free()
+
+	# Play meow sound
+	if audio_manager:
+		audio_manager.play_meow()
 
 	var phrase = MEOW_PHRASES[randi() % MEOW_PHRASES.size()]
 

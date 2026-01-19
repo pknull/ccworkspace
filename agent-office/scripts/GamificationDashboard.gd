@@ -74,6 +74,7 @@ func _create_ui() -> void:
 	background = ColorRect.new()
 	background.size = Vector2(OfficeConstants.SCREEN_WIDTH, OfficeConstants.SCREEN_HEIGHT)
 	background.color = COLOR_OVERLAY
+	background.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(background)
 
 	# Main panel

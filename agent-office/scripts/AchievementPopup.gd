@@ -40,6 +40,7 @@ func _create_visuals() -> void:
 	panel = ColorRect.new()
 	panel.size = Vector2(PANEL_WIDTH, PANEL_HEIGHT)
 	panel.color = OfficePalette.GRUVBOX_BG
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(panel)
 	
 	# Border
@@ -48,6 +49,7 @@ func _create_visuals() -> void:
 	border.position = Vector2(-2, -2)
 	border.color = OfficePalette.GRUVBOX_YELLOW
 	border.z_index = -1
+	border.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(border)
 	
 	# Icon
@@ -55,6 +57,7 @@ func _create_visuals() -> void:
 	icon_label.position = Vector2(10, 10)
 	icon_label.add_theme_font_size_override("font_size", 24)
 	icon_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_YELLOW)
+	icon_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(icon_label)
 	
 	# Achievement name
@@ -63,6 +66,7 @@ func _create_visuals() -> void:
 	name_label.size = Vector2(240, 24)
 	name_label.add_theme_font_size_override("font_size", 14)
 	name_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT)
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(name_label)
 	
 	# Description
@@ -72,6 +76,7 @@ func _create_visuals() -> void:
 	desc_label.add_theme_font_size_override("font_size", 11)
 	desc_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT3)
 	desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	desc_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(desc_label)
 
 func setup(achievement_name: String, description: String, icon: String) -> void:

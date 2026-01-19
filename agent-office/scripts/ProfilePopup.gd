@@ -19,6 +19,7 @@ var close_button: Button
 
 # Profile content
 var portrait_container: Control
+var portrait_layer: Control
 var name_label: Label
 var title_label: Label
 var level_label: Label
@@ -47,6 +48,7 @@ var tool_bars: Array[Control] = []
 # Badges section
 var badges_container: Control
 var badges_label: Label
+var badges_scroll: ScrollContainer
 
 # Colleagues section
 var colleagues_label: Label
@@ -62,6 +64,25 @@ const FONT_SIZE_HEADER: int = 14
 const FONT_SIZE_BODY: int = 12
 const FONT_SIZE_SMALL: int = 11
 
+# Hair colors palette (same order as AgentProfile indices)
+const HAIR_COLORS: Array[Color] = [
+	Color(0.45, 0.32, 0.22),  # Brown
+	Color(0.15, 0.12, 0.10),  # Black
+	Color(0.85, 0.75, 0.55),  # Blonde
+	Color(0.55, 0.25, 0.15),  # Red
+	Color(0.35, 0.35, 0.40),  # Gray
+	Color(0.08, 0.06, 0.05),  # Very dark
+]
+
+# Skin tones palette (same order as AgentProfile indices)
+const SKIN_TONES: Array[Color] = [
+	Color(0.95, 0.82, 0.70),  # Light
+	Color(0.78, 0.60, 0.45),  # Medium
+	Color(0.55, 0.38, 0.28),  # Dark
+	Color(0.40, 0.28, 0.20),  # Very dark
+	Color(1.0, 0.90, 0.80),   # Very light
+]
+
 # Reference to badge system for badge info
 var badge_system: BadgeSystem = null
 var roster: AgentRoster = null
@@ -69,7 +90,7 @@ var roster: AgentRoster = null
 func _init() -> void:
 	# Set canvas layer to render above game (layer 0)
 	# Must be set in _init before node is added to tree
-	layer = 100
+	layer = OfficeConstants.Z_UI_POPUP_LAYER
 
 func _ready() -> void:
 	_create_visuals()
@@ -86,12 +107,14 @@ func _create_visuals() -> void:
 	# Create a Control container for all UI elements
 	container = Control.new()
 	container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	container.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(container)
 
 	# Semi-transparent background overlay
 	background = ColorRect.new()
 	background.size = Vector2(OfficeConstants.SCREEN_WIDTH, OfficeConstants.SCREEN_HEIGHT)
 	background.color = Color(0, 0, 0, 0.85)
+	background.mouse_filter = Control.MOUSE_FILTER_STOP
 	container.add_child(background)
 
 	# Main panel
@@ -109,6 +132,7 @@ func _create_visuals() -> void:
 	panel.size = Vector2(PANEL_WIDTH, PANEL_HEIGHT)
 	panel.position = Vector2(panel_x, panel_y)
 	panel.color = OfficePalette.GRUVBOX_BG
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	container.add_child(panel)
 
 	# Close button
@@ -138,6 +162,11 @@ func _create_visuals() -> void:
 	portrait_bg.size = Vector2(80, 100)
 	portrait_bg.color = OfficePalette.GRUVBOX_BG1
 	portrait_container.add_child(portrait_bg)
+
+	portrait_layer = Control.new()
+	portrait_layer.position = Vector2.ZERO
+	portrait_layer.size = Vector2(80, 100)
+	portrait_container.add_child(portrait_layer)
 
 	# Name and title (next to portrait)
 	var info_x = panel_x + 130
@@ -193,12 +222,25 @@ func _create_visuals() -> void:
 
 	# Badges
 	badges_label = Label.new()
-	badges_label.text = "Badges: None"
+	badges_label.text = "Badges:"
 	badges_label.position = Vector2(info_x, content_y + 100)
-	badges_label.size = Vector2(400, 20)
+	badges_label.size = Vector2(60, 20)
 	badges_label.add_theme_font_size_override("font_size", FONT_SIZE_BODY)
 	badges_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_YELLOW)
 	container.add_child(badges_label)
+
+	badges_scroll = ScrollContainer.new()
+	badges_scroll.position = Vector2(info_x + 70, content_y + 98)
+	badges_scroll.size = Vector2(330, 26)
+	badges_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	badges_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	badges_scroll.mouse_filter = Control.MOUSE_FILTER_STOP
+	container.add_child(badges_scroll)
+
+	badges_container = HBoxContainer.new()
+	badges_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	badges_container.add_theme_constant_override("separation", 6)
+	badges_scroll.add_child(badges_container)
 
 	# Divider line
 	var divider = ColorRect.new()
@@ -237,9 +279,9 @@ func _create_visuals() -> void:
 	skills_container.position = Vector2(panel_x + 200, stats_y)
 	container.add_child(skills_container)
 
-	# TOOLS section (right column)
+	# ACTIONS section (right column) - what they did while performing their skill
 	var tools_header = Label.new()
-	tools_header.text = "-- TOOLS --"
+	tools_header.text = "-- ACTIONS --"
 	tools_header.position = Vector2(panel_x + 470, section_y)
 	tools_header.add_theme_font_size_override("font_size", FONT_SIZE_HEADER)
 	tools_header.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT3)
@@ -294,18 +336,21 @@ func _populate_profile(profile: AgentProfile) -> void:
 	hired_label.text = "Hired: %s" % _format_date(profile.hired_at)
 	last_seen_label.text = "Last: %s" % _format_date(profile.last_seen)
 
+	_update_portrait(profile)
+
 	# Badges
+	for child in badges_container.get_children():
+		child.queue_free()
 	if profile.badges.is_empty():
-		badges_label.text = "Badges: None yet"
+		var none_label = Label.new()
+		none_label.text = "None yet"
+		none_label.add_theme_font_size_override("font_size", FONT_SIZE_SMALL)
+		none_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
+		none_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		badges_container.add_child(none_label)
 	else:
-		var badge_texts: Array[String] = []
 		for badge_id in profile.badges:
-			if badge_system:
-				var info = badge_system.get_badge_info(badge_id)
-				badge_texts.append("%s %s" % [info.get("icon", ""), info.get("name", badge_id)])
-			else:
-				badge_texts.append(badge_id)
-		badges_label.text = "Badges: " + ", ".join(badge_texts)
+			badges_container.add_child(_create_badge_icon(badge_id))
 
 	# Stats
 	tasks_label.text = "Tasks Done: %d" % profile.tasks_completed
@@ -322,6 +367,135 @@ func _populate_profile(profile: AgentProfile) -> void:
 
 	# Colleagues
 	_populate_colleagues(profile)
+
+func _update_portrait(profile: AgentProfile) -> void:
+	if not portrait_layer:
+		return
+	for child in portrait_layer.get_children():
+		child.queue_free()
+
+	var skin_color = SKIN_TONES[profile.skin_color_index % SKIN_TONES.size()]
+	var hair_color = HAIR_COLORS[profile.hair_color_index % HAIR_COLORS.size()]
+
+	# Head
+	var head = ColorRect.new()
+	head.size = Vector2(30, 30)
+	head.position = Vector2(25, 28)
+	head.color = skin_color
+	portrait_layer.add_child(head)
+
+	# Eyes
+	var left_eye = ColorRect.new()
+	left_eye.size = Vector2(4, 4)
+	left_eye.position = Vector2(33, 40)
+	left_eye.color = OfficePalette.EYE_COLOR
+	portrait_layer.add_child(left_eye)
+
+	var right_eye = ColorRect.new()
+	right_eye.size = Vector2(4, 4)
+	right_eye.position = Vector2(43, 40)
+	right_eye.color = OfficePalette.EYE_COLOR
+	portrait_layer.add_child(right_eye)
+
+	# Hair
+	if profile.is_female:
+		_create_female_portrait_hair(profile.hair_style_index, hair_color)
+	else:
+		_create_male_portrait_hair(hair_color)
+
+func _create_badge_icon(badge_id: String) -> Control:
+	var info = badge_system.get_badge_info(badge_id) if badge_system else {}
+	var icon_text = str(info.get("icon", "*")).strip_edges()
+	if icon_text.begins_with("[") and icon_text.ends_with("]") and icon_text.length() >= 3:
+		icon_text = icon_text.substr(1, icon_text.length() - 2)
+
+	var badge = Control.new()
+	badge.custom_minimum_size = Vector2(22, 22)
+	badge.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	# Tooltip with badge name and description
+	var badge_name = str(info.get("name", badge_id))
+	var badge_desc = str(info.get("description", ""))
+	badge.tooltip_text = badge_name + "\n" + badge_desc if badge_desc else badge_name
+
+	var border = ColorRect.new()
+	border.size = Vector2(22, 22)
+	border.position = Vector2.ZERO
+	border.color = OfficePalette.GRUVBOX_YELLOW
+	border.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.add_child(border)
+
+	var inner = ColorRect.new()
+	inner.size = Vector2(20, 20)
+	inner.position = Vector2(1, 1)
+	inner.color = OfficePalette.GRUVBOX_BG1
+	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.add_child(inner)
+
+	var icon = Label.new()
+	icon.text = icon_text
+	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	icon.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	icon.position = Vector2(0, 0)
+	icon.size = Vector2(22, 22)
+	icon.add_theme_font_size_override("font_size", 11)
+	icon.add_theme_color_override("font_color", OfficePalette.GRUVBOX_YELLOW_BRIGHT)
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.add_child(icon)
+
+	return badge
+
+func _create_male_portrait_hair(hair_color: Color) -> void:
+	var hair = ColorRect.new()
+	hair.size = Vector2(34, 10)
+	hair.position = Vector2(23, 20)
+	hair.color = hair_color
+	portrait_layer.add_child(hair)
+
+func _create_female_portrait_hair(style_index: int, hair_color: Color) -> void:
+	match style_index % 3:
+		0:
+			var hair_top = ColorRect.new()
+			hair_top.size = Vector2(36, 12)
+			hair_top.position = Vector2(22, 18)
+			hair_top.color = hair_color
+			portrait_layer.add_child(hair_top)
+
+			var hair_left = ColorRect.new()
+			hair_left.size = Vector2(6, 26)
+			hair_left.position = Vector2(20, 28)
+			hair_left.color = hair_color
+			portrait_layer.add_child(hair_left)
+
+			var hair_right = ColorRect.new()
+			hair_right.size = Vector2(6, 26)
+			hair_right.position = Vector2(54, 28)
+			hair_right.color = hair_color
+			portrait_layer.add_child(hair_right)
+		1:
+			var hair = ColorRect.new()
+			hair.size = Vector2(38, 16)
+			hair.position = Vector2(21, 20)
+			hair.color = hair_color
+			portrait_layer.add_child(hair)
+
+			var hair_sides = ColorRect.new()
+			hair_sides.size = Vector2(40, 10)
+			hair_sides.position = Vector2(20, 32)
+			hair_sides.color = hair_color
+			portrait_layer.add_child(hair_sides)
+		2:
+			var hair = ColorRect.new()
+			hair.size = Vector2(34, 12)
+			hair.position = Vector2(23, 20)
+			hair.color = hair_color
+			portrait_layer.add_child(hair)
+
+			var bun = ColorRect.new()
+			bun.size = Vector2(14, 14)
+			bun.position = Vector2(38, 10)
+			bun.color = hair_color
+			portrait_layer.add_child(bun)
 
 func _populate_skills(profile: AgentProfile) -> void:
 	# Clear existing
@@ -342,7 +516,9 @@ func _populate_skills(profile: AgentProfile) -> void:
 	var y = 0
 	for i in range(min(6, sorted_skills.size())):
 		var skill = sorted_skills[i]
-		var bar = _create_bar(skill.name, skill.data.tasks, max_tasks, OfficePalette.GRUVBOX_GREEN)
+		var time_hrs = skill.data.time / 3600.0
+		var tooltip = "%s\n%d tasks completed\n%.1f hours worked" % [skill.name, skill.data.tasks, time_hrs]
+		var bar = _create_bar(skill.name, skill.data.tasks, max_tasks, OfficePalette.GRUVBOX_GREEN, tooltip)
 		bar.position.y = y
 		skills_container.add_child(bar)
 		skill_bars.append(bar)
@@ -374,7 +550,8 @@ func _populate_tools(profile: AgentProfile) -> void:
 	var y = 0
 	for i in range(min(6, sorted_tools.size())):
 		var tool = sorted_tools[i]
-		var bar = _create_bar(tool.name, tool.count, max_count, OfficePalette.GRUVBOX_BLUE)
+		var tooltip = "%s\nUsed %d times" % [tool.name, tool.count]
+		var bar = _create_bar(tool.name, tool.count, max_count, OfficePalette.GRUVBOX_BLUE, tooltip)
 		bar.position.y = y
 		tools_container.add_child(bar)
 		tool_bars.append(bar)
@@ -382,13 +559,17 @@ func _populate_tools(profile: AgentProfile) -> void:
 
 	if sorted_tools.is_empty():
 		var empty = Label.new()
-		empty.text = "No tools yet"
+		empty.text = "No actions yet"
 		empty.add_theme_font_size_override("font_size", FONT_SIZE_SMALL)
 		empty.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
 		tools_container.add_child(empty)
 
-func _create_bar(label_text: String, value: int, max_value: int, color: Color) -> Control:
+func _create_bar(label_text: String, value: int, max_value: int, color: Color, tooltip: String = "") -> Control:
 	var bar_container = Control.new()
+	bar_container.custom_minimum_size = Vector2(190, 16)
+	bar_container.mouse_filter = Control.MOUSE_FILTER_STOP
+	if tooltip:
+		bar_container.tooltip_text = tooltip
 
 	# Truncate long names
 	var display_name = label_text
@@ -400,6 +581,7 @@ func _create_bar(label_text: String, value: int, max_value: int, color: Color) -
 	label.size = Vector2(80, 16)
 	label.add_theme_font_size_override("font_size", FONT_SIZE_SMALL)
 	label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar_container.add_child(label)
 
 	var bar_width = 80.0 * (float(value) / float(max_value))
@@ -407,6 +589,7 @@ func _create_bar(label_text: String, value: int, max_value: int, color: Color) -
 	bar.size = Vector2(max(2, bar_width), 12)
 	bar.position = Vector2(85, 2)
 	bar.color = color
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar_container.add_child(bar)
 
 	var count = Label.new()
@@ -414,6 +597,7 @@ func _create_bar(label_text: String, value: int, max_value: int, color: Color) -
 	count.position = Vector2(170, 0)
 	count.add_theme_font_size_override("font_size", FONT_SIZE_SMALL)
 	count.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT3)
+	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar_container.add_child(count)
 
 	return bar_container

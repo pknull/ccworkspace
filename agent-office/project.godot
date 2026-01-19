@@ -10,7 +10,7 @@ config_version=5
 
 [application]
 
-config/name="Claude Office"
+config/name="Inference Inc."
 config/version="1.0.0"
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.5", "Forward Plus")

@@ -3,7 +3,38 @@ class_name Agent
 
 signal work_completed(agent: Agent)
 
-enum State { SPAWNING, WALKING_TO_DESK, WORKING, DELIVERING, SOCIALIZING, LEAVING, COMPLETING, IDLE, MEETING, FURNITURE_TOUR, CHATTING }
+enum State { SPAWNING, WALKING_TO_DESK, WORKING, DELIVERING, SOCIALIZING, LEAVING, COMPLETING, IDLE, MEETING, FURNITURE_TOUR, CHATTING, WANDERING }
+enum Mood { CONTENT, TIRED, FRUSTRATED, IRATE }
+
+# Debug event logging helper - safely logs if DebugEventLog exists
+func _log_debug_event(category: String, message: String) -> void:
+	var debug_log = get_node_or_null("/root/Main/DebugEventLog")
+	if debug_log == null:
+		# Try static instance via class lookup
+		var script = load("res://scripts/DebugEventLog.gd")
+		if script and script.get("instance"):
+			debug_log = script.instance
+	if debug_log and debug_log.has_method("add_event"):
+		debug_log.add_event(category, message, agent_id)
+
+# Mood thresholds (in seconds)
+const MOOD_TIRED_THRESHOLD: float = 1800.0      # 30 minutes
+const MOOD_FRUSTRATED_THRESHOLD: float = 3600.0  # 1 hour
+const MOOD_IRATE_THRESHOLD: float = 7200.0       # 2 hours
+
+# Mood-specific phrases for spontaneous bubbles
+const TIRED_PHRASES = [
+	"*yawn*", "Need coffee...", "Getting tired.", "Long day...",
+	"*stretches*", "How much longer?", "Break soon?",
+]
+const FRUSTRATED_PHRASES = [
+	"Ugh.", "Really?", "*sigh*", "Come on...", "Why...",
+	"This again?", "Seriously?", "Not ideal.",
+]
+const IRATE_PHRASES = [
+	"ENOUGH!", "I'M DONE.", "*grumble*", "UGH!",
+	"GET ME OUT.", "THIS IS RIDICULOUS", "WHY.",
+]
 
 # Dynamic agent type assignment - colors/labels assigned as agents appear
 # All agent types get assigned colors from the pool dynamically
@@ -103,6 +134,8 @@ var shredder_position: Vector2 = OfficeConstants.SHREDDER_POSITION
 var water_cooler_position: Vector2 = OfficeConstants.WATER_COOLER_POSITION
 var plant_position: Vector2 = OfficeConstants.PLANT_POSITION
 var filing_cabinet_position: Vector2 = OfficeConstants.FILING_CABINET_POSITION
+var taskboard_position: Vector2 = OfficeConstants.TASKBOARD_POSITION
+var meeting_table_position: Vector2 = OfficeConstants.MEETING_TABLE_POSITION
 var door_position: Vector2 = OfficeConstants.SPAWN_POINT
 
 # Floor bounds (agents can only walk here) - use centralized constants
@@ -123,6 +156,18 @@ const CHAT_DURATION_MIN: float = 3.0
 const CHAT_DURATION_MAX: float = 6.0
 const CHAT_COOLDOWN_TIME: float = 15.0  # Time before this agent can chat again
 const CHAT_PROXIMITY: float = 60.0  # How close agents need to be to start chatting
+const POST_CHAT_EXIT_CHANCE: float = 0.35  # Chance to leave the office after a chat
+const SOCIAL_SPOT_COOLDOWN: float = 20.0  # Seconds before revisiting the same spot
+
+# Navigation nudge constants (for path retry when initial path fails)
+const NAV_NUDGE_MAX_RETRIES: int = 2     # Max times to retry finding a path
+const NAV_NUDGE_SAMPLES: int = 3         # Random offset samples per retry
+const NAV_NUDGE_RADIUS: float = 40.0     # Radius for random offset when nudging destination
+
+# Stuck detection constants
+const WALK_STUCK_THRESHOLD: float = 0.5  # Distance below which agent is considered stuck
+const WALK_STUCK_TIMEOUT: float = 1.2    # Seconds before stuck recovery triggers
+const WALK_NUDGE_RADIUS: float = 18.0    # Radius for random recovery nudge
 
 # Cat interaction
 var cat_reaction_cooldown: float = 0.0
@@ -131,6 +176,12 @@ const CAT_REACTION_COOLDOWN_TIME: float = 30.0  # Time before reacting to cat ag
 # Meeting overflow state
 var is_in_meeting: bool = false
 var meeting_spot: Vector2 = Vector2.ZERO
+
+# Interaction point reservation
+var current_interaction_furniture: String = ""  # Which furniture we're at
+var current_interaction_point_idx: int = -1     # Which point index we reserved
+var wander_retries: int = 0                     # How many times we've wandered without finding a spot
+const MAX_WANDER_RETRIES: int = 3               # Give up and leave after this many attempts
 
 # Furniture tour (for smoke testing)
 var furniture_tour_active: bool = false
@@ -143,11 +194,25 @@ var current_waypoint_index: int = 0
 var navigation_grid: NavigationGrid = null  # Set by OfficeManager for grid-based pathfinding
 var current_destination: Vector2 = Vector2.ZERO  # Track where we're heading
 var destination_furniture: String = ""  # Track which furniture we're heading to (for recalculation)
+
+const TOUR_CLEARANCE: int = 1
 var spawn_timer: float = 0.0
 var is_waiting_for_completion: bool = true
 var pending_completion: bool = false
 var min_work_time: float = OfficeConstants.MIN_WORK_TIME
 var work_elapsed: float = 0.0
+var last_task_duration: float = 0.0  # Duration of most recently completed task
+var walk_speed_multiplier: float = 1.0
+
+# Mood system - agents get tired/frustrated the longer they work
+var time_on_floor: float = 0.0
+var current_mood: Mood = Mood.CONTENT
+var mood_indicator: Label = null  # Shows mood emoji above head
+
+# Audio
+var audio_manager = null  # AudioManager instance
+var typing_timer: float = 0.0
+const TYPING_INTERVAL: float = 0.3  # How often to trigger typing sound
 
 # Document being carried
 var document: ColorRect = null
@@ -182,6 +247,13 @@ var appearance_applied: bool = false  # Track if persistent appearance was appli
 # Personal items this worker brings to their desk
 var personal_item_types: Array[String] = []  # Which items this worker has
 
+# Per-agent cooldowns for social spots (spot_key -> seconds remaining)
+var social_spot_cooldowns: Dictionary = {}
+var nav_nudge_retries: int = 0
+var nav_retry_target: Vector2 = Vector2.ZERO
+var walk_last_position: Vector2 = Vector2.ZERO
+var walk_stuck_timer: float = 0.0
+
 # Click reactions
 var reaction_phrases: Array[String] = []  # This worker's personality phrases
 var reaction_bubble: Node2D = null
@@ -204,8 +276,7 @@ var base_head_y: float = -35
 var base_body_y: float = -15
 
 func _init() -> void:
-	_create_visuals()
-	_visuals_created = true
+	pass
 
 func _ready() -> void:
 	if not _visuals_created:
@@ -218,8 +289,11 @@ func _ready() -> void:
 	spawn_timer = OfficeConstants.AGENT_SPAWN_FADE_TIME
 	# Initialize fidget timing
 	next_fidget_time = randf_range(OfficeConstants.FIDGET_TIME_MIN, OfficeConstants.FIDGET_TIME_MAX)
+	walk_speed_multiplier = randf_range(0.9, 1.1)
+	walk_last_position = position
 
 func _create_visuals() -> void:
+	_ensure_ui_nodes()
 	# Randomly determine gender and appearance
 	is_female = randf() < 0.5
 
@@ -255,6 +329,9 @@ func _create_visuals() -> void:
 
 	# Eyes are now added as children of head in _create_male/female_visuals
 
+func _ensure_ui_nodes() -> void:
+	if type_label:
+		return
 	# Type label (hidden - clutters the view)
 	type_label = Label.new()
 	type_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -545,6 +622,7 @@ func _create_tooltip() -> void:
 	tooltip_panel.color = OfficePalette.TOOLTIP_BG
 	tooltip_panel.visible = false
 	tooltip_panel.z_index = OfficeConstants.Z_UI_TOOLTIP  # Always on top
+	tooltip_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(tooltip_panel)
 
 	# Tooltip border
@@ -552,12 +630,14 @@ func _create_tooltip() -> void:
 	border.size = Vector2(280, 220)
 	border.position = Vector2(0, 0)
 	border.color = OfficePalette.TOOLTIP_BORDER
+	border.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tooltip_panel.add_child(border)
 
 	var inner = ColorRect.new()
 	inner.size = Vector2(276, 216)
 	inner.position = Vector2(2, 2)
 	inner.color = OfficePalette.GRUVBOX_LIGHT
+	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tooltip_panel.add_child(inner)
 
 	# Tooltip header
@@ -567,6 +647,7 @@ func _create_tooltip() -> void:
 	header.size = Vector2(268, 16)
 	header.add_theme_font_size_override("font_size", 11)
 	header.add_theme_color_override("font_color", OfficePalette.GRUVBOX_BG2)
+	header.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tooltip_panel.add_child(header)
 
 	# Divider line
@@ -574,6 +655,7 @@ func _create_tooltip() -> void:
 	divider.size = Vector2(268, 1)
 	divider.position = Vector2(6, 20)
 	divider.color = OfficePalette.TOOLTIP_DIVIDER
+	divider.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tooltip_panel.add_child(divider)
 
 	# Tooltip content - sized for up to 500 characters with word wrap
@@ -583,6 +665,7 @@ func _create_tooltip() -> void:
 	tooltip_label.add_theme_font_size_override("font_size", 9)
 	tooltip_label.add_theme_color_override("font_color", OfficePalette.UI_TEXT_DARK)
 	tooltip_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	tooltip_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tooltip_panel.add_child(tooltip_label)
 
 func _update_appearance() -> void:
@@ -610,6 +693,7 @@ func _apply_appearance_values(p_is_female: bool, p_hair_index: int, p_skin_index
 		return  # Don't apply twice
 
 	appearance_applied = true
+	_ensure_ui_nodes()
 
 	# Hair colors palette
 	var hair_colors = [
@@ -630,9 +714,10 @@ func _apply_appearance_values(p_is_female: bool, p_hair_index: int, p_skin_index
 		OfficePalette.SKIN_VERY_LIGHT,
 	]
 
-	# Always clear and recreate visuals with profile appearance
-	# This ensures consistent appearance regardless of random initial state
-	_clear_visual_nodes()
+	if _visuals_created:
+		# Always clear and recreate visuals with profile appearance
+		# This ensures consistent appearance regardless of random initial state
+		_clear_visual_nodes()
 
 	is_female = p_is_female
 	hair_color = hair_colors[p_hair_index % hair_colors.size()]
@@ -644,6 +729,7 @@ func _apply_appearance_values(p_is_female: bool, p_hair_index: int, p_skin_index
 		_create_female_visuals_persistent(skin_color, hair_color, hair_style_index, blouse_color_index)
 	else:
 		_create_male_visuals_persistent(skin_color, hair_color)
+	_visuals_created = true
 
 func _clear_visual_nodes() -> void:
 	# Clear body-related visual nodes for recreation
@@ -916,7 +1002,14 @@ func _create_female_visuals_persistent(p_skin_color: Color, p_hair_color: Color,
 
 func _process(delta: float) -> void:
 	# Update z_index based on Y position - agents lower on screen render in front
-	z_index = int(position.y)
+	var new_z = int(position.y)
+	if new_z != z_index:
+		z_index = new_z
+
+	# Track time on floor and update mood
+	if state != State.SPAWNING and state != State.COMPLETING:
+		time_on_floor += delta
+		_update_mood()
 
 	_check_mouse_hover()
 	_update_reaction_timer(delta)
@@ -926,6 +1019,7 @@ func _process(delta: float) -> void:
 		chat_cooldown -= delta
 	if cat_reaction_cooldown > 0:
 		cat_reaction_cooldown -= delta
+	_update_social_spot_cooldowns(delta)
 
 	match state:
 		State.SPAWNING:
@@ -952,6 +1046,8 @@ func _process(delta: float) -> void:
 			_process_walking_path(delta)
 		State.CHATTING:
 			_process_chatting(delta)
+		State.WANDERING:
+			_process_wandering(delta)
 
 func _check_mouse_hover() -> void:
 	var mouse_pos = get_local_mouse_position()
@@ -1006,6 +1102,7 @@ func _show_tooltip() -> void:
 				State.IDLE: state_text = "Idle"
 				State.MEETING: state_text = "In meeting"
 				State.CHATTING: state_text = "Small talk"
+				State.WANDERING: state_text = "Looking around"
 
 			# Build tooltip content
 			var lines: Array[String] = []
@@ -1015,6 +1112,14 @@ func _show_tooltip() -> void:
 			if state == State.WORKING and work_elapsed > 0:
 				status_line += " (%.0fs)" % work_elapsed
 			lines.append(status_line)
+
+			# Mood and floor time
+			var floor_time = get_floor_time_text()
+			var mood_text = get_mood_text()
+			if mood_text:
+				lines.append("Mood: " + mood_text + (" (%s)" % floor_time if floor_time else ""))
+			elif floor_time:
+				lines.append(floor_time)
 
 			# Badges (if any)
 			if not profile_badges.is_empty():
@@ -1077,7 +1182,12 @@ func _process_walking_path(delta: float) -> void:
 			_on_path_complete()
 		return
 
-	var new_pos = position + direction.normalized() * OfficeConstants.AGENT_WALK_SPEED * delta
+	var speed = OfficeConstants.AGENT_WALK_SPEED * walk_speed_multiplier
+	var distance = direction.length()
+	if current_waypoint_index >= path_waypoints.size() - 1:
+		var slow_factor = clamp(distance / 30.0, 0.4, 1.0)
+		speed *= slow_factor
+	var new_pos = position + direction.normalized() * speed * delta
 
 	# Clamp to floor bounds
 	new_pos.x = clamp(new_pos.x, FLOOR_MIN_X, FLOOR_MAX_X)
@@ -1100,6 +1210,51 @@ func _process_walking_path(delta: float) -> void:
 
 	position = new_pos
 
+	if position.distance_to(walk_last_position) < WALK_STUCK_THRESHOLD:
+		walk_stuck_timer += delta
+		if walk_stuck_timer >= WALK_STUCK_TIMEOUT:
+			_recover_from_stuck()
+			walk_stuck_timer = 0.0
+	else:
+		walk_stuck_timer = 0.0
+	walk_last_position = position
+
+func _recover_from_stuck() -> void:
+	if current_destination == Vector2.ZERO:
+		return
+
+	_log_debug_event("STUCK", "Stuck recovery triggered at %s" % position)
+
+	if navigation_grid and _try_nudge_path(current_destination, destination_furniture):
+		_log_debug_event("STUCK", "Nudge path succeeded")
+		return
+
+	for _i in range(6):
+		var nudge = position + Vector2(
+			randf_range(-WALK_NUDGE_RADIUS, WALK_NUDGE_RADIUS),
+			randf_range(-WALK_NUDGE_RADIUS, WALK_NUDGE_RADIUS)
+		)
+		nudge.x = clamp(nudge.x, FLOOR_MIN_X, FLOOR_MAX_X)
+		nudge.y = clamp(nudge.y, FLOOR_MIN_Y, FLOOR_MAX_Y)
+
+		if navigation_grid:
+			var grid_pos = navigation_grid.world_to_grid(nudge)
+			if navigation_grid.is_valid_grid_pos(grid_pos) and navigation_grid.is_walkable(grid_pos):
+				_log_debug_event("STUCK", "Random nudge to %s" % nudge)
+				position = nudge
+				_build_path_to(current_destination, destination_furniture)
+				return
+		else:
+			position = nudge
+			return
+	_log_debug_event("STUCK", "All recovery attempts failed, forcing idle")
+	# Fallback: clean up state and go idle to prevent infinite stuck loop
+	path_waypoints.clear()
+	current_waypoint_index = 0
+	walk_stuck_timer = 0.0
+	# Release any reserved resources (desk, meeting spot) before going idle
+	_handle_unreachable_destination()
+
 func set_obstacles(obs: Array[Rect2]) -> void:
 	obstacles = obs
 
@@ -1112,6 +1267,7 @@ func _on_path_complete() -> void:
 			# Arrived at desk, start working
 			work_elapsed = 0.0
 			state = State.WORKING
+			_log_debug_event("STATE", "Started working at desk")
 			# Turn on monitor now that agent has arrived
 			if assigned_desk and assigned_desk.has_method("set_monitor_active"):
 				assigned_desk.set_monitor_active(true)
@@ -1168,30 +1324,134 @@ func _furniture_tour_arrived() -> void:
 		if is_instance_valid(self):
 			_start_leaving()
 
+func _is_walkable_with_clearance(world_pos: Vector2, clearance: int = TOUR_CLEARANCE) -> bool:
+	if not navigation_grid:
+		return true
+	var grid_pos = navigation_grid.world_to_grid(world_pos)
+	if not navigation_grid.is_valid_grid_pos(grid_pos):
+		return false
+	for dx in range(-clearance, clearance + 1):
+		for dy in range(-clearance, clearance + 1):
+			var neighbor = Vector2i(grid_pos.x + dx, grid_pos.y + dy)
+			if not navigation_grid.is_valid_grid_pos(neighbor) or not navigation_grid.is_walkable(neighbor):
+				return false
+	return true
+
+func _pick_tour_target(candidates: Array[Vector2], fallback: Vector2) -> Vector2:
+	if candidates.is_empty():
+		return fallback
+	if not navigation_grid:
+		return candidates[randi() % candidates.size()]
+
+	var shuffled = candidates.duplicate()
+	shuffled.shuffle()
+
+	for candidate in shuffled:
+		if _is_walkable_with_clearance(candidate):
+			return candidate
+
+	for candidate in shuffled:
+		var grid_pos = navigation_grid.world_to_grid(candidate)
+		if navigation_grid.is_valid_grid_pos(grid_pos) and navigation_grid.is_walkable(grid_pos):
+			return candidate
+
+	return fallback
+
+func _order_tour_targets_by_distance(targets: Array) -> Array:
+	if targets.size() <= 1:
+		return targets
+
+	var remaining = targets.duplicate()
+	var ordered: Array = []
+	var current_pos = position
+
+	while not remaining.is_empty():
+		var best_index = 0
+		var best_distance = INF
+		for i in range(remaining.size()):
+			var candidate = remaining[i]
+			var distance = current_pos.distance_to(candidate["pos"])
+			if distance < best_distance:
+				best_distance = distance
+				best_index = i
+		var next_target = remaining.pop_at(best_index)
+		ordered.append(next_target)
+		current_pos = next_target["pos"]
+
+	return ordered
+
 func start_furniture_tour(meeting_table_pos: Vector2 = Vector2.ZERO) -> void:
 	"""Start a furniture tour visiting all furniture items."""
 	print("[Agent %s] Starting furniture tour" % agent_id)
 	furniture_tour_active = true
 	furniture_tour_index = 0
 
-	# Define tour targets - visit each side of furniture where possible
-	furniture_tour_targets = [
-		{"pos": water_cooler_position + Vector2(40, 0), "name": "Water Cooler (right)", "status": "At water cooler..."},
-		{"pos": water_cooler_position + Vector2(-40, 0), "name": "Water Cooler (left)", "status": "At water cooler..."},
-		{"pos": plant_position + Vector2(40, 0), "name": "Plant (right)", "status": "Admiring plant..."},
-		{"pos": plant_position + Vector2(-40, 0), "name": "Plant (left)", "status": "Admiring plant..."},
-		{"pos": filing_cabinet_position + Vector2(40, 0), "name": "Filing Cabinet (right)", "status": "Checking files..."},
-		{"pos": filing_cabinet_position + Vector2(-40, 0), "name": "Filing Cabinet (left)", "status": "Checking files..."},
-		{"pos": shredder_position + Vector2(-50, 0), "name": "Shredder (left)", "status": "At shredder..."},
-		{"pos": shredder_position + Vector2(0, 40), "name": "Shredder (front)", "status": "At shredder..."},
+	var targets: Array = []
+
+	var cooler_candidates = [
+		water_cooler_position + Vector2(50, 0),
+		water_cooler_position + Vector2(50, 30),
+		water_cooler_position + Vector2(50, -30),
+		water_cooler_position + Vector2(20, 50),
 	]
+	targets.append({
+		"pos": _pick_tour_target(cooler_candidates, water_cooler_position + Vector2(50, 0)),
+		"name": "Water Cooler",
+		"status": "At water cooler..."
+	})
+
+	var plant_candidates = [
+		plant_position + Vector2(50, 0),
+		plant_position + Vector2(50, 30),
+		plant_position + Vector2(50, -30),
+		plant_position + Vector2(20, 50),
+	]
+	targets.append({
+		"pos": _pick_tour_target(plant_candidates, plant_position + Vector2(50, 0)),
+		"name": "Plant",
+		"status": "Admiring plant..."
+	})
+
+	var filing_candidates = [
+		filing_cabinet_position + Vector2(50, 0),
+		filing_cabinet_position + Vector2(50, 30),
+		filing_cabinet_position + Vector2(50, -30),
+		filing_cabinet_position + Vector2(30, 50),
+	]
+	targets.append({
+		"pos": _pick_tour_target(filing_candidates, filing_cabinet_position + Vector2(50, 0)),
+		"name": "Filing Cabinet",
+		"status": "Checking files..."
+	})
+
+	var shredder_candidates = [
+		shredder_position + Vector2(-60, 0),
+		shredder_position + Vector2(-60, 30),
+		shredder_position + Vector2(-60, -30),
+		shredder_position + Vector2(0, 50),
+	]
+	targets.append({
+		"pos": _pick_tour_target(shredder_candidates, shredder_position + Vector2(-60, 0)),
+		"name": "Shredder",
+		"status": "At shredder..."
+	})
 
 	# Add meeting table if position provided
 	if meeting_table_pos != Vector2.ZERO:
-		furniture_tour_targets.append({"pos": meeting_table_pos + Vector2(-70, 0), "name": "Meeting Table (left)", "status": "At meeting table..."})
-		furniture_tour_targets.append({"pos": meeting_table_pos + Vector2(70, 0), "name": "Meeting Table (right)", "status": "At meeting table..."})
-		furniture_tour_targets.append({"pos": meeting_table_pos + Vector2(0, -40), "name": "Meeting Table (top)", "status": "At meeting table..."})
-		furniture_tour_targets.append({"pos": meeting_table_pos + Vector2(0, 40), "name": "Meeting Table (bottom)", "status": "At meeting table..."})
+		var meeting_candidates = [
+			meeting_table_pos + Vector2(-70, 40),
+			meeting_table_pos + Vector2(70, 40),
+			meeting_table_pos + Vector2(-70, -40),
+			meeting_table_pos + Vector2(70, -40),
+			meeting_table_pos + Vector2(0, 60),
+		]
+		targets.append({
+			"pos": _pick_tour_target(meeting_candidates, meeting_table_pos + Vector2(0, 60)),
+			"name": "Meeting Table",
+			"status": "At meeting table..."
+		})
+
+	furniture_tour_targets = _order_tour_targets_by_distance(targets)
 
 	# Start walking to first target
 	state = State.FURNITURE_TOUR
@@ -1200,34 +1460,176 @@ func start_furniture_tour(meeting_table_pos: Vector2 = Vector2.ZERO) -> void:
 	var first_target = furniture_tour_targets[0]
 	_build_path_to(first_target["pos"])
 
-func _pick_post_work_action() -> void:
-	# After delivering, randomly pick: socialize at water cooler/plant, or exit
-	# Water cooler and plant are the social spots; filing cabinet is now part of delivery
-	var options = [
-		{"type": "socialize", "pos": water_cooler_position, "name": "Water cooler chat...", "furniture": "water_cooler"},
-		{"type": "socialize", "pos": water_cooler_position, "name": "Getting a drink...", "furniture": "water_cooler"},
-		{"type": "socialize", "pos": plant_position, "name": "Admiring the plant...", "furniture": "plant"},
-		{"type": "socialize", "pos": plant_position, "name": "Watering the plant...", "furniture": "plant"},
-		{"type": "exit", "pos": door_position, "name": "Heading out...", "furniture": ""},
-		{"type": "exit", "pos": door_position, "name": "Time to go...", "furniture": ""},
-	]
-	var choice = options[randi() % options.size()]
+func _pick_post_work_action(allow_exit: bool = true) -> void:
+	# Release any current interaction point before picking a new action
+	_release_current_interaction_point()
+
+	# After delivering, pick: socialize around the office, or exit
+	var options = _get_social_spots()
+	if allow_exit:
+		options.append({"type": "exit", "pos": door_position, "name": "Heading out...", "furniture": ""})
+		options.append({"type": "exit", "pos": door_position, "name": "Time to go...", "furniture": ""})
+	var choice = _choose_social_spot(options)
 
 	if choice["type"] == "exit":
 		_start_leaving()
 	else:
-		_start_socializing_at(choice["pos"], choice["name"], choice.get("furniture", ""))
+		_mark_social_spot_cooldown(choice)
+		_start_socializing_at(choice["pos"], choice["name"], choice.get("furniture", ""), choice.get("offset", true))
 
-func _start_socializing_at(target_pos: Vector2, status_text: String, furniture_name: String = "") -> void:
+func _get_social_spots() -> Array:
+	return [
+		{"type": "socialize", "pos": water_cooler_position, "name": "Water cooler chat...", "furniture": "water_cooler", "offset": true, "weight": 3.0, "cooldown_key": "water_cooler"},
+		{"type": "socialize", "pos": water_cooler_position, "name": "Getting a drink...", "furniture": "water_cooler", "offset": true, "weight": 3.0, "cooldown_key": "water_cooler"},
+		{"type": "socialize", "pos": plant_position, "name": "Admiring the plant...", "furniture": "plant", "offset": true, "weight": 3.0, "cooldown_key": "plant"},
+		{"type": "socialize", "pos": plant_position, "name": "Watering the plant...", "furniture": "plant", "offset": true, "weight": 3.0, "cooldown_key": "plant"},
+		{"type": "socialize", "pos": _get_random_filing_cabinet_approach(), "name": "Checking files...", "furniture": "filing_cabinet", "offset": false, "weight": 1.0, "cooldown_key": "filing_cabinet"},
+		{"type": "socialize", "pos": _get_random_shredder_approach(), "name": "Shredding leftovers...", "furniture": "shredder", "offset": false, "weight": 1.0, "cooldown_key": "shredder"},
+		{"type": "socialize", "pos": _get_random_taskboard_approach(), "name": "Reviewing tasks...", "furniture": "taskboard", "offset": false, "weight": 2.0, "cooldown_key": "taskboard"},
+		{"type": "socialize", "pos": _get_random_meeting_table_approach(), "name": "Passing the table...", "furniture": "meeting_table", "offset": false, "weight": 2.0, "cooldown_key": "meeting_table"},
+	]
+
+func _choose_social_spot(options: Array) -> Dictionary:
+	var available: Array = []
+	for option in options:
+		if option.get("type", "") == "exit":
+			available.append(option)
+			continue
+		var key = option.get("cooldown_key", "")
+		if key.is_empty() or not social_spot_cooldowns.has(key):
+			available.append(option)
+
+	if available.is_empty():
+		available = options
+
+	var total_weight = 0.0
+	for option in available:
+		total_weight += float(option.get("weight", 1.0))
+
+	var roll = randf() * total_weight
+	for option in available:
+		roll -= float(option.get("weight", 1.0))
+		if roll <= 0.0:
+			return option
+
+	return available[available.size() - 1]
+
+func _mark_social_spot_cooldown(option: Dictionary) -> void:
+	var key = option.get("cooldown_key", "")
+	if key.is_empty():
+		return
+	social_spot_cooldowns[key] = SOCIAL_SPOT_COOLDOWN
+
+func _update_social_spot_cooldowns(delta: float) -> void:
+	if social_spot_cooldowns.is_empty():
+		return
+	var to_clear: Array[String] = []
+	for key in social_spot_cooldowns.keys():
+		var remaining = float(social_spot_cooldowns[key]) - delta
+		if remaining <= 0.0:
+			to_clear.append(key)
+		else:
+			social_spot_cooldowns[key] = remaining
+	for key in to_clear:
+		social_spot_cooldowns.erase(key)
+
+func _start_socializing_at(target_pos: Vector2, status_text: String, furniture_name: String = "", apply_offset: bool = true) -> void:
+	# Release any previously held interaction point
+	_release_current_interaction_point()
+
+	# Check if this furniture uses interaction points
+	if office_manager and _is_tracked_furniture(furniture_name):
+		var point_idx = office_manager.reserve_interaction_point(furniture_name, agent_id)
+		if point_idx == -1:
+			# All points occupied - start wandering
+			_start_wandering()
+			return
+
+		# Use the reserved point position
+		current_interaction_furniture = furniture_name
+		current_interaction_point_idx = point_idx
+		target_pos = office_manager.get_interaction_point_position(furniture_name, point_idx)
+		apply_offset = false  # Position is exact, no offset needed
+		wander_retries = 0  # Reset on successful reservation
+
 	socialize_timer = randf_range(OfficeConstants.SOCIALIZE_TIME_MIN, OfficeConstants.SOCIALIZE_TIME_MAX)
 	state = State.SOCIALIZING
-	# Add some randomness to exact position
-	_build_path_to(target_pos + Vector2(randf_range(20, 50), randf_range(-20, 20)), furniture_name)
+	var spot_name = furniture_name if furniture_name else "spot"
+	_log_debug_event("STATE", "Socializing at %s" % spot_name)
+	var destination = target_pos
+	if apply_offset:
+		# Add some randomness to exact position
+		destination += Vector2(randf_range(20, 50), randf_range(-20, 20))
+	_build_path_to(destination, furniture_name)
 	if status_label:
 		status_label.text = status_text
 
+func _is_tracked_furniture(furniture_name: String) -> bool:
+	"""Check if this furniture uses the interaction point system."""
+	return furniture_name in ["water_cooler", "plant", "filing_cabinet", "shredder", "taskboard"]
+
+func _release_current_interaction_point() -> void:
+	"""Release any interaction point we're currently holding."""
+	if office_manager and current_interaction_furniture:
+		office_manager.release_interaction_point(agent_id)
+		current_interaction_furniture = ""
+		current_interaction_point_idx = -1
+
+func _start_wandering() -> void:
+	"""Start wandering when no interaction points are available."""
+	state = State.WANDERING
+	_log_debug_event("STATE", "Wandering (no spots available, attempt %d)" % (wander_retries + 1))
+
+	# Pick a random position in the main aisle area
+	var wander_pos = Vector2(
+		randf_range(OfficeConstants.FLOOR_MIN_X + 150, OfficeConstants.FLOOR_MAX_X - 150),
+		randf_range(OfficeConstants.MAIN_AISLE_Y - 30, OfficeConstants.FLOOR_MAX_Y - 50)
+	)
+
+	socialize_timer = randf_range(OfficeConstants.SOCIALIZE_TIME_MIN, OfficeConstants.SOCIALIZE_TIME_MAX)
+	_build_path_to(wander_pos)
+
+	if status_label:
+		status_label.text = "Looking around..."
+
+func _process_wandering(delta: float) -> void:
+	"""Process wandering state - walk to random position, then retry finding a spot."""
+	# If we have waypoints, keep walking
+	if not path_waypoints.is_empty():
+		_process_walking_path(delta)
+		return
+
+	# Idle animation while waiting (looking around)
+	if body:
+		body.position.y = -15 + sin(Time.get_ticks_msec() * 0.003) * 1.5
+	if head:
+		head.position.y = -35 + sin(Time.get_ticks_msec() * 0.003 + 0.5) * 1.5
+
+	# Count down timer
+	socialize_timer -= delta
+	if socialize_timer <= 0:
+		wander_retries += 1
+		if wander_retries >= MAX_WANDER_RETRIES:
+			# Give up, leave the office
+			_log_debug_event("STATE", "Giving up after %d wander attempts" % MAX_WANDER_RETRIES)
+			_start_leaving()
+		else:
+			# Try to find a social spot again
+			_pick_post_work_action()
+
 func _start_leaving() -> void:
+	_log_debug_event("STATE", "Leaving office")
+
+	# Release any interaction point before leaving
+	_release_current_interaction_point()
+
 	state = State.LEAVING
+	# Release desk and turn off monitor before leaving
+	if assigned_desk:
+		if assigned_desk.has_method("hide_tool"):
+			assigned_desk.hide_tool()
+		assigned_desk.set_occupied(false)
+		assigned_desk = null
 	_build_path_to(door_position)
 	if status_label:
 		status_label.text = "Heading out..."
@@ -1280,6 +1682,7 @@ func start_chat_with(other_agent: Agent) -> void:
 	chatting_with = other_agent
 	chat_timer = randf_range(CHAT_DURATION_MIN, CHAT_DURATION_MAX)
 	state = State.CHATTING
+	_log_debug_event("STATE", "Started chatting with %s" % other_agent.agent_id.substr(0, 8))
 
 	# Stop walking
 	path_waypoints.clear()
@@ -1300,14 +1703,26 @@ func start_chat_with(other_agent: Agent) -> void:
 func end_chat() -> void:
 	chat_cooldown = CHAT_COOLDOWN_TIME
 	chatting_with = null
-	state = State.IDLE
 
 	# Reset head position after facing other agent
 	if head:
 		head.position.x = -9  # Default center position
 
-	if status_label:
-		status_label.text = "Idle"
+	_start_post_chat_action()
+
+func _start_post_chat_action() -> void:
+	var exit_chance = POST_CHAT_EXIT_CHANCE
+	if agent_type == "orchestrator":
+		exit_chance = 0.0
+
+	if randf() < exit_chance:
+		_start_leaving()
+		return
+
+	var spots = _get_social_spots()
+	var choice = _choose_social_spot(spots)
+	_mark_social_spot_cooldown(choice)
+	_start_socializing_at(choice["pos"], choice["name"], choice.get("furniture", ""), choice.get("offset", true))
 
 func _show_small_talk_bubble() -> void:
 	var phrase = SMALL_TALK_PHRASES[randi() % SMALL_TALK_PHRASES.size()]
@@ -1326,7 +1741,7 @@ func react_to_cat() -> void:
 
 func can_chat() -> bool:
 	# Can this agent start a chat?
-	return (state == State.IDLE or state == State.SOCIALIZING) and chat_cooldown <= 0 and chatting_with == null
+	return (state == State.IDLE or state == State.SOCIALIZING) and chat_cooldown <= 0 and chatting_with == null and path_waypoints.is_empty()
 
 func can_react_to_cat() -> bool:
 	return cat_reaction_cooldown <= 0 and state != State.COMPLETING and state != State.SPAWNING and state != State.LEAVING
@@ -1341,10 +1756,13 @@ func _process_meeting(delta: float) -> void:
 	work_elapsed += delta
 
 	# Subtle standing animation (shift weight)
+	var t = Time.get_ticks_msec() * 0.003
+	var body_bob = sin(t) * 1.5
+	var head_bob = sin(t + 0.3) * 1.5
 	if body:
-		body.position.y = -15 + sin(Time.get_ticks_msec() * 0.003) * 1.5
+		body.position.y = -15 + body_bob
 	if head:
-		head.position.y = -35 + sin(Time.get_ticks_msec() * 0.003 + 0.3) * 1.5
+		head.position.y = -35 + head_bob
 
 	# Meeting-specific spontaneous bubbles
 	_process_spontaneous_bubble(delta, false, true)  # Third param = is_meeting
@@ -1361,6 +1779,7 @@ func start_meeting(spot: Vector2) -> void:
 	is_in_meeting = true
 	meeting_spot = spot
 	state = State.MEETING
+	_log_debug_event("STATE", "Joining meeting")
 	_build_path_to(spot)
 	if status_label:
 		status_label.text = "Heading to meeting..."
@@ -1374,10 +1793,19 @@ func _process_working(delta: float) -> void:
 		_process_fidget(delta)
 	else:
 		# Normal typing animation when not fidgeting
+		var t = Time.get_ticks_msec() * 0.008
+		var bob = sin(t) * 1.5
 		if body:
-			body.position.y = base_body_y + sin(Time.get_ticks_msec() * 0.008) * 1.5
+			body.position.y = base_body_y + bob
 		if head:
-			head.position.y = base_head_y + sin(Time.get_ticks_msec() * 0.008) * 1.5
+			head.position.y = base_head_y + bob
+
+		# Typing sound
+		typing_timer += delta
+		if typing_timer >= TYPING_INTERVAL:
+			typing_timer = 0.0
+			if audio_manager and randf() < 0.3:  # 30% chance per interval to avoid constant sound
+				audio_manager.play_typing()
 
 		# Time-based fidget trigger
 		fidget_timer += delta
@@ -1396,30 +1824,74 @@ func _process_working(delta: float) -> void:
 			complete_work()
 
 func _build_path_to(destination: Vector2, furniture_name: String = "") -> bool:
+	var had_waypoints = not path_waypoints.is_empty()
+	var old_index = current_waypoint_index
 	path_waypoints.clear()
 	current_waypoint_index = 0
 	current_destination = destination
 	destination_furniture = furniture_name
+	walk_stuck_timer = 0.0
+	walk_last_position = position
+	if nav_retry_target.distance_to(destination) > 1.0:
+		nav_retry_target = destination
+		nav_nudge_retries = 0
 
 	# Use grid-based A* pathfinding if available
 	if navigation_grid:
 		var path = navigation_grid.find_path(position, destination)
 		if path.is_empty():
+			if _try_nudge_path(destination, furniture_name):
+				_log_debug_event("PATH", "Nudge path to %s" % furniture_name)
+				return true
 			# Path is unreachable - give up and go idle
+			_log_debug_event("PATH", "FAILED: Cannot reach %s" % destination)
 			print("[Agent %s] Cannot reach destination %s - going idle" % [agent_id, destination])
 			_handle_unreachable_destination()
 			return false
 		for waypoint in path:
 			path_waypoints.append(waypoint)
+		if had_waypoints and old_index > 0:
+			_log_debug_event("PATH", "Rebuilt path (was at wp %d) -> %s" % [old_index, furniture_name if furniture_name else "pos"])
+		else:
+			_log_debug_event("PATH", "New path (%d wps) -> %s" % [path.size(), furniture_name if furniture_name else "pos"])
 		return true
 
 	# Fallback: direct path (shouldn't happen if grid is set up correctly)
 	path_waypoints.append(destination)
 	return true
 
+func _try_nudge_path(destination: Vector2, furniture_name: String) -> bool:
+	if nav_nudge_retries >= NAV_NUDGE_MAX_RETRIES:
+		return false
+	nav_nudge_retries += 1
+	for i in range(NAV_NUDGE_SAMPLES):
+		var offset = Vector2(randf_range(-NAV_NUDGE_RADIUS, NAV_NUDGE_RADIUS), randf_range(-NAV_NUDGE_RADIUS, NAV_NUDGE_RADIUS))
+		var nudged = destination + offset
+		var path = navigation_grid.find_path(position, nudged)
+		if path.is_empty():
+			continue
+		path_waypoints.clear()
+		current_waypoint_index = 0
+		current_destination = nudged
+		destination_furniture = furniture_name
+		for waypoint in path:
+			path_waypoints.append(waypoint)
+		return true
+	return false
+
 func _handle_unreachable_destination() -> void:
+	_log_debug_event("NAV", "Got lost - destination unreachable")
 	destination_furniture = ""
 	current_destination = Vector2.ZERO
+	nav_nudge_retries = 0
+	# Release any reserved resources to avoid blocking other agents.
+	if state == State.WALKING_TO_DESK and assigned_desk:
+		assigned_desk.set_occupied(false)
+		assigned_desk = null
+	elif state == State.MEETING:
+		is_in_meeting = false
+		if is_instance_valid(office_manager) and office_manager.has_method("_release_meeting_spot"):
+			office_manager._release_meeting_spot(agent_id)
 	# Transition to idle or leaving based on current state
 	match state:
 		State.FURNITURE_TOUR:
@@ -1449,6 +1921,7 @@ func on_furniture_moved(furniture_name: String, new_position: Vector2) -> void:
 	if path_waypoints.is_empty():
 		return
 
+	_log_debug_event("NAV", "Furniture moved: %s -> recalc path" % furniture_name)
 	print("[Agent %s] Recalculating path - %s moved to %s" % [agent_id, furniture_name, new_position])
 
 	# Recalculate path to new position (with some offset for approach)
@@ -1462,6 +1935,9 @@ func _process_completing(delta: float) -> void:
 		work_completed.emit(self)
 
 func complete_work() -> void:
+	_log_debug_event("STATE", "Work completed (%.1fs)" % work_elapsed)
+	# Record task duration for speed achievements
+	last_task_duration = work_elapsed
 	_create_document()
 	# Clear personal items and tool display from desk
 	_clear_personal_items_from_desk()
@@ -1504,6 +1980,31 @@ func _get_random_filing_cabinet_approach() -> Vector2:
 		filing_cabinet_position + Vector2(50, 30),  # Bottom-right
 		filing_cabinet_position + Vector2(50, -30), # Top-right
 		filing_cabinet_position + Vector2(30, 50),  # Below
+	]
+	return approaches[randi() % approaches.size()]
+
+func _get_wall_item_approaches(top_left: Vector2, size: Vector2, front_offset: float = 20.0) -> Array[Vector2]:
+	var front_y = top_left.y + size.y + front_offset
+	var left_x = top_left.x + 20
+	var center_x = top_left.x + size.x / 2
+	var right_x = top_left.x + size.x - 20
+	return [
+		Vector2(left_x, front_y),
+		Vector2(center_x, front_y),
+		Vector2(right_x, front_y),
+	]
+
+func _get_random_taskboard_approach() -> Vector2:
+	# Pick a random position in front of the taskboard (mounted on wall)
+	var approaches = _get_wall_item_approaches(taskboard_position, OfficeConstants.TASKBOARD_SIZE, 20.0)
+	return _pick_tour_target(approaches, approaches[1])
+
+func _get_random_meeting_table_approach() -> Vector2:
+	# Pick a random position around the meeting table
+	var approaches = [
+		meeting_table_position + Vector2(-70, 40),
+		meeting_table_position + Vector2(70, 40),
+		meeting_table_position + Vector2(0, 60),
 	]
 	return approaches[randi() % approaches.size()]
 
@@ -1558,9 +2059,11 @@ func set_plant_position(pos: Vector2) -> void:
 func set_filing_cabinet_position(pos: Vector2) -> void:
 	filing_cabinet_position = pos
 
-func set_meeting_table_position(_pos: Vector2) -> void:
-	# Meeting spot updates are handled by OfficeManager._update_meeting_spots()
-	pass
+func set_taskboard_position(pos: Vector2) -> void:
+	taskboard_position = pos
+
+func set_meeting_table_position(pos: Vector2) -> void:
+	meeting_table_position = pos
 
 func set_door_position(pos: Vector2) -> void:
 	door_position = pos
@@ -1896,7 +2399,7 @@ func _get_tool_aware_phrase(tool_name: String, is_meeting: bool) -> String:
 		short_tool = short_tool.substr(0, 10) + ".."
 	return template.replace("{tool}", short_tool)
 
-func _input(event: InputEvent) -> void:
+func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		# Check if click is on this agent
 		var mouse_pos = get_local_mouse_position()
@@ -2040,6 +2543,67 @@ func _update_reaction_timer(delta: float) -> void:
 				reaction_bubble.queue_free()
 				reaction_bubble = null
 
+func _update_mood() -> void:
+	var old_mood = current_mood
+	if time_on_floor >= MOOD_IRATE_THRESHOLD:
+		current_mood = Mood.IRATE
+	elif time_on_floor >= MOOD_FRUSTRATED_THRESHOLD:
+		current_mood = Mood.FRUSTRATED
+	elif time_on_floor >= MOOD_TIRED_THRESHOLD:
+		current_mood = Mood.TIRED
+	else:
+		current_mood = Mood.CONTENT
+
+	# Update mood indicator if mood changed
+	if old_mood != current_mood:
+		_update_mood_indicator()
+
+func _update_mood_indicator() -> void:
+	if not mood_indicator:
+		mood_indicator = Label.new()
+		mood_indicator.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		mood_indicator.position = Vector2(-10, -70)
+		mood_indicator.size = Vector2(20, 16)
+		mood_indicator.add_theme_font_size_override("font_size", 12)
+		add_child(mood_indicator)
+
+	match current_mood:
+		Mood.CONTENT:
+			mood_indicator.text = ""
+			mood_indicator.visible = false
+		Mood.TIRED:
+			mood_indicator.text = "~"
+			mood_indicator.add_theme_color_override("font_color", OfficePalette.GRUVBOX_YELLOW)
+			mood_indicator.visible = true
+		Mood.FRUSTRATED:
+			mood_indicator.text = "!"
+			mood_indicator.add_theme_color_override("font_color", OfficePalette.GRUVBOX_ORANGE)
+			mood_indicator.visible = true
+		Mood.IRATE:
+			mood_indicator.text = "!!"
+			mood_indicator.add_theme_color_override("font_color", OfficePalette.GRUVBOX_RED)
+			mood_indicator.visible = true
+
+func get_mood_text() -> String:
+	match current_mood:
+		Mood.TIRED:
+			return "Tired"
+		Mood.FRUSTRATED:
+			return "Frustrated"
+		Mood.IRATE:
+			return "IRATE"
+		_:
+			return ""
+
+func get_floor_time_text() -> String:
+	var hours = int(time_on_floor / 3600)
+	var minutes = int(fmod(time_on_floor, 3600) / 60)
+	if hours > 0:
+		return "%dh %dm on floor" % [hours, minutes]
+	elif minutes > 0:
+		return "%dm on floor" % minutes
+	return ""
+
 # Idle fidget animation functions
 func _start_random_fidget() -> void:
 	var fidgets = ["head_scratch", "stretch", "look_around", "lean_back", "sip_drink", "adjust_posture"]
@@ -2152,7 +2716,7 @@ func _process_spontaneous_bubble(delta: float, is_socializing: bool = false, is_
 
 func _can_show_spontaneous_globally() -> bool:
 	# Check with office manager if we can show a spontaneous bubble
-	if office_manager and office_manager.has_method("can_show_spontaneous_bubble"):
+	if is_instance_valid(office_manager) and office_manager.has_method("can_show_spontaneous_bubble"):
 		return office_manager.can_show_spontaneous_bubble()
 	return true  # Default to yes if no manager
 
@@ -2160,8 +2724,25 @@ func _show_spontaneous_reaction(is_socializing: bool = false, is_meeting: bool =
 	# Pick appropriate phrase based on context
 	var phrase = ""
 
+	# Mood-based phrases take priority when agent is unhappy
+	var use_mood_phrase = false
+	if current_mood == Mood.IRATE:
+		use_mood_phrase = randf() < 0.7  # 70% chance to complain when irate
+	elif current_mood == Mood.FRUSTRATED:
+		use_mood_phrase = randf() < 0.4  # 40% chance when frustrated
+	elif current_mood == Mood.TIRED:
+		use_mood_phrase = randf() < 0.25  # 25% chance when tired
+
+	if use_mood_phrase:
+		match current_mood:
+			Mood.IRATE:
+				phrase = IRATE_PHRASES[randi() % IRATE_PHRASES.size()]
+			Mood.FRUSTRATED:
+				phrase = FRUSTRATED_PHRASES[randi() % FRUSTRATED_PHRASES.size()]
+			Mood.TIRED:
+				phrase = TIRED_PHRASES[randi() % TIRED_PHRASES.size()]
 	# If we have a tool and it's work-related context, sometimes mention the tool
-	if current_tool and not is_socializing and randf() < 0.5:
+	elif current_tool and not is_socializing and randf() < 0.5:
 		phrase = _get_tool_aware_phrase(current_tool, is_meeting)
 	else:
 		var phrases = WORKING_PHRASES
@@ -2172,7 +2753,7 @@ func _show_spontaneous_reaction(is_socializing: bool = false, is_meeting: bool =
 		phrase = phrases[randi() % phrases.size()]
 
 	# Notify manager that we're showing a bubble
-	if office_manager and office_manager.has_method("register_spontaneous_bubble"):
+	if is_instance_valid(office_manager) and office_manager.has_method("register_spontaneous_bubble"):
 		office_manager.register_spontaneous_bubble(self)
 
 	# Create smaller, quicker bubble than click reactions

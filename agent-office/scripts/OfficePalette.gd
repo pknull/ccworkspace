@@ -158,6 +158,23 @@ const LEAF_GREEN_DARK = GRUVBOX_AQUA_FADED
 const SKY_BLUE = GRUVBOX_BLUE_BRIGHT
 const CLOUD_WHITE = Color(GRUVBOX_LIGHT.r, GRUVBOX_LIGHT.g, GRUVBOX_LIGHT.b, 0.85)
 const TREE_GREEN = GRUVBOX_AQUA_FADED
+const SUN_YELLOW = Color(1.0, 0.9, 0.3)       # Bright yellow sun
+const MOON_SILVER = Color(0.9, 0.9, 0.95)     # Pale silver moon
+
+# Day/Night cycle sky colors
+const SKY_DAWN = Color(0.95, 0.65, 0.55)       # Warm pink/orange sunrise
+const SKY_MORNING = Color(0.65, 0.80, 0.90)   # Light blue morning
+const SKY_DAY = GRUVBOX_BLUE_BRIGHT           # Bright day blue
+const SKY_AFTERNOON = Color(0.55, 0.70, 0.85) # Slightly warmer afternoon
+const SKY_DUSK = Color(0.90, 0.55, 0.45)      # Orange/pink sunset
+const SKY_EVENING = Color(0.35, 0.30, 0.55)   # Purple twilight
+const SKY_NIGHT = Color(0.12, 0.12, 0.22)     # Dark night blue
+
+# Ambient lighting overlay (applied to whole office)
+const AMBIENT_DAWN = Color(1.0, 0.9, 0.85, 0.1)    # Warm morning tint
+const AMBIENT_DAY = Color(1.0, 1.0, 1.0, 0.0)      # No tint during day
+const AMBIENT_DUSK = Color(1.0, 0.85, 0.75, 0.15)  # Warm evening tint
+const AMBIENT_NIGHT = Color(0.7, 0.75, 0.9, 0.2)   # Cool blue night tint
 
 # =============================================================================
 # UI ELEMENTS

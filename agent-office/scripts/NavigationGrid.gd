@@ -4,6 +4,67 @@ class_name NavigationGrid
 # Grid-based navigation system with A* pathfinding
 # =============================================================================
 
+class MinHeap:
+	var _positions: Array[Vector2i] = []
+	var _priorities: Array[float] = []
+
+	func is_empty() -> bool:
+		return _positions.is_empty()
+
+	func push(pos: Vector2i, priority: float) -> void:
+		_positions.append(pos)
+		_priorities.append(priority)
+		_sift_up(_positions.size() - 1)
+
+	func pop() -> Dictionary:
+		if _positions.is_empty():
+			return {}
+		var pos = _positions[0]
+		var priority = _priorities[0]
+		var last_index = _positions.size() - 1
+		if last_index == 0:
+			_positions.clear()
+			_priorities.clear()
+			return {"pos": pos, "priority": priority}
+		_positions[0] = _positions[last_index]
+		_priorities[0] = _priorities[last_index]
+		_positions.remove_at(last_index)
+		_priorities.remove_at(last_index)
+		_sift_down(0)
+		return {"pos": pos, "priority": priority}
+
+	func _sift_up(index: int) -> void:
+		var i = index
+		while i > 0:
+			var parent = (i - 1) / 2
+			if _priorities[i] >= _priorities[parent]:
+				break
+			_swap(i, parent)
+			i = parent
+
+	func _sift_down(index: int) -> void:
+		var i = index
+		while true:
+			var left = i * 2 + 1
+			var right = i * 2 + 2
+			var smallest = i
+			if left < _positions.size() and _priorities[left] < _priorities[smallest]:
+				smallest = left
+			if right < _positions.size() and _priorities[right] < _priorities[smallest]:
+				smallest = right
+			if smallest == i:
+				break
+			_swap(i, smallest)
+			i = smallest
+
+	func _swap(a: int, b: int) -> void:
+		var temp_pos = _positions[a]
+		_positions[a] = _positions[b]
+		_positions[b] = temp_pos
+		var temp_priority = _priorities[a]
+		_priorities[a] = _priorities[b]
+		_priorities[b] = temp_priority
+
 enum CellState { WALKABLE, BLOCKED, WORK_POSITION }
 
 # Grid storage - cells[x][y] = CellState
@@ -14,6 +75,11 @@ var obstacles: Dictionary = {}
 
 # Work position tracking - grid_pos string -> desk reference
 var work_positions: Dictionary = {}
+
+# Path cache (start_grid|end_grid -> Array[Vector2i])
+const PATH_CACHE_LIMIT: int = 200
+var path_cache: Dictionary = {}
+var path_cache_order: Array[String] = []
 
 # =============================================================================
 # INITIALIZATION
@@ -33,7 +99,12 @@ func _initialize_grid() -> void:
 func clear() -> void:
 	obstacles.clear()
 	work_positions.clear()
+	clear_path_cache()
 	_initialize_grid()
+
+func clear_path_cache() -> void:
+	path_cache.clear()
+	path_cache_order.clear()
 
 # =============================================================================
 # COORDINATE CONVERSION
@@ -85,6 +156,7 @@ func register_obstacle(world_rect: Rect2, obstacle_id: String) -> void:
 	obstacles[obstacle_id] = grid_cells
 	for cell in grid_cells:
 		set_cell_state(cell, CellState.BLOCKED)
+	clear_path_cache()
 
 func unregister_obstacle(obstacle_id: String) -> void:
 	if obstacles.has(obstacle_id):
@@ -92,6 +164,7 @@ func unregister_obstacle(obstacle_id: String) -> void:
 		for cell in grid_cells:
 			set_cell_state(cell, CellState.WALKABLE)
 		obstacles.erase(obstacle_id)
+		clear_path_cache()
 
 func update_obstacle(obstacle_id: String, new_world_rect: Rect2) -> void:
 	unregister_obstacle(obstacle_id)
@@ -199,6 +272,17 @@ func _key_to_grid_pos(key: String) -> Vector2i:
 		return Vector2i.ZERO
 	return Vector2i(int(parts[0]), int(parts[1]))
 
+func _path_cache_key(start: Vector2i, end: Vector2i) -> String:
+	return "%d,%d|%d,%d" % [start.x, start.y, end.x, end.y]
+
+func _touch_path_cache(key: String) -> void:
+	if path_cache_order.has(key):
+		path_cache_order.erase(key)
+	path_cache_order.append(key)
+	if path_cache_order.size() > PATH_CACHE_LIMIT:
+		var oldest = path_cache_order.pop_front()
+		path_cache.erase(oldest)
+
 # =============================================================================
 # A* PATHFINDING
 # =============================================================================
@@ -222,24 +306,39 @@ func find_path(start_world: Vector2, end_world: Vector2) -> Array[Vector2]:
 	if start_grid == end_grid:
 		return [end_world]
 
+	var cache_key = _path_cache_key(start_grid, end_grid)
+	if path_cache.has(cache_key):
+		_touch_path_cache(cache_key)
+		var cached_path: Array = path_cache[cache_key]
+		if cached_path.is_empty():
+			return []
+		return _smooth_path(cached_path, end_world)
+
 	var grid_path = _astar_search(start_grid, end_grid)
 	if grid_path.is_empty():
 		# No path found - return empty (let agent handle gracefully)
 		print("[NavigationGrid] No path from %s to %s" % [start_world, end_world])
+		path_cache[cache_key] = []
+		_touch_path_cache(cache_key)
 		return []
+
+	path_cache[cache_key] = grid_path
+	_touch_path_cache(cache_key)
 
 	var world_path = _smooth_path(grid_path, end_world)
 	return world_path
 
 func _astar_search(start: Vector2i, goal: Vector2i) -> Array[Vector2i]:
-	var open_set: Array[Vector2i] = [start]
+	var open_set = MinHeap.new()
 	var came_from: Dictionary = {}
 
 	var g_score: Dictionary = {}
 	g_score[_grid_pos_to_key(start)] = 0.0
 
 	var f_score: Dictionary = {}
-	f_score[_grid_pos_to_key(start)] = _heuristic(start, goal)
+	var start_f = _heuristic(start, goal)
+	f_score[_grid_pos_to_key(start)] = start_f
+	open_set.push(start, start_f)
 
 	var iterations = 0
 	var max_iterations = OfficeConstants.GRID_WIDTH * OfficeConstants.GRID_HEIGHT * 2
@@ -247,20 +346,17 @@ func _astar_search(start: Vector2i, goal: Vector2i) -> Array[Vector2i]:
 	while not open_set.is_empty() and iterations < max_iterations:
 		iterations += 1
 
-		# Find node with lowest f_score
-		var current = open_set[0]
-		var current_f = f_score.get(_grid_pos_to_key(current), INF)
-		for node in open_set:
-			var node_f = f_score.get(_grid_pos_to_key(node), INF)
-			if node_f < current_f:
-				current = node
-				current_f = node_f
+		var current_item = open_set.pop()
+		if current_item.is_empty():
+			break
+		var current = current_item["pos"]
+		var current_key = _grid_pos_to_key(current)
+		var current_f = current_item["priority"]
+		if current_f > f_score.get(current_key, INF):
+			continue
 
 		if current == goal:
 			return _reconstruct_path(came_from, current)
-
-		open_set.erase(current)
-		var current_key = _grid_pos_to_key(current)
 
 		for neighbor in _get_neighbors(current):
 			var neighbor_key = _grid_pos_to_key(neighbor)
@@ -270,10 +366,9 @@ func _astar_search(start: Vector2i, goal: Vector2i) -> Array[Vector2i]:
 			if tentative_g < g_score.get(neighbor_key, INF):
 				came_from[neighbor_key] = current
 				g_score[neighbor_key] = tentative_g
-				f_score[neighbor_key] = tentative_g + _heuristic(neighbor, goal)
-
-				if neighbor not in open_set:
-					open_set.append(neighbor)
+				var neighbor_f = tentative_g + _heuristic(neighbor, goal)
+				f_score[neighbor_key] = neighbor_f
+				open_set.push(neighbor, neighbor_f)
 
 	# No path found
 	return []
