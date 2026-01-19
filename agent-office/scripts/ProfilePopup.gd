@@ -30,12 +30,10 @@ var hired_label: Label
 var last_seen_label: Label
 
 # Stats section
-var stats_container: Control
 var tasks_label: Label
 var failed_label: Label
 var success_label: Label
 var time_label: Label
-var orchestrator_label: Label
 
 # Skills section
 var skills_container: Control
@@ -100,6 +98,9 @@ func setup(agent_roster: AgentRoster, p_badge_system: BadgeSystem) -> void:
 	badge_system = p_badge_system
 
 func show_profile(profile: AgentProfile) -> void:
+	if profile == null:
+		push_warning("[ProfilePopup] show_profile called with null profile")
+		return
 	visible = true
 	_populate_profile(profile)
 
@@ -265,7 +266,6 @@ func _create_visuals() -> void:
 	failed_label = _create_stat_label(panel_x + 30, stats_y + 18, "Tasks Failed: 0")
 	success_label = _create_stat_label(panel_x + 30, stats_y + 36, "Success Rate: 0%")
 	time_label = _create_stat_label(panel_x + 30, stats_y + 54, "Work Time: 0.0 hr")
-	orchestrator_label = _create_stat_label(panel_x + 30, stats_y + 72, "Orchestrator: 0x")
 
 	# SKILLS section (middle column)
 	var skills_header = Label.new()
@@ -357,7 +357,6 @@ func _populate_profile(profile: AgentProfile) -> void:
 	failed_label.text = "Tasks Failed: %d" % profile.tasks_failed
 	success_label.text = "Success Rate: %.0f%%" % profile.get_success_rate()
 	time_label.text = "Work Time: %.1f hr" % profile.get_work_time_hours()
-	orchestrator_label.text = "Orchestrator: %dx" % profile.orchestrator_sessions
 
 	# Skills
 	_populate_skills(profile)
@@ -404,7 +403,7 @@ func _update_portrait(profile: AgentProfile) -> void:
 		_create_male_portrait_hair(hair_color)
 
 func _create_badge_icon(badge_id: String) -> Control:
-	var info = badge_system.get_badge_info(badge_id) if badge_system else {}
+	var info = badge_system.get_badge_info(badge_id) if is_instance_valid(badge_system) else {}
 	var icon_text = str(info.get("icon", "*")).strip_edges()
 	if icon_text.begins_with("[") and icon_text.ends_with("]") and icon_text.length() >= 3:
 		icon_text = icon_text.substr(1, icon_text.length() - 2)
@@ -584,7 +583,7 @@ func _create_bar(label_text: String, value: int, max_value: int, color: Color, t
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bar_container.add_child(label)
 
-	var bar_width = 80.0 * (float(value) / float(max_value))
+	var bar_width = 80.0 * (float(value) / float(max(1, max_value)))
 	var bar = ColorRect.new()
 	bar.size = Vector2(max(2, bar_width), 12)
 	bar.position = Vector2(85, 2)
@@ -610,7 +609,7 @@ func _populate_colleagues(profile: AgentProfile) -> void:
 		var worked: Array[String] = []
 		for agent_id_str in profile.worked_with.keys():
 			var count = profile.worked_with[agent_id_str]
-			if roster:
+			if is_instance_valid(roster):
 				var other = roster.get_agent(int(agent_id_str))
 				if other:
 					worked.append("%s (%dx)" % [other.agent_name, count])
@@ -622,7 +621,7 @@ func _populate_colleagues(profile: AgentProfile) -> void:
 		var chatted: Array[String] = []
 		for agent_id_str in profile.chatted_with.keys():
 			var count = profile.chatted_with[agent_id_str]
-			if roster:
+			if is_instance_valid(roster):
 				var other = roster.get_agent(int(agent_id_str))
 				if other:
 					chatted.append("%s (%dx)" % [other.agent_name, count])
@@ -657,3 +656,4 @@ func _input(event: InputEvent) -> void:
 	if visible and event is InputEventKey:
 		if event.pressed and event.keycode == KEY_ESCAPE:
 			_on_close_pressed()
+			get_viewport().set_input_as_handled()
