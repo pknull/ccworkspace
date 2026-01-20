@@ -599,6 +599,7 @@ def run_stress_tests() -> bool:
             "event": "agent_complete",
             "agent_id": agent_id,
             "success": "true",
+            "force": True,  # Bypass MIN_WORK_TIME for rapid cycles
             "timestamp": timestamp()
         }):
             errors += 1
@@ -612,11 +613,20 @@ def run_stress_tests() -> bool:
         print(f"  PARTIAL: {20-errors}/20 events sent, {errors} errors")
         failed += 1
 
-    # Cleanup: Complete all stress agents (force=true bypasses MIN_WORK_TIME)
+    # Cleanup: Complete all stress and cycle agents (force=true bypasses MIN_WORK_TIME)
     for i in range(20):
         send_event(sock, {
             "event": "agent_complete",
             "agent_id": f"stress{i:03d}",
+            "success": "true",
+            "force": True,
+            "timestamp": timestamp()
+        })
+        time.sleep(0.02)
+    for i in range(10):
+        send_event(sock, {
+            "event": "agent_complete",
+            "agent_id": f"cycle{i:03d}",
             "success": "true",
             "force": True,
             "timestamp": timestamp()
