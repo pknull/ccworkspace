@@ -329,7 +329,7 @@ def run_refactor_tests() -> bool:
     else:
         failed += 1
 
-    time.sleep(2.0)  # Let agents potentially interact
+    time.sleep(6.0)  # Let agents potentially interact and be observed
 
     # Test 5: Complete both agents (tests bubbles/leaving behavior)
     print("[5/5] Completing agents (tests AgentBubbles)...")
@@ -339,7 +339,6 @@ def run_refactor_tests() -> bool:
             "event": "agent_complete",
             "agent_id": agent_id,
             "success": "true",
-            "force": True,  # Bypass MIN_WORK_TIME for reliable test cleanup
             "timestamp": timestamp()
         }):
             success = False
