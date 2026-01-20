@@ -413,6 +413,7 @@ func _create_desks() -> void:
 		var desk = Desk.new()
 		desk.position = pos
 		desk.navigation_grid = navigation_grid
+		desk.office_manager = self  # For popup state checking
 		desk.position_changed.connect(_on_desk_position_changed)
 		add_child(desk)
 		desks.append(desk)
