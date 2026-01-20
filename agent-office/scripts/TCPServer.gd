@@ -77,7 +77,8 @@ func _process(_delta: float) -> void:
 
 func _process_buffer(client_index: int, buffer: String) -> void:
 	# Handle multiple JSON objects in the buffer (newline delimited)
-	var lines = buffer.split("\n")
+	# Convert PackedStringArray to Array so we can use pop_back()
+	var lines: Array = Array(buffer.split("\n"))
 	var remainder = ""
 
 	if not buffer.ends_with("\n") and lines.size() > 0:

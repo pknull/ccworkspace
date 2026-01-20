@@ -21,7 +21,7 @@ const SCREEN_HEIGHT: float = 720.0
 const FLOOR_MIN_X: float = 10.0
 const FLOOR_MAX_X: float = 1270.0
 const FLOOR_MIN_Y: float = 85.0   # Below back wall seam
-const FLOOR_MAX_Y: float = 625.0  # Above bottom wall seam
+const FLOOR_MAX_Y: float = 670.0  # Includes door exit area
 
 # Wall positions
 const BACK_WALL_HEIGHT: float = 76.0

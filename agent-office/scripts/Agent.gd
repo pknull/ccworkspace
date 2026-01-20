@@ -101,7 +101,7 @@ var plant_position: Vector2 = OfficeConstants.PLANT_POSITION
 var filing_cabinet_position: Vector2 = OfficeConstants.FILING_CABINET_POSITION
 var taskboard_position: Vector2 = OfficeConstants.TASKBOARD_POSITION
 var meeting_table_position: Vector2 = OfficeConstants.MEETING_TABLE_POSITION
-var door_position: Vector2 = OfficeConstants.SPAWN_POINT
+var door_position: Vector2 = OfficeConstants.DOOR_POSITION
 
 # Floor bounds (agents can only walk here) - use centralized constants
 const FLOOR_MIN_X: float = OfficeConstants.FLOOR_MIN_X
@@ -151,7 +151,7 @@ const MAX_WANDER_RETRIES: int = 3               # Give up and leave after this m
 # Furniture tour (for smoke testing)
 var furniture_tour_active: bool = false
 var furniture_tour_index: int = 0
-var furniture_tour_targets: Array[Dictionary] = []
+var furniture_tour_targets: Array = []
 
 # Pathfinding
 var path_waypoints: Array[Vector2] = []
@@ -345,6 +345,8 @@ func _build_tooltip_data() -> Dictionary:
 	var status_line = "Status: " + state_text
 	if state == State.WORKING and work_elapsed > 0:
 		status_line += " (%.0fs)" % work_elapsed
+	if pending_completion:
+		status_line += " [pending completion]"
 	lines.append(status_line)
 
 	var floor_time = get_floor_time_text()
@@ -579,7 +581,7 @@ func _is_walkable_with_clearance(world_pos: Vector2, clearance: int = TOUR_CLEAR
 				return false
 	return true
 
-func _pick_tour_target(candidates: Array[Vector2], fallback: Vector2) -> Vector2:
+func _pick_tour_target(candidates: Array, fallback: Vector2) -> Vector2:
 	if candidates.is_empty():
 		return fallback
 	if not navigation_grid:
@@ -1289,19 +1291,19 @@ func apply_profile_appearance(profile) -> void:
 		# Store for later - will be applied in _ready() after visuals are created
 		_pending_profile = profile
 
-func force_complete() -> void:
+func force_complete(bypass_min_time: bool = false) -> void:
 	match state:
 		State.WORKING:
-			# If we haven't worked long enough, delay completion
-			if work_elapsed >= min_work_time:
+			# If we haven't worked long enough, delay completion (unless bypassed)
+			if bypass_min_time or work_elapsed >= min_work_time:
 				complete_work()
 			else:
 				pending_completion = true
 				if visuals and visuals.status_label:
 					visuals.status_label.text = "Wrapping up..."
 		State.MEETING:
-			# If we haven't met long enough, delay completion
-			if work_elapsed >= min_work_time:
+			# If we haven't met long enough, delay completion (unless bypassed)
+			if bypass_min_time or work_elapsed >= min_work_time:
 				is_in_meeting = false
 				_start_delivering()
 			else:
@@ -1309,9 +1311,14 @@ func force_complete() -> void:
 				if visuals and visuals.status_label:
 					visuals.status_label.text = "Wrapping up meeting..."
 		State.SPAWNING, State.WALKING_TO_DESK:
-			pending_completion = true
-			if visuals and visuals.status_label:
-				visuals.status_label.text = "Finishing up..."
+			if bypass_min_time:
+				# Skip to leaving immediately
+				state = State.LEAVING
+				spawn_timer = OfficeConstants.AGENT_EXIT_FADE_TIME
+			else:
+				pending_completion = true
+				if visuals and visuals.status_label:
+					visuals.status_label.text = "Finishing up..."
 		State.IDLE:
 			state = State.COMPLETING
 			spawn_timer = OfficeConstants.AGENT_SPAWN_FADE_TIME
