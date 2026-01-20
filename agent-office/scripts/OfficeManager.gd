@@ -913,7 +913,8 @@ func can_show_spontaneous_bubble() -> bool:
 	if spontaneous_bubble_cooldown > 0:
 		return false
 	if current_spontaneous_agent and is_instance_valid(current_spontaneous_agent):
-		if current_spontaneous_agent.reaction_timer > 0:
+		# reaction_timer is now on the bubbles component
+		if current_spontaneous_agent.bubbles and current_spontaneous_agent.bubbles.reaction_timer > 0:
 			return false
 	return true
 
@@ -1173,6 +1174,7 @@ func _find_agent_for_completion(agent_id: String) -> Agent:
 func _handle_agent_complete(data: Dictionary) -> void:
 	var agent_id = data.get("agent_id", "")
 	var result = data.get("result", "")
+	var force_immediate = data.get("force", false)  # Bypass MIN_WORK_TIME when true
 
 	if OfficeConstants.DEBUG_EVENTS:
 		print("[OfficeManager] _handle_agent_complete: looking for '%s'" % agent_id)
@@ -1189,9 +1191,9 @@ func _handle_agent_complete(data: Dictionary) -> void:
 		print("[OfficeManager] Found agent '%s' in state %s" % [agent_id, Agent.State.keys()[agent.state]])
 	if result:
 		agent.set_result(result)
-	agent.force_complete()
+	agent.force_complete(force_immediate)
 	completed_agent_ids[agent_id] = true
-	print("[OfficeManager] Completed agent: %s" % agent_id)
+	print("[OfficeManager] Completed agent: %s%s" % [agent_id, " (forced)" if force_immediate else ""])
 
 func _handle_waiting_for_input(data: Dictionary) -> void:
 	var tool_name = data.get("tool", "")

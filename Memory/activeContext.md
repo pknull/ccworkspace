@@ -1,9 +1,9 @@
 ---
-version: "1.7"
-lastUpdated: "2026-01-19 UTC"
+version: "1.8"
+lastUpdated: "2026-01-20 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - Agent.gd refactor complete (51% reduction)"
+changeTrigger: "Session save - Smoke test enhancements, force completion fix"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -21,6 +21,27 @@ dependencies: ["communicationStyle.md"]
 - Enhanced achievement system with cat and speed achievements
 
 **Recent Activities** (last 7 days):
+- **2026-01-20 (Session 8)**: Smoke test enhancements and force completion fix:
+  - **Extended smoke_test.py** from 243 to 832 lines with new test suites:
+    - `--refactor` - Tests component extraction (AgentVisuals, AgentBubbles, AgentMood, AgentSocial)
+    - `--interactions` - Multi-agent interaction tests (rapid spawns, social spots, reactions)
+    - `--stress` - Rapid event stress testing (20 agents, 10 cycles)
+    - `--edge` - Edge case handling (duplicate IDs, empty events, non-existent agents)
+    - `--all` - Run complete test suite (22 tests total)
+  - **Fixed multiple bugs discovered during testing**:
+    - `reaction_timer` access error in OfficeManager.gd:916 (moved to bubbles component)
+    - `pop_back()` not found on PackedStringArray in TCPServer.gd:80 (convert to Array)
+    - Tour agent stuck at door - `door_position` defaulted to SPAWN_POINT instead of DOOR_POSITION
+    - Door outside walkable area - increased FLOOR_MAX_Y from 625 to 670
+    - `_pick_tour_target()` type mismatch - changed `Array[Vector2]` to plain `Array`
+    - `furniture_tour_targets` type mismatch - changed `Array[Dictionary]` to plain `Array`
+  - **Fixed stress test cleanup issue** - agents stuck with monitors off:
+    - Added `pending_completion` indicator to agent tooltips for debugging
+    - Added `bypass_min_time` parameter to `force_complete()` in Agent.gd
+    - Added `force` flag support to `agent_complete` event in OfficeManager.gd
+    - Updated all smoke_test.py cleanup completions to use `"force": True`
+  - Replaced non-functional `tool_use` event with working `waiting_for_input` event
+
 - **2026-01-19 (Session 7)**: Agent.gd refactor completed - 51% reduction:
   - **Extracted components**:
     - AgentVisuals.gd (691 lines) - visual node creation, appearance, tooltips
@@ -169,6 +190,9 @@ Port 9999, JSON messages with `"event"` field:
 - [x] Code review and critical bug fixes
 - [x] PersonalItemFactory extraction
 - [x] Agent.gd refactor complete (51% reduction - practical limit reached)
+- [x] Comprehensive smoke test suite (22 tests, 5 modes)
+- [x] Force completion for reliable test cleanup
+- [ ] Run full `--all` smoke test to verify fixes
 - [ ] Test tool tracking with reduced scan interval
 - [ ] Verify subagents leaving properly
 
@@ -257,3 +281,12 @@ func apply_profile_appearance(profile) -> void:
 
 ### State Machines Resist Decomposition
 State machine code with heavy `_process_*` functions, state transitions, and `await` calls creates tight coupling that resists extraction. Extracting would require a full StateMachine class pattern - high risk for diminishing returns.
+
+### Godot 4 PackedStringArray Limitations
+`PackedStringArray.split()` returns PackedStringArray which lacks `pop_back()` method. Wrap with `Array()` constructor for full array functionality: `var lines: Array = Array(buffer.split("\n"))`.
+
+### Typed Arrays in GDScript
+Typed arrays like `Array[Vector2]` or `Array[Dictionary]` can cause type mismatch errors when assigned from plain `Array` returns. For flexibility in function parameters and assignment, use plain `Array` type when strict typing isn't essential.
+
+### MIN_WORK_TIME Enforcement
+Agents won't leave until they've worked for MIN_WORK_TIME (3.0s). For tests with rapid spawn/complete cycles, add `"force": true` to agent_complete events to bypass this check and ensure reliable cleanup.
