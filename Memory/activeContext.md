@@ -1,9 +1,9 @@
 ---
-version: "2.0"
+version: "2.1"
 lastUpdated: "2026-01-20 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - Weather system, delivery sounds, furniture drag fix, tie color fix"
+changeTrigger: "Session save - Distribution workflow planning, itch.io setup added to Todoist"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -21,6 +21,14 @@ dependencies: ["communicationStyle.md"]
 - Agent mood system (tired/frustrated/irate)
 
 **Recent Activities** (last 7 days):
+- **2026-01-20 (Session 11)**: Distribution workflow planning:
+  - User considers project ready for first release ("ask for coffee")
+  - Discussed GitHub release access without repo access
+  - Planned itch.io distribution workflow: code → GitHub Actions → Butler → itch.io
+  - Workflow cost: $0 (free tiers cover indie use)
+  - Added itch.io setup task to user's Todoist with full workflow steps
+  - User will set up itch.io account and publishing workflow tonight
+
 - **2026-01-20 (Session 10)**: Weather system, delivery sounds, bug fixes:
   - **WeatherSystem.gd**: Random weather (clear 50%, rain 35%, snow 15%)
     - CPUParticles2D for rain/snow effects
@@ -206,33 +214,16 @@ Port 9999, JSON messages with `"event"` field:
 ## Next Steps
 
 **Immediate**:
-- [x] All requested cute features implemented
-- [x] Bug fixes complete
-- [x] Orchestrator lifecycle management (/exit, idle timeout)
-- [x] Z-index rendering fixed for furniture
-- [x] Smoke test with furniture tour
-- [x] Path recalculation on furniture move
-- [x] Gamification lifetime stats verified working
-- [x] Tool definitions centralized in OfficePalette
-- [x] Sound/audio system implemented
-- [x] Day/night cycle
-- [x] Agent mood system
-- [x] Cat and speed achievements
-- [x] Code review and critical bug fixes
-- [x] PersonalItemFactory extraction
-- [x] Agent.gd refactor complete (51% reduction - practical limit reached)
+- [x] All features implemented (weather, audio, day/night, mood, achievements)
+- [x] All bugs fixed (floor boundary, cat stuck, drag popups, tie color)
+- [x] Agent.gd refactor complete (51% reduction)
 - [x] Comprehensive smoke test suite (22 tests, 5 modes)
-- [x] Force completion for reliable test cleanup
-- [x] Floor boundary fix (agents no longer walk on bottom wall)
-- [x] Cat stuck fix (turns around instead of teleporting)
-- [x] Exit point relocated to floor in front of door
-- [x] Weather system with rain/snow (clipped to sky region)
-- [x] Shredder and filing cabinet sounds
-- [x] Furniture drag fix (no movement when clicking through popups)
-- [x] Male tie color fix (colored by agent_type)
-- [ ] Release new minor version
-- [ ] Fix GitHub to create platform releases
-- [ ] Test tool tracking with reduced scan interval
+- [ ] **Set up itch.io publishing workflow** (user doing tonight)
+  - Create itch.io account/project
+  - Export Godot builds (Windows/Linux/macOS/Web)
+  - Set up GitHub Action with Butler
+  - Configure Butler credentials as secret
+- [ ] First public release on itch.io
 
 **Blocked**:
 - None
