@@ -793,3 +793,8 @@ static func create_wall_clock() -> Node2D:
 	var clock = WallClockScript.new()
 	clock.z_index = OfficeConstants.Z_WALL_DECORATION
 	return clock
+
+static func create_weather_system() -> WeatherSystem:
+	var weather = WeatherSystem.new()
+	weather.name = "WeatherSystem"
+	return weather

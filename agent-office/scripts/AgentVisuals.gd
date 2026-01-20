@@ -214,9 +214,11 @@ func _create_male_visuals(p_skin_color: Color) -> void:
 	collar_right.color = OfficePalette.AGENT_SHIRT_WHITE
 	agent.add_child(collar_right)
 
+	var tie_color = Agent.get_agent_color(agent.agent_type)
 	tie = ColorRect.new()
 	tie.size = Vector2(6, 22)
 	tie.position = Vector2(-3, -12)
+	tie.color = tie_color
 	tie.z_index = 1
 	agent.add_child(tie)
 
@@ -224,6 +226,7 @@ func _create_male_visuals(p_skin_color: Color) -> void:
 	tie_knot.name = "TieKnot"
 	tie_knot.size = Vector2(8, 5)
 	tie_knot.position = Vector2(-4, -15)
+	tie_knot.color = tie_color.darkened(0.1)
 	tie_knot.z_index = 1
 	agent.add_child(tie_knot)
 
@@ -439,9 +442,11 @@ func _create_male_visuals_persistent(p_skin_color: Color, p_hair_color: Color) -
 	collar_right.color = OfficePalette.AGENT_SHIRT_WHITE
 	agent.add_child(collar_right)
 
+	var tie_color = Agent.get_agent_color(agent.agent_type)
 	tie = ColorRect.new()
 	tie.size = Vector2(6, 22)
 	tie.position = Vector2(-3, -12)
+	tie.color = tie_color
 	tie.z_index = 1
 	agent.add_child(tie)
 
@@ -449,6 +454,7 @@ func _create_male_visuals_persistent(p_skin_color: Color, p_hair_color: Color) -
 	tie_knot.name = "TieKnot"
 	tie_knot.size = Vector2(8, 5)
 	tie_knot.position = Vector2(-4, -15)
+	tie_knot.color = tie_color.darkened(0.1)
 	tie_knot.z_index = 1
 	agent.add_child(tie_knot)
 

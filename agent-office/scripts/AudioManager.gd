@@ -6,11 +6,15 @@ class_name AudioManager
 # - typing.wav (or .ogg) - keyboard typing sounds
 # - meow.wav - cat meowing
 # - stapler.wav - stapler/achievement sound
+# - shredder.wav - paper shredder sound
+# - filing.wav - filing cabinet drawer sound
 
 # Sound effect players
 var typing_player: AudioStreamPlayer
 var meow_player: AudioStreamPlayer
 var stapler_player: AudioStreamPlayer
+var shredder_player: AudioStreamPlayer
+var filing_player: AudioStreamPlayer
 
 # Typing sound management
 var typing_timer: float = 0.0
@@ -20,11 +24,13 @@ const TYPING_INTERVAL: float = 0.15  # Time between key sounds
 const DEFAULT_TYPING_VOLUME_DB: float = -15.0
 const DEFAULT_MEOW_VOLUME_DB: float = -8.0
 const DEFAULT_ACHIEVEMENT_VOLUME_DB: float = -5.0
+const DEFAULT_OFFICE_VOLUME_DB: float = -10.0  # Shredder, filing cabinet
 
 # Volume levels (0.0 to 1.0 for UI, converted to dB internally)
 var typing_volume: float = 0.5
 var meow_volume: float = 0.7
 var achievement_volume: float = 0.8
+var office_volume: float = 0.6  # Shredder, filing cabinet
 
 # Meow management
 var meow_cooldown: float = 0.0
@@ -35,6 +41,8 @@ const AUDIO_PATH = "res://audio/"
 const TYPING_SOUND = "typing.wav"
 const MEOW_SOUND = "meow.wav"
 const STAPLER_SOUND = "stapler.wav"
+const SHREDDER_SOUND = "shredder.wav"
+const FILING_SOUND = "filing.wav"
 
 # Settings persistence
 const SETTINGS_FILE: String = "user://audio_settings.json"
@@ -65,6 +73,16 @@ func _setup_audio_players() -> void:
 	stapler_player.max_polyphony = 4  # Allow overlapping achievement sounds
 	add_child(stapler_player)
 
+	shredder_player = AudioStreamPlayer.new()
+	shredder_player.volume_db = _volume_to_db(office_volume, DEFAULT_OFFICE_VOLUME_DB)
+	shredder_player.bus = "Master"
+	add_child(shredder_player)
+
+	filing_player = AudioStreamPlayer.new()
+	filing_player.volume_db = _volume_to_db(office_volume, DEFAULT_OFFICE_VOLUME_DB)
+	filing_player.bus = "Master"
+	add_child(filing_player)
+
 func _load_sounds() -> void:
 	# Try to load sounds - they may not exist yet
 	var typing_path = AUDIO_PATH + TYPING_SOUND
@@ -88,6 +106,16 @@ func _load_sounds() -> void:
 		sounds_loaded = true
 	else:
 		push_warning("[AudioManager] Stapler sound not found at: " + stapler_path)
+
+	var shredder_path = AUDIO_PATH + SHREDDER_SOUND
+	if ResourceLoader.exists(shredder_path):
+		shredder_player.stream = load(shredder_path)
+		sounds_loaded = true
+
+	var filing_path = AUDIO_PATH + FILING_SOUND
+	if ResourceLoader.exists(filing_path):
+		filing_player.stream = load(filing_path)
+		sounds_loaded = true
 
 	if not sounds_loaded:
 		push_warning("[AudioManager] No sounds loaded. Create audio files in res://audio/")
@@ -120,6 +148,20 @@ func play_achievement() -> void:
 		return
 	stapler_player.play()
 
+# Called when agent uses shredder
+func play_shredder() -> void:
+	if not sounds_enabled or not shredder_player.stream:
+		return
+	shredder_player.pitch_scale = randf_range(0.95, 1.05)
+	shredder_player.play()
+
+# Called when agent uses filing cabinet
+func play_filing() -> void:
+	if not sounds_enabled or not filing_player.stream:
+		return
+	filing_player.pitch_scale = randf_range(0.9, 1.1)
+	filing_player.play()
+
 func set_sounds_enabled(enabled: bool) -> void:
 	sounds_enabled = enabled
 
@@ -145,6 +187,14 @@ func set_achievement_volume(volume: float) -> void:
 		stapler_player.volume_db = _volume_to_db(achievement_volume, DEFAULT_ACHIEVEMENT_VOLUME_DB)
 	_save_settings()
 
+func set_office_volume(volume: float) -> void:
+	office_volume = clampf(volume, 0.0, 1.0)
+	if shredder_player:
+		shredder_player.volume_db = _volume_to_db(office_volume, DEFAULT_OFFICE_VOLUME_DB)
+	if filing_player:
+		filing_player.volume_db = _volume_to_db(office_volume, DEFAULT_OFFICE_VOLUME_DB)
+	_save_settings()
+
 # Volume getters
 func get_typing_volume() -> float:
 	return typing_volume
@@ -154,6 +204,9 @@ func get_meow_volume() -> float:
 
 func get_achievement_volume() -> float:
 	return achievement_volume
+
+func get_office_volume() -> float:
+	return office_volume
 
 # Convert 0-1 volume to dB
 # 0.0 = muted, 0.5 = default, 1.0 = +6dB boost from default
@@ -184,6 +237,7 @@ func _load_settings() -> void:
 		typing_volume = clampf(data.get("typing_volume", 0.5), 0.0, 1.0)
 		meow_volume = clampf(data.get("meow_volume", 0.7), 0.0, 1.0)
 		achievement_volume = clampf(data.get("achievement_volume", 0.8), 0.0, 1.0)
+		office_volume = clampf(data.get("office_volume", 0.6), 0.0, 1.0)
 		sounds_enabled = data.get("sounds_enabled", true)
 
 func _save_settings() -> void:
@@ -191,6 +245,7 @@ func _save_settings() -> void:
 		"typing_volume": typing_volume,
 		"meow_volume": meow_volume,
 		"achievement_volume": achievement_volume,
+		"office_volume": office_volume,
 		"sounds_enabled": sounds_enabled
 	}
 	var file = FileAccess.open(SETTINGS_FILE, FileAccess.WRITE)
