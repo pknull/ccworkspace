@@ -21,7 +21,7 @@ const SCREEN_HEIGHT: float = 720.0
 const FLOOR_MIN_X: float = 10.0
 const FLOOR_MAX_X: float = 1270.0
 const FLOOR_MIN_Y: float = 85.0   # Below back wall seam
-const FLOOR_MAX_Y: float = 670.0  # Includes door exit area
+const FLOOR_MAX_Y: float = 630.0  # Just before bottom wall, door corridor extends beyond
 
 # Wall positions
 const BACK_WALL_HEIGHT: float = 76.0
@@ -60,8 +60,8 @@ const DESK_POSITIONS_X: Array[float] = [230.0, 390.0, 530.0, 690.0]
 # SPAWN POINTS - Entry/Exit Locations
 # =============================================================================
 
-const DOOR_POSITION: Vector2 = Vector2(640, 665)
-const SPAWN_POINT: Vector2 = Vector2(640, 620)  # Just inside from bottom door
+const DOOR_POSITION: Vector2 = Vector2(640, 615)  # Exit point on floor in front of visual door
+const SPAWN_POINT: Vector2 = Vector2(640, 615)   # Spawn at same location as exit
 
 # =============================================================================
 # FURNITURE - Default Positions
