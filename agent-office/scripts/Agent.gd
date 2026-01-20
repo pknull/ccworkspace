@@ -93,6 +93,8 @@ var profile_badges: Array[String] = []  # Badge IDs from profile
 var profile_level: int = 0  # Level from profile
 var _pending_profile = null  # Profile to apply once visuals are ready
 var state: State = State.SPAWNING
+var last_state: State = State.SPAWNING
+var state_timer: float = 0.0
 var target_position: Vector2
 var assigned_desk: Node2D = null
 var shredder_position: Vector2 = OfficeConstants.SHREDDER_POSITION
@@ -133,6 +135,17 @@ const NAV_NUDGE_RADIUS: float = 40.0     # Radius for random offset when nudging
 const WALK_STUCK_THRESHOLD: float = 0.5  # Distance below which agent is considered stuck
 const WALK_STUCK_TIMEOUT: float = 1.2    # Seconds before stuck recovery triggers
 const WALK_NUDGE_RADIUS: float = 18.0    # Radius for random recovery nudge
+
+# Safety timeouts to reset agents stuck in non-working roles.
+const STATE_TIMEOUTS: Dictionary = {
+	State.WALKING_TO_DESK: 20.0,
+	State.DELIVERING: 20.0,
+	State.LEAVING: 12.0,
+	State.SOCIALIZING: 25.0,
+	State.CHATTING: 20.0,
+	State.WANDERING: 25.0,
+	State.FURNITURE_TOUR: 45.0,
+}
 
 # Cat interaction
 var cat_reaction_cooldown: float = 0.0
@@ -305,6 +318,8 @@ func _process(delta: float) -> void:
 		State.WANDERING:
 			_process_wandering(delta)
 
+	_update_state_timer(delta)
+
 func _check_mouse_hover() -> void:
 	var mouse_pos = get_local_mouse_position()
 	# Check if mouse is within agent bounds (roughly -15 to 15 x, -45 to 30 y)
@@ -402,6 +417,11 @@ func _process_walking_path(delta: float) -> void:
 	if path_waypoints.is_empty():
 		return
 
+	# Allow clean exit even if the final waypoint is slightly unreachable.
+	if state == State.LEAVING and position.distance_to(door_position) <= 6.0:
+		_on_path_complete()
+		return
+
 	var target = path_waypoints[current_waypoint_index]
 	var direction = target - position
 
@@ -486,6 +506,47 @@ func _recover_from_stuck() -> void:
 	walk_stuck_timer = 0.0
 	# Release any reserved resources (desk, meeting spot) before going idle
 	_handle_unreachable_destination()
+
+func _update_state_timer(delta: float) -> void:
+	if state != last_state:
+		state_timer = 0.0
+		last_state = state
+		return
+
+	state_timer += delta
+	if not STATE_TIMEOUTS.has(state):
+		return
+
+	var timeout = float(STATE_TIMEOUTS[state])
+	if state_timer < timeout:
+		return
+
+	_log_debug_event("STATE", "State timeout in %s (%.1fs)" % [State.keys()[state], state_timer])
+	state_timer = 0.0
+	_reset_stuck_state()
+
+func _reset_stuck_state() -> void:
+	# Clear movement and reset to a safe fallback based on current role.
+	path_waypoints.clear()
+	current_waypoint_index = 0
+	walk_stuck_timer = 0.0
+
+	match state:
+		State.LEAVING:
+			state = State.COMPLETING
+			spawn_timer = OfficeConstants.AGENT_SPAWN_FADE_TIME
+			if visuals and visuals.status_label:
+				visuals.status_label.text = "Goodbye!"
+		State.CHATTING:
+			end_chat()
+		State.SOCIALIZING:
+			_pick_post_work_action()
+		State.WANDERING:
+			_start_leaving()
+		State.WALKING_TO_DESK, State.DELIVERING, State.FURNITURE_TOUR:
+			_handle_unreachable_destination()
+		_:
+			_handle_unreachable_destination()
 
 func set_obstacles(obs: Array[Rect2]) -> void:
 	obstacles = obs
