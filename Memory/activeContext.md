@@ -1,9 +1,9 @@
 ---
-version: "1.8"
+version: "1.9"
 lastUpdated: "2026-01-20 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - Smoke test enhancements, force completion fix"
+changeTrigger: "Session save - Floor boundary fix, cat stuck fix, exit point relocation"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -21,6 +21,19 @@ dependencies: ["communicationStyle.md"]
 - Enhanced achievement system with cat and speed achievements
 
 **Recent Activities** (last 7 days):
+- **2026-01-20 (Session 9)**: Floor boundary fix and cat stuck detection:
+  - **xdotool screenshot capability**: Demonstrated ability to capture game window screenshots for visual verification during development
+  - **Fixed agents walking on bottom wall**:
+    - Reduced FLOOR_MAX_Y from 670 to 630 (agents stop at wall edge)
+    - Moved DOOR_POSITION from Y=665 to Y=615 (exit point on floor in front of visual door)
+    - Moved SPAWN_POINT from Y=620 to Y=615 (spawn at same location as exit)
+  - **Fixed cat getting stuck** (long-range stuck detection):
+    - Added LONG_STUCK_TIMEOUT (5s) and LONG_STUCK_DISTANCE (30px)
+    - Cat now turns around and walks opposite direction instead of teleporting
+    - Added `_find_opposite_direction_position()` helper function
+  - **Stress tests passing**: All 3 stress tests pass with floor boundary fix
+  - Verified agents properly exit without getting stuck on wall
+
 - **2026-01-20 (Session 8)**: Smoke test enhancements and force completion fix:
   - **Extended smoke_test.py** from 243 to 832 lines with new test suites:
     - `--refactor` - Tests component extraction (AgentVisuals, AgentBubbles, AgentMood, AgentSocial)
@@ -192,9 +205,12 @@ Port 9999, JSON messages with `"event"` field:
 - [x] Agent.gd refactor complete (51% reduction - practical limit reached)
 - [x] Comprehensive smoke test suite (22 tests, 5 modes)
 - [x] Force completion for reliable test cleanup
-- [ ] Run full `--all` smoke test to verify fixes
+- [x] Floor boundary fix (agents no longer walk on bottom wall)
+- [x] Cat stuck fix (turns around instead of teleporting)
+- [x] Exit point relocated to floor in front of door
+- [ ] Release new minor version
+- [ ] Fix GitHub to create platform releases
 - [ ] Test tool tracking with reduced scan interval
-- [ ] Verify subagents leaving properly
 
 **Blocked**:
 - None
@@ -290,3 +306,12 @@ Typed arrays like `Array[Vector2]` or `Array[Dictionary]` can cause type mismatc
 
 ### MIN_WORK_TIME Enforcement
 Agents won't leave until they've worked for MIN_WORK_TIME (3.0s). For tests with rapid spawn/complete cycles, add `"force": true` to agent_complete events to bypass this check and ensure reliable cleanup.
+
+### Exit Point vs Boundary Exceptions
+When entities get stuck trying to reach a point outside the walkable area, move the target point inside the walkable area rather than adding complex boundary-bypass logic. Simpler solution: DOOR_POSITION at Y=615 (on floor) instead of Y=665 (in wall) with LEAVING state exceptions.
+
+### Long-Range Stuck Detection
+Short-term stuck detection (1.5s, 0.75px) misses "dodging in place" where an entity moves but makes no real progress. Add long-range detection (5s, 30px) that checks actual distance traveled. On trigger, turn around and walk the opposite direction - more natural than teleporting.
+
+### xdotool for Visual Verification
+`xdotool search --name "Window Name"` finds window IDs, `import -window $ID file.png` captures screenshots. Useful for visual verification during development. May need `wmctrl -i -a $ID` to focus window first if on different workspace.

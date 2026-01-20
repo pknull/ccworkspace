@@ -51,12 +51,16 @@ const STUCK_DISTANCE_EPS: float = 0.75
 const STUCK_TIMEOUT: float = 1.5
 const CAT_WALL_MARGIN: float = 18.0
 const CAT_NUDGE_RADIUS: float = 18.0
+const LONG_STUCK_TIMEOUT: float = 5.0  # Long-range stuck detection
+const LONG_STUCK_DISTANCE: float = 30.0  # Must move at least this far in LONG_STUCK_TIMEOUT
 
 # Dragging
 var is_being_dragged: bool = false
 var drag_offset: Vector2 = Vector2.ZERO
 var last_position: Vector2 = Vector2.ZERO
 var stuck_timer: float = 0.0
+var long_stuck_timer: float = 0.0
+var long_stuck_position: Vector2 = Vector2.ZERO
 var nap_spot: Vector2 = Vector2.ZERO
 var pending_sleep: bool = false
 var cat_bed_position: Vector2 = Vector2.ZERO
@@ -76,6 +80,7 @@ func _ready() -> void:
 	position = Vector2(randf_range(bounds_min.x, bounds_max.x), randf_range(bounds_min.y, bounds_max.y))
 	next_action_time = randf_range(2.0, 5.0)
 	last_position = position
+	long_stuck_position = position
 	nap_spot = _find_valid_nap_spot()
 
 func _randomize_appearance() -> void:
@@ -346,7 +351,7 @@ func _process_walking(delta: float) -> void:
 		consecutive_blocks = 0
 		position = next_pos
 
-		# Stuck detection
+		# Stuck detection (short-range)
 		if position.distance_to(last_position) < STUCK_DISTANCE_EPS:
 			stuck_timer += delta
 			if stuck_timer >= STUCK_TIMEOUT:
@@ -354,9 +359,22 @@ func _process_walking(delta: float) -> void:
 				target_position = _find_valid_position()
 				_build_path_to(target_position)
 				stuck_timer = 0.0
+				long_stuck_timer = 0.0
+				long_stuck_position = position
 		else:
 			stuck_timer = 0.0
 		last_position = position
+
+		# Long-range stuck detection (catches dodging back and forth)
+		long_stuck_timer += delta
+		if long_stuck_timer >= LONG_STUCK_TIMEOUT:
+			if position.distance_to(long_stuck_position) < LONG_STUCK_DISTANCE:
+				_log_event("STUCK", "No real progress in %.1fs, turning around" % LONG_STUCK_TIMEOUT)
+				# Find a destination in the opposite direction instead of teleporting
+				target_position = _find_opposite_direction_position()
+				_build_path_to(target_position)
+			long_stuck_timer = 0.0
+			long_stuck_position = position
 
 		# Face direction of movement
 		if abs(direction.x) > 1:
@@ -454,6 +472,8 @@ func _process_stretching(delta: float) -> void:
 func _pick_next_action() -> void:
 	state_timer = 0.0
 	consecutive_blocks = 0
+	long_stuck_timer = 0.0
+	long_stuck_position = position
 
 	# Weight different actions
 	var roll = randf()
@@ -628,6 +648,26 @@ func _has_clearance(pos: Vector2, clearance: float) -> bool:
 			return false
 
 	return true
+
+func _find_opposite_direction_position() -> Vector2:
+	# Find a position in the opposite direction from where we were heading
+	var away_dir = (position - target_position).normalized()
+	if away_dir == Vector2.ZERO:
+		away_dir = Vector2(randf_range(-1, 1), randf_range(-1, 1)).normalized()
+
+	# Try to find a valid position in that general direction
+	for dist in [150, 200, 250, 100, 300]:
+		for angle_offset in [0.0, 0.3, -0.3, 0.6, -0.6]:
+			var test_dir = away_dir.rotated(angle_offset)
+			var test_pos = position + test_dir * dist
+			# Clamp to bounds
+			test_pos.x = clamp(test_pos.x, bounds_min.x + CAT_WALL_MARGIN, bounds_max.x - CAT_WALL_MARGIN)
+			test_pos.y = clamp(test_pos.y, bounds_min.y + CAT_WALL_MARGIN, bounds_max.y - CAT_WALL_MARGIN)
+			if _has_clearance(test_pos, 20.0):
+				return test_pos
+
+	# Fallback to any valid position
+	return _find_valid_position()
 
 func _log_event(category: String, message: String) -> void:
 	var script = load("res://scripts/DebugEventLog.gd")
