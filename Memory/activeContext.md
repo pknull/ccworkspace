@@ -1,9 +1,9 @@
 ---
-version: "2.1"
+version: "2.2"
 lastUpdated: "2026-01-20 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - Distribution workflow planning, itch.io setup added to Todoist"
+changeTrigger: "Session save - Desk drag bug fix during pause menu"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -21,6 +21,18 @@ dependencies: ["communicationStyle.md"]
 - Agent mood system (tired/frustrated/irate)
 
 **Recent Activities** (last 7 days):
+- **2026-01-20 (Session 12)**: Desk drag bug during pause menu:
+  - **Bug**: Adjusting volume sliders in pause menu caused desks to move
+  - **Root cause**: `Desk.gd` used `_input()` for drag handling without popup check
+    - `DraggableItem.gd` already had `is_any_popup_open()` guard
+    - `Desk.gd` was missing this check (only checked `is_occupied`)
+    - Control's `mouse_filter = MOUSE_FILTER_STOP` only blocks GUI event propagation
+    - `_input()` receives events from main input pipeline before GUI processing
+  - **Fix**:
+    - Added `office_manager` reference to `Desk.gd`
+    - Added popup check in `Desk._input()` before starting drag
+    - Set reference in `OfficeManager._create_desks()`
+
 - **2026-01-20 (Session 11)**: Distribution workflow planning:
   - User considers project ready for first release ("ask for coffee")
   - Discussed GitHub release access without repo access
@@ -267,6 +279,9 @@ Window cloud masks (to hide overflow) render on top of wall decorations. Wall-mo
 
 ### _input vs _unhandled_input
 Using `_unhandled_input` for drag operations caused furniture dragging to break - other nodes consumed the input first. Reverted to `_input` for DraggableItem to ensure drag events are captured.
+
+### _input Bypasses Control mouse_filter
+Control nodes with `mouse_filter = MOUSE_FILTER_STOP` only block GUI event propagation (Control._gui_input). They do NOT block `_input()` which receives events from the main input pipeline before GUI processing. When using `_input()` for drag handling on floor objects (desks, furniture), always check if popups/menus are open before starting drag operations.
 
 ### Godot Audio Import
 Audio files placed in `res://audio/` require Godot editor to scan and import them. Running headless editor (`godot --editor --headless`) triggers the import without opening the full GUI.
