@@ -15,6 +15,7 @@ var click_area: Rect2 = Rect2(-30, -30, 60, 60)  # Default click area
 
 # For collision checking
 var navigation_grid: NavigationGrid = null
+var office_manager: Node = null  # Set by OfficeManager to check popup state
 var obstacle_size: Vector2 = Vector2(40, 40)  # Default size, set by OfficeManager
 
 func _ready() -> void:
@@ -43,6 +44,9 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
+				# Don't start dragging if a popup is open
+				if office_manager and office_manager.has_method("is_any_popup_open") and office_manager.is_any_popup_open():
+					return
 				# Check if click is within our bounds
 				var local_pos = get_local_mouse_position()
 				if click_area.has_point(local_pos):

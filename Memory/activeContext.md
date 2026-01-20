@@ -1,9 +1,9 @@
 ---
-version: "1.9"
+version: "2.0"
 lastUpdated: "2026-01-20 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - Floor boundary fix, cat stuck fix, exit point relocation"
+changeTrigger: "Session save - Weather system, delivery sounds, furniture drag fix, tie color fix"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -12,15 +12,33 @@ dependencies: ["communicationStyle.md"]
 
 ## Current Project Status
 
-**Primary Focus**: Feature-rich office simulation with audio, day/night cycle, achievements
+**Primary Focus**: Feature-complete office simulation - user considers project essentially done
 
 **Active Work**:
-- Audio system implemented with CC0 sound effects
+- Weather system with rain/snow particles
+- Audio system with typing, meow, achievement, shredder, and filing sounds
 - Day/night cycle with real-time sky colors
 - Agent mood system (tired/frustrated/irate)
-- Enhanced achievement system with cat and speed achievements
 
 **Recent Activities** (last 7 days):
+- **2026-01-20 (Session 10)**: Weather system, delivery sounds, bug fixes:
+  - **WeatherSystem.gd**: Random weather (clear 50%, rain 35%, snow 15%)
+    - CPUParticles2D for rain/snow effects
+    - SubViewport clips particles to 76px sky region (doesn't fall on floor)
+    - 5-15 minute random transitions with 3s fade
+  - **Shredder/filing sounds**: Downloaded CC0 sounds from BigSoundBank
+    - `shredder.wav` (torn paper), `filing.wav` (metal drawer)
+    - Agent tracks `delivery_target` and plays appropriate sound
+    - Added `play_shredder()` and `play_filing()` to AudioManager
+  - **Fixed furniture drag through popups**:
+    - Added `is_any_popup_open()` to OfficeManager
+    - DraggableItem checks popup state before starting drag
+  - **Fixed white tie bug**: Male agents had white ties after profile appearance applied
+    - Cause: tie created as ColorRect without setting .color (defaults to white)
+    - Fix: Set `tie.color = Agent.get_agent_color(agent.agent_type)` in both `_create_male_visuals` and `_create_male_visuals_persistent`
+  - Stress tests passing (20 agents, 100 tool cycles)
+  - User considers project feature-complete
+
 - **2026-01-20 (Session 9)**: Floor boundary fix and cat stuck detection:
   - **xdotool screenshot capability**: Demonstrated ability to capture game window screenshots for visual verification during development
   - **Fixed agents walking on bottom wall**:
@@ -208,6 +226,10 @@ Port 9999, JSON messages with `"event"` field:
 - [x] Floor boundary fix (agents no longer walk on bottom wall)
 - [x] Cat stuck fix (turns around instead of teleporting)
 - [x] Exit point relocated to floor in front of door
+- [x] Weather system with rain/snow (clipped to sky region)
+- [x] Shredder and filing cabinet sounds
+- [x] Furniture drag fix (no movement when clicking through popups)
+- [x] Male tie color fix (colored by agent_type)
 - [ ] Release new minor version
 - [ ] Fix GitHub to create platform releases
 - [ ] Test tool tracking with reduced scan interval
@@ -219,7 +241,7 @@ Port 9999, JSON messages with `"event"` field:
 - Extract AgentSpawner from OfficeManager (reduces monolith)
 - EventBus pattern for decoupled communication
 - A* priority queue optimization
-- Weather effects (user noted back wall layering issues)
+- Agent-type accent for female agents (optional consistency)
 - More furniture variety
 - Further Agent.gd reduction would require StateMachine class (diminishing returns)
 

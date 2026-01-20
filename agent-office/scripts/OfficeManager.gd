@@ -77,6 +77,7 @@ var window_clouds: Array = []
 var window_skies: Array = []  # Sky ColorRects for day/night cycle
 var celestial_layer: Node2D = null  # Sun/moon layer
 var ambient_overlay: ColorRect = null  # Lighting overlay for day/night
+var weather_system: WeatherSystem = null  # Rain/snow particles
 var office_cat: Node2D = null
 
 # Wall decorations
@@ -273,6 +274,8 @@ func _setup_office() -> void:
 	OfficeVisualFactory.create_sky_layer(self, window_skies)
 	celestial_layer = OfficeVisualFactory.create_celestial_layer(self)
 	OfficeVisualFactory.create_cloud_layer(self, window_clouds)
+	weather_system = OfficeVisualFactory.create_weather_system()
+	add_child(weather_system)
 	OfficeVisualFactory.create_foliage_layer(self)
 
 	# Walls (with transparent holes where windows are)
@@ -314,6 +317,7 @@ func _setup_office() -> void:
 	# Taskboard (now draggable)
 	draggable_taskboard = OfficeVisualFactory.create_taskboard(DraggableItemScript)
 	draggable_taskboard.position = taskboard_position
+	draggable_taskboard.office_manager = self
 	draggable_taskboard.position_changed.connect(_on_item_position_changed)
 	add_child(draggable_taskboard)
 	taskboard = draggable_taskboard  # Keep reference for session labels
@@ -330,6 +334,7 @@ func _create_furniture() -> void:
 	draggable_water_cooler.position = water_cooler_position
 	draggable_water_cooler.navigation_grid = navigation_grid
 	draggable_water_cooler.obstacle_size = OfficeConstants.WATER_COOLER_OBSTACLE
+	draggable_water_cooler.office_manager = self
 	draggable_water_cooler.position_changed.connect(_on_item_position_changed)
 	add_child(draggable_water_cooler)
 	office_obstacles.append(Rect2(water_cooler_position.x - 20, water_cooler_position.y - 40, 40, 60))
@@ -339,6 +344,7 @@ func _create_furniture() -> void:
 	draggable_plant.position = plant_position
 	draggable_plant.navigation_grid = navigation_grid
 	draggable_plant.obstacle_size = OfficeConstants.PLANT_OBSTACLE
+	draggable_plant.office_manager = self
 	draggable_plant.position_changed.connect(_on_item_position_changed)
 	add_child(draggable_plant)
 	office_obstacles.append(Rect2(plant_position.x - 20, plant_position.y - 20, 40, 50))
@@ -348,6 +354,7 @@ func _create_furniture() -> void:
 	draggable_filing_cabinet.position = filing_cabinet_position
 	draggable_filing_cabinet.navigation_grid = navigation_grid
 	draggable_filing_cabinet.obstacle_size = OfficeConstants.FILING_CABINET_OBSTACLE
+	draggable_filing_cabinet.office_manager = self
 	draggable_filing_cabinet.position_changed.connect(_on_item_position_changed)
 	add_child(draggable_filing_cabinet)
 	office_obstacles.append(Rect2(filing_cabinet_position.x - 20, filing_cabinet_position.y - 30, 40, 80))
@@ -357,6 +364,7 @@ func _create_furniture() -> void:
 	draggable_shredder.position = shredder_position
 	draggable_shredder.navigation_grid = navigation_grid
 	draggable_shredder.obstacle_size = OfficeConstants.SHREDDER_OBSTACLE
+	draggable_shredder.office_manager = self
 	draggable_shredder.position_changed.connect(_on_item_position_changed)
 	add_child(draggable_shredder)
 	office_obstacles.append(Rect2(shredder_position.x - 15, shredder_position.y - 20, 30, 40))
@@ -366,6 +374,7 @@ func _create_furniture() -> void:
 	meeting_table.position = meeting_table_position
 	meeting_table.navigation_grid = navigation_grid
 	meeting_table.obstacle_size = OfficeConstants.MEETING_TABLE_OBSTACLE
+	meeting_table.office_manager = self
 	meeting_table.position_changed.connect(_on_item_position_changed)
 	add_child(meeting_table)
 	# Register as obstacle
@@ -377,6 +386,7 @@ func _create_furniture() -> void:
 	draggable_cat_bed.position = cat_bed_position
 	draggable_cat_bed.navigation_grid = navigation_grid
 	draggable_cat_bed.obstacle_size = OfficeConstants.CAT_BED_OBSTACLE
+	draggable_cat_bed.office_manager = self
 	draggable_cat_bed.position_changed.connect(_on_item_position_changed)
 	add_child(draggable_cat_bed)
 	var bed_size = OfficeConstants.CAT_BED_OBSTACLE
@@ -1810,6 +1820,9 @@ func _on_achievement_popup_closed() -> void:
 	if achievement_popup:
 		achievement_popup.queue_free()
 		achievement_popup = null
+
+func is_any_popup_open() -> bool:
+	return roster_popup != null or profile_popup != null or achievement_popup != null or pause_menu != null
 
 # =============================================================================
 # PAUSE MENU

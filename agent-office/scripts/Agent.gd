@@ -194,6 +194,7 @@ const TYPING_INTERVAL: float = 0.3  # How often to trigger typing sound
 
 # Document being carried
 var document: ColorRect = null
+var delivery_target: String = ""  # "shredder" or "filing_cabinet"
 
 # Tool display
 var current_tool: String = ""
@@ -1216,11 +1217,13 @@ func _start_delivering() -> void:
 		_create_document()
 	# Randomly choose between shredder (destroy) or filing cabinet (archive)
 	if randf() < 0.5:
+		delivery_target = "shredder"
 		var delivery_pos = _get_random_shredder_approach()
 		_build_path_to(delivery_pos, "shredder")
 		if visuals and visuals.status_label:
 			visuals.status_label.text = "Shredding docs..."
 	else:
+		delivery_target = "filing_cabinet"
 		var delivery_pos = _get_random_filing_cabinet_approach()
 		_build_path_to(delivery_pos, "filing_cabinet")
 		if visuals and visuals.status_label:
@@ -1297,6 +1300,13 @@ func _deliver_document() -> void:
 	if document:
 		document.queue_free()
 		document = null
+	# Play appropriate sound
+	if audio_manager:
+		if delivery_target == "shredder":
+			audio_manager.play_shredder()
+		elif delivery_target == "filing_cabinet":
+			audio_manager.play_filing()
+	delivery_target = ""
 
 func assign_desk(desk: Node2D) -> void:
 	assigned_desk = desk
