@@ -4,6 +4,7 @@ class_name Desk
 signal position_changed(desk: Desk, new_position: Vector2)
 
 var is_occupied: bool = false
+var occupied_by: String = ""
 
 # Visual nodes
 var desk_rect: ColorRect
@@ -210,18 +211,25 @@ func get_work_position() -> Vector2:
 	# Position where agent should stand (in front of desk)
 	return global_position + Vector2(0, OfficeConstants.WORK_POSITION_OFFSET)
 
-func set_occupied(occupied: bool) -> void:
-	is_occupied = occupied
-	# Only update indicator, not monitor - monitor is controlled by set_monitor_active
-	if occupied:
-		if status_indicator:
-			status_indicator.color = OfficePalette.GRUVBOX_YELLOW  # Yellow/amber when reserved but worker not yet arrived
-	else:
+func set_occupied(occupied: bool, agent_id: String = "") -> void:
+	if not occupied:
+		if agent_id != "" and occupied_by != "" and agent_id != occupied_by:
+			return
+		occupied_by = ""
+		is_occupied = false
 		if status_indicator:
 			status_indicator.color = OfficePalette.STATUS_LED_RED  # Red when unoccupied
 		# Turn off monitor and clear items when desk is vacated
 		set_monitor_active(false)
 		clear_personal_items()
+		return
+
+	is_occupied = true
+	if agent_id != "":
+		occupied_by = agent_id
+	# Only update indicator, not monitor - monitor is controlled by set_monitor_active
+	if status_indicator:
+		status_indicator.color = OfficePalette.GRUVBOX_YELLOW  # Yellow/amber when reserved but worker not yet arrived
 
 func set_monitor_active(active: bool) -> void:
 	if active:

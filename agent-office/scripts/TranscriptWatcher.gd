@@ -9,6 +9,7 @@ const CODEX_MAX_SCAN_DEPTH = 3  # root + YYYY/MM/DD
 const POLL_INTERVAL = OfficeConstants.TRANSCRIPT_POLL_INTERVAL
 const SCAN_INTERVAL = 1.0  # seconds - how often to scan for new sessions (fast to catch subagent sessions)
 const ACTIVE_THRESHOLD = 300  # seconds - consider sessions active if modified within this time (longer than SESSION_INACTIVE_TIMEOUT)
+const PENDING_AGENT_TIMEOUT = 1800  # seconds - consider pending agents stale after this long without updates
 
 # Track multiple sessions
 var watched_sessions: Dictionary = {}  # file_path -> {position: int, last_modified: int}
@@ -16,7 +17,7 @@ var poll_timer: float = 0.0
 var scan_timer: float = 0.0
 
 # Track tool_use_id -> agent info for matching with tool_result
-var pending_agents: Dictionary = {}  # tool_use_id -> {agent_type, description, session_path}
+var pending_agents: Dictionary = {}  # tool_use_id -> {agent_type, description, session_path, created_at}
 
 # Track ALL pending tool calls - any tool can require permission
 var pending_tools: Dictionary = {}  # tool_use_id -> {tool_name, session_path}
@@ -123,7 +124,7 @@ func _remove_stale_sessions(current_time: float) -> void:
 		var mod_time = FileAccess.get_modified_time(path)
 		if current_time - mod_time > ACTIVE_THRESHOLD:
 			# Only remove if no pending agents from this session
-			if not session_has_pending_agents(path):
+			if not session_has_pending_agents(path, current_time):
 				to_remove.append(path)
 
 	for path in to_remove:
@@ -317,7 +318,8 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 		pending_agents[tool_id] = {
 			"agent_type": agent_type,
 			"description": description,
-			"session_path": session_path
+			"session_path": session_path,
+			"created_at": Time.get_unix_time_from_system()
 		}
 
 		print("[TranscriptWatcher] SPAWN: %s - %s (id: %s)" % [agent_type, description, tool_id.substr(0, 12)])
@@ -423,11 +425,16 @@ func process_tool_result(item: Dictionary, entry: Dictionary) -> void:
 			"session_path": tool_info.session_path
 		})
 
-func session_has_pending_agents(session_path: String) -> bool:
+func session_has_pending_agents(session_path: String, current_time: float = -1.0) -> bool:
+	var now = current_time
+	if now < 0.0:
+		now = Time.get_unix_time_from_system()
 	for tool_id in pending_agents.keys():
 		var agent_info = pending_agents[tool_id]
 		if agent_info.get("session_path", "") == session_path:
-			return true
+			var created_at = float(agent_info.get("created_at", 0))
+			if created_at > 0 and (now - created_at) <= PENDING_AGENT_TIMEOUT:
+				return true
 	return false
 
 func _cleanup_pending_for_session(session_path: String) -> void:
