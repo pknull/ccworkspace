@@ -10,6 +10,7 @@ const PauseMenuScript = preload("res://scripts/PauseMenu.gd")
 const AudioManagerScript = preload("res://scripts/AudioManager.gd")
 const WallClockScript = preload("res://scripts/WallClock.gd")
 const DebugEventLogScript = preload("res://scripts/DebugEventLog.gd")
+const WeatherServiceScript = preload("res://scripts/WeatherService.gd")
 # Note: OfficeConstants, OfficePalette, OfficeVisualFactory are accessed via class_name (no preload needed)
 
 @export var spawn_point: Vector2 = OfficeConstants.SPAWN_POINT
@@ -74,6 +75,7 @@ var debug_overlay_enabled: bool = false
 # Visual elements
 var connection_lines: Array[Line2D] = []
 var window_clouds: Array = []
+var cloud_layer: Node2D = null
 var window_skies: Array = []  # Sky ColorRects for day/night cycle
 var celestial_layer: Node2D = null  # Sun/moon layer
 var ambient_overlay: ColorRect = null  # Lighting overlay for day/night
@@ -84,6 +86,8 @@ var office_cat: Node2D = null
 var vip_photo: VIPPhoto = null
 var roster_clipboard: RosterClipboard = null
 var wall_clock = null  # WallClock instance
+var temperature_display = null
+var weather_service = null
 
 # Popups
 var roster_popup: RosterPopup = null
@@ -273,7 +277,7 @@ func _setup_office() -> void:
 	# Sky layers (behind wall, visible through window holes)
 	OfficeVisualFactory.create_sky_layer(self, window_skies)
 	celestial_layer = OfficeVisualFactory.create_celestial_layer(self)
-	OfficeVisualFactory.create_cloud_layer(self, window_clouds)
+	cloud_layer = OfficeVisualFactory.create_cloud_layer(self, window_clouds)
 	weather_system = OfficeVisualFactory.create_weather_system()
 	add_child(weather_system)
 	OfficeVisualFactory.create_foliage_layer(self)
@@ -301,6 +305,10 @@ func _setup_office() -> void:
 	OfficeVisualFactory.create_title_sign(self)
 
 	# Wall decorations (between windows and title sign)
+	temperature_display = OfficeVisualFactory.create_temperature_display()
+	temperature_display.position = OfficeConstants.TEMPERATURE_DISPLAY_POSITION
+	add_child(temperature_display)
+
 	wall_clock = OfficeVisualFactory.create_wall_clock()
 	wall_clock.position = OfficeConstants.WALL_CLOCK_POSITION
 	add_child(wall_clock)
@@ -313,6 +321,10 @@ func _setup_office() -> void:
 	add_child(roster_clipboard)
 	roster_clipboard.setup(agent_roster)
 	roster_clipboard.clicked.connect(_on_roster_clipboard_clicked)
+
+	weather_service = WeatherServiceScript.new()
+	weather_service.configure(weather_system, temperature_display)
+	add_child(weather_service)
 
 	# Taskboard (now draggable)
 	draggable_taskboard = OfficeVisualFactory.create_taskboard(DraggableItemScript)
@@ -818,6 +830,13 @@ func _animate_clouds(delta: float) -> void:
 		if cloud.position.x > OfficeConstants.SCREEN_WIDTH:
 			cloud.position.x = -cloud.size.x
 
+func _update_weather_visibility() -> void:
+	if not is_instance_valid(weather_system):
+		return
+	var is_fog = weather_system.get_weather_state() == WeatherSystem.WeatherState.FOG
+	if cloud_layer:
+		cloud_layer.visible = not is_fog
+
 func _update_day_night_cycle() -> void:
 	# Get current time
 	var time_dict = Time.get_time_dict_from_system()
@@ -885,6 +904,8 @@ func _update_day_night_cycle() -> void:
 	# Update ambient overlay
 	if ambient_overlay:
 		ambient_overlay.color = ambient_color
+
+	_update_weather_visibility()
 
 	# Update sun/moon visibility and position
 	if celestial_layer:
@@ -1407,7 +1428,7 @@ func _on_agent_completed(agent: Agent) -> void:
 
 	# Safety: ensure desk is released before agent is freed
 	if agent.assigned_desk:
-		agent.assigned_desk.set_occupied(false)
+		agent.assigned_desk.set_occupied(false, agent.agent_id)
 		agent.assigned_desk = null
 
 	# Release meeting spot if this agent was in a meeting
@@ -1843,8 +1864,10 @@ func _show_pause_menu() -> void:
 	pause_menu.profiler_enabled = profiler_enabled
 	pause_menu.debug_enabled = debug_overlay_enabled
 	pause_menu.audio_manager = audio_manager
+	pause_menu.weather_service = weather_service
 	add_child(pause_menu)
 	pause_menu.sync_volume_sliders()
+	pause_menu.sync_weather_settings()
 	pause_menu.resume_requested.connect(_on_pause_resume)
 	pause_menu.roster_requested.connect(_on_pause_roster)
 	pause_menu.reset_layout_requested.connect(_on_pause_reset_layout)

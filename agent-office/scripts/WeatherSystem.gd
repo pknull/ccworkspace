@@ -4,11 +4,12 @@ class_name WeatherSystem
 # Weather system for office background
 # Uses SubViewport to clip particles to sky region only
 
-enum WeatherState { CLEAR, RAIN, SNOW }
+enum WeatherState { CLEAR, RAIN, SNOW, FOG }
 
 var current_weather: WeatherState = WeatherState.CLEAR
 var weather_timer: float = 0.0
 var transition_time: float = 0.0
+var live_weather_enabled: bool = false
 
 # Clipping viewport
 var viewport_container: SubViewportContainer = null
@@ -17,6 +18,7 @@ var viewport: SubViewport = null
 # Particle emitters (inside viewport)
 var rain_particles: CPUParticles2D = null
 var snow_particles: CPUParticles2D = null
+var fog_particles: CPUParticles2D = null
 
 # Weather timing
 const MIN_WEATHER_DURATION: float = 300.0  # 5 minutes minimum
@@ -36,6 +38,7 @@ func _ready() -> void:
 	_create_clipping_viewport()
 	_create_rain_particles()
 	_create_snow_particles()
+	_create_fog_particles()
 	_pick_next_weather()
 
 func _create_clipping_viewport() -> void:
@@ -110,7 +113,34 @@ func _create_snow_particles() -> void:
 
 	viewport.add_child(snow_particles)
 
+func _create_fog_particles() -> void:
+	fog_particles = CPUParticles2D.new()
+	fog_particles.emitting = false
+	fog_particles.amount = 40
+	fog_particles.lifetime = 6.0
+	fog_particles.preprocess = 1.0
+
+	# Fog drifts slowly across the sky area
+	fog_particles.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	fog_particles.emission_rect_extents = Vector2(OfficeConstants.SCREEN_WIDTH / 2, SKY_HEIGHT / 2)
+	fog_particles.position = Vector2(OfficeConstants.SCREEN_WIDTH / 2, SKY_HEIGHT / 2)
+
+	fog_particles.direction = Vector2(1, 0)
+	fog_particles.spread = 20.0
+	fog_particles.gravity = Vector2(0, 0)
+	fog_particles.initial_velocity_min = 2.0
+	fog_particles.initial_velocity_max = 8.0
+
+	# Large, soft fog puffs
+	fog_particles.scale_amount_min = 6.0
+	fog_particles.scale_amount_max = 12.0
+	fog_particles.color = Color(0.92, 0.92, 0.95, 0.0)
+
+	viewport.add_child(fog_particles)
+
 func _process(delta: float) -> void:
+	if live_weather_enabled:
+		return
 	weather_timer -= delta
 
 	if weather_timer <= 0:
@@ -147,6 +177,7 @@ func _pick_next_weather() -> void:
 func _apply_weather() -> void:
 	rain_particles.emitting = (current_weather == WeatherState.RAIN)
 	snow_particles.emitting = (current_weather == WeatherState.SNOW)
+	fog_particles.emitting = (current_weather == WeatherState.FOG)
 
 	# Reset opacity for fade-in
 	_update_particle_opacity(0.0)
@@ -158,6 +189,8 @@ func _update_particle_opacity(factor: float) -> void:
 		rain_particles.color.a = 0.6 * factor
 	elif current_weather == WeatherState.SNOW:
 		snow_particles.color.a = 0.8 * factor
+	elif current_weather == WeatherState.FOG:
+		fog_particles.color.a = 0.35 * factor
 
 func get_weather_state() -> WeatherState:
 	return current_weather
@@ -170,6 +203,8 @@ func get_weather_name() -> String:
 			return "Rain"
 		WeatherState.SNOW:
 			return "Snow"
+		WeatherState.FOG:
+			return "Fog"
 	return "Unknown"
 
 # Force a specific weather (for testing)
@@ -179,3 +214,17 @@ func set_weather(state: WeatherState, duration: float = 60.0) -> void:
 	weather_timer = duration
 	_apply_weather()
 	_update_particle_opacity(1.0)
+
+func set_live_weather(state: WeatherState) -> void:
+	live_weather_enabled = true
+	current_weather = state
+	transition_time = 0.0
+	weather_timer = 0.0
+	_apply_weather()
+	_update_particle_opacity(1.0)
+
+func clear_live_weather() -> void:
+	if not live_weather_enabled:
+		return
+	live_weather_enabled = false
+	_pick_next_weather()

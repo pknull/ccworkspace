@@ -33,6 +33,12 @@ var quit_button: Button
 var profiler_enabled: bool = false
 var debug_enabled: bool = false
 
+# Weather controls
+var weather_label: Label
+var weather_mode_button: Button
+var weather_units_button: Button
+var weather_location_input: LineEdit
+
 # Volume sliders
 var typing_slider: HSlider
 var meow_slider: HSlider
@@ -43,10 +49,11 @@ var achievement_label: Label
 
 # Audio manager reference (set by OfficeManager)
 var audio_manager = null
+var weather_service = null
 
 # Layout constants
 const PANEL_WIDTH: float = 280
-const PANEL_HEIGHT: float = 560
+const PANEL_HEIGHT: float = 680
 const BUTTON_WIDTH: float = 200
 const BUTTON_HEIGHT: float = 32
 const BUTTON_SPACING: float = 8
@@ -164,6 +171,38 @@ func _create_visuals() -> void:
 	container.add_child(achievement_slider)
 	button_y += SLIDER_HEIGHT + BUTTON_SPACING + VOLUME_SECTION_SPACING
 
+	# Weather controls section
+	weather_label = Label.new()
+	weather_label.text = "— Weather —"
+	weather_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	weather_label.position = Vector2(panel_x, button_y)
+	weather_label.size = Vector2(PANEL_WIDTH, 20)
+	weather_label.add_theme_font_size_override("font_size", 12)
+	weather_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_GRAY)
+	container.add_child(weather_label)
+	button_y += VOLUME_LABEL_HEIGHT
+
+	weather_mode_button = _create_button(_get_weather_mode_button_text(), button_x, button_y)
+	weather_mode_button.pressed.connect(_on_weather_mode_pressed)
+	container.add_child(weather_mode_button)
+	button_y += BUTTON_HEIGHT + BUTTON_SPACING
+
+	weather_location_input = LineEdit.new()
+	weather_location_input.position = Vector2(button_x, button_y)
+	weather_location_input.size = Vector2(BUTTON_WIDTH, BUTTON_HEIGHT)
+	weather_location_input.placeholder_text = "City, Region (Enter)"
+	weather_location_input.add_theme_font_size_override("font_size", 12)
+	weather_location_input.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT1)
+	weather_location_input.text_submitted.connect(_on_weather_location_submitted)
+	weather_location_input.focus_exited.connect(_on_weather_location_focus_exited)
+	container.add_child(weather_location_input)
+	button_y += BUTTON_HEIGHT + BUTTON_SPACING
+
+	weather_units_button = _create_button(_get_weather_units_button_text(), button_x, button_y)
+	weather_units_button.pressed.connect(_on_weather_units_pressed)
+	container.add_child(weather_units_button)
+	button_y += BUTTON_HEIGHT + BUTTON_SPACING + VOLUME_SECTION_SPACING
+
 	# Roster button
 	roster_button = _create_button("Roster", button_x, button_y)
 	roster_button.pressed.connect(_on_roster_pressed)
@@ -265,6 +304,16 @@ func _get_profiler_button_text() -> String:
 func _get_debug_button_text() -> String:
 	return "Debug: On" if debug_enabled else "Debug: Off"
 
+func _get_weather_mode_button_text() -> String:
+	if weather_service and weather_service.is_auto_location():
+		return "Location: Auto"
+	return "Location: Custom"
+
+func _get_weather_units_button_text() -> String:
+	if weather_service and weather_service.is_fahrenheit():
+		return "Units: F"
+	return "Units: C"
+
 # Volume callbacks
 func _on_typing_volume_changed(value: float) -> void:
 	if audio_manager:
@@ -278,6 +327,33 @@ func _on_achievement_volume_changed(value: float) -> void:
 	if audio_manager:
 		audio_manager.set_achievement_volume(value)
 
+func _on_weather_mode_pressed() -> void:
+	if weather_service:
+		weather_service.set_use_auto_location(not weather_service.is_auto_location())
+		sync_weather_settings()
+
+func _on_weather_units_pressed() -> void:
+	if weather_service:
+		weather_service.set_use_fahrenheit(not weather_service.is_fahrenheit())
+		sync_weather_settings()
+
+func _on_weather_location_submitted(text: String) -> void:
+	_apply_weather_location(text)
+
+func _on_weather_location_focus_exited() -> void:
+	if weather_location_input:
+		_apply_weather_location(weather_location_input.text)
+
+func _apply_weather_location(text: String) -> void:
+	if not weather_service:
+		return
+	var trimmed = text.strip_edges()
+	if trimmed == "":
+		weather_service.set_use_auto_location(true)
+	else:
+		weather_service.set_custom_location(trimmed)
+	sync_weather_settings()
+
 # Initialize sliders from AudioManager values
 func sync_volume_sliders() -> void:
 	if audio_manager:
@@ -287,3 +363,20 @@ func sync_volume_sliders() -> void:
 			meow_slider.set_value_no_signal(audio_manager.get_meow_volume())
 		if achievement_slider:
 			achievement_slider.set_value_no_signal(audio_manager.get_achievement_volume())
+
+func sync_weather_settings() -> void:
+	if not weather_service:
+		return
+	var is_auto = weather_service.is_auto_location()
+	if weather_mode_button:
+		weather_mode_button.text = _get_weather_mode_button_text()
+	if weather_units_button:
+		weather_units_button.text = _get_weather_units_button_text()
+	if weather_location_input:
+		weather_location_input.editable = not is_auto
+		if is_auto:
+			weather_location_input.text = ""
+			weather_location_input.placeholder_text = "Auto (office)"
+		else:
+			weather_location_input.text = weather_service.get_location_query()
+			weather_location_input.placeholder_text = "City, Region (Enter)"
