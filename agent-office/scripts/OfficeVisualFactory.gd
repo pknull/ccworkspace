@@ -4,6 +4,7 @@ class_name OfficeVisualFactory
 # Extracts visual creation logic from OfficeManager for better separation of concerns
 
 const WallClockScript = preload("res://scripts/WallClock.gd")
+const TemperatureDisplayScript = preload("res://scripts/TemperatureDisplay.gd")
 
 static func create_water_cooler(draggable_script: Script) -> Node2D:
 	var cooler = draggable_script.new()
@@ -793,6 +794,11 @@ static func create_wall_clock() -> Node2D:
 	var clock = WallClockScript.new()
 	clock.z_index = OfficeConstants.Z_WALL_DECORATION
 	return clock
+
+static func create_temperature_display() -> Node2D:
+	var display = TemperatureDisplayScript.new()
+	display.z_index = OfficeConstants.Z_WALL_DECORATION
+	return display
 
 static func create_weather_system() -> WeatherSystem:
 	var weather = WeatherSystem.new()

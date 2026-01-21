@@ -148,6 +148,7 @@ const CAT_BED_OBSTACLE: Vector2 = Vector2(60, 36)
 
 # Wall decorations (between windows and title sign)
 const ACHIEVEMENT_BOARD_POSITION: Vector2 = Vector2(50, 32)  # Far left on wall
+const TEMPERATURE_DISPLAY_POSITION: Vector2 = Vector2(260, 32)  # Opposite wall clock
 const WALL_CLOCK_POSITION: Vector2 = Vector2(1020, 32)       # Between windows at 900 and 1140
 const VIP_PHOTO_POSITION: Vector2 = Vector2(510, 32)         # Left of title sign
 const ROSTER_CLIPBOARD_POSITION: Vector2 = Vector2(770, 32)  # Right of title sign
