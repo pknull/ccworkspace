@@ -135,6 +135,7 @@ const NAV_NUDGE_RADIUS: float = 40.0     # Radius for random offset when nudging
 const WALK_STUCK_THRESHOLD: float = 0.5  # Distance below which agent is considered stuck
 const WALK_STUCK_TIMEOUT: float = 1.2    # Seconds before stuck recovery triggers
 const WALK_NUDGE_RADIUS: float = 18.0    # Radius for random recovery nudge
+const WORKING_DESK_MAX_DISTANCE: float = 30.0
 
 # Safety timeouts to reset agents stuck in non-working roles.
 const STATE_TIMEOUTS: Dictionary = {
@@ -250,7 +251,7 @@ func _exit_tree() -> void:
 
 	# Release desk reservation
 	if is_instance_valid(assigned_desk):
-		assigned_desk.set_occupied(false)
+		assigned_desk.set_occupied(false, agent_id)
 		if assigned_desk.has_method("hide_tool"):
 			assigned_desk.hide_tool()
 		if assigned_desk.has_method("clear_personal_items"):
@@ -898,7 +899,7 @@ func _start_leaving() -> void:
 	if is_instance_valid(assigned_desk):
 		if assigned_desk.has_method("hide_tool"):
 			assigned_desk.hide_tool()
-		assigned_desk.set_occupied(false)
+		assigned_desk.set_occupied(false, agent_id)
 	assigned_desk = null
 	_build_path_to(door_position)
 	if visuals and visuals.status_label:
@@ -1053,6 +1054,39 @@ func start_meeting(spot: Vector2) -> void:
 		visuals.status_label.text = "Heading to meeting..."
 
 func _process_working(delta: float) -> void:
+	var desk := assigned_desk as Desk
+	if desk == null or not is_instance_valid(desk):
+		_log_debug_event("STATE", "Working without desk - going idle")
+		assigned_desk = null
+		state = State.IDLE
+		if visuals and visuals.status_label:
+			visuals.status_label.text = "Desk lost"
+		return
+
+	if desk.occupied_by != "" and desk.occupied_by != agent_id:
+		_log_debug_event("STATE", "Desk taken by %s - going idle" % desk.occupied_by)
+		assigned_desk = null
+		state = State.IDLE
+		if visuals and visuals.status_label:
+			visuals.status_label.text = "Desk taken"
+		return
+
+	if position.distance_to(desk.get_work_position()) > WORKING_DESK_MAX_DISTANCE:
+		_log_debug_event("STATE", "Working away from desk - going idle")
+		desk.set_monitor_active(false)
+		desk.set_occupied(false, agent_id)
+		assigned_desk = null
+		state = State.IDLE
+		if visuals and visuals.status_label:
+			visuals.status_label.text = "Away from desk"
+		return
+
+	if desk.is_available() or desk.occupied_by == "":
+		desk.set_occupied(true, agent_id)
+		desk.set_monitor_active(true)
+	elif desk.screen and desk.screen.color == OfficePalette.MONITOR_SCREEN_OFF:
+		desk.set_monitor_active(true)
+
 	# Track work time
 	work_elapsed += delta
 
@@ -1151,7 +1185,7 @@ func _handle_unreachable_destination() -> void:
 	nav_nudge_retries = 0
 	# Release any reserved resources to avoid blocking other agents.
 	if state == State.WALKING_TO_DESK and is_instance_valid(assigned_desk):
-		assigned_desk.set_occupied(false)
+		assigned_desk.set_occupied(false, agent_id)
 		assigned_desk = null
 	elif state == State.MEETING:
 		is_in_meeting = false
@@ -1208,7 +1242,7 @@ func complete_work() -> void:
 	if is_instance_valid(assigned_desk):
 		if assigned_desk.has_method("hide_tool"):
 			assigned_desk.hide_tool()
-		assigned_desk.set_occupied(false)
+		assigned_desk.set_occupied(false, agent_id)
 	_start_delivering()
 
 func _start_delivering() -> void:
@@ -1310,7 +1344,7 @@ func _deliver_document() -> void:
 
 func assign_desk(desk: Node2D) -> void:
 	assigned_desk = desk
-	desk.set_occupied(true)  # Reserve the desk
+	desk.set_occupied(true, agent_id)  # Reserve the desk
 	target_position = desk.get_work_position()
 
 func start_walking_to_desk() -> void:
