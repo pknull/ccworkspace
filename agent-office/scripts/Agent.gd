@@ -92,6 +92,8 @@ var profile_name: String = ""  # Display name from roster profile
 var profile_badges: Array[String] = []  # Badge IDs from profile
 var profile_level: int = 0  # Level from profile
 var _pending_profile = null  # Profile to apply once visuals are ready
+var harness_id: String = ""
+var harness_label: String = ""
 var state: State = State.SPAWNING
 var last_state: State = State.SPAWNING
 var state_timer: float = 0.0
@@ -375,6 +377,10 @@ func _build_tooltip_data() -> Dictionary:
 
 	if not profile_badges.is_empty():
 		lines.append("Badges: " + ", ".join(profile_badges))
+
+	if not harness_label.is_empty() or not harness_id.is_empty():
+		var label = harness_label if not harness_label.is_empty() else harness_id
+		lines.append("Harness: " + label)
 
 	if state == State.WORKING and current_tool:
 		lines.append("Using: " + current_tool)
@@ -785,16 +791,82 @@ func _pick_post_work_action(allow_exit: bool = true) -> void:
 		_start_socializing_at(choice["pos"], choice["name"], choice.get("furniture", ""), choice.get("offset", true))
 
 func _get_social_spots() -> Array:
-	return [
-		{"type": "socialize", "pos": water_cooler_position, "name": "Water cooler chat...", "furniture": "water_cooler", "offset": true, "weight": 3.0, "cooldown_key": "water_cooler"},
-		{"type": "socialize", "pos": water_cooler_position, "name": "Getting a drink...", "furniture": "water_cooler", "offset": true, "weight": 3.0, "cooldown_key": "water_cooler"},
-		{"type": "socialize", "pos": plant_position, "name": "Admiring the plant...", "furniture": "plant", "offset": true, "weight": 3.0, "cooldown_key": "plant"},
-		{"type": "socialize", "pos": plant_position, "name": "Watering the plant...", "furniture": "plant", "offset": true, "weight": 3.0, "cooldown_key": "plant"},
-		{"type": "socialize", "pos": _get_random_filing_cabinet_approach(), "name": "Checking files...", "furniture": "filing_cabinet", "offset": false, "weight": 1.0, "cooldown_key": "filing_cabinet"},
-		{"type": "socialize", "pos": _get_random_shredder_approach(), "name": "Shredding leftovers...", "furniture": "shredder", "offset": false, "weight": 1.0, "cooldown_key": "shredder"},
-		{"type": "socialize", "pos": _get_random_taskboard_approach(), "name": "Reviewing tasks...", "furniture": "taskboard", "offset": false, "weight": 2.0, "cooldown_key": "taskboard"},
-		{"type": "socialize", "pos": _get_random_meeting_table_approach(), "name": "Passing the table...", "furniture": "meeting_table", "offset": false, "weight": 2.0, "cooldown_key": "meeting_table"},
-	]
+	## Build social spots dynamically from trait-based furniture system.
+	var spots: Array = []
+
+	# Query all furniture with "social" trait
+	if not is_instance_valid(office_manager):
+		return spots
+
+	var social_furniture: Array = office_manager.find_all_with_trait("social")
+
+	# Phrase templates per furniture type
+	var phrases: Dictionary = {
+		"water_cooler": [
+			{"name": "Water cooler chat...", "weight": 3.0},
+			{"name": "Getting a drink...", "weight": 3.0},
+		],
+		"plant": [
+			{"name": "Admiring the plant...", "weight": 3.0},
+			{"name": "Watering the plant...", "weight": 3.0},
+		],
+		"filing_cabinet": [
+			{"name": "Checking files...", "weight": 1.0},
+		],
+		"shredder": [
+			{"name": "Shredding leftovers...", "weight": 1.0},
+		],
+		"taskboard": [
+			{"name": "Reviewing tasks...", "weight": 2.0},
+		],
+		"meeting_table": [
+			{"name": "Passing the table...", "weight": 2.0},
+		],
+	}
+
+	for furniture in social_furniture:
+		var ftype: String = furniture.furniture_type
+		var fpos: Vector2 = furniture.position
+		var phrase_list: Array = phrases.get(ftype, [{"name": "Hanging out...", "weight": 1.0}])
+
+		for phrase in phrase_list:
+			var spot_pos: Vector2 = fpos
+			var use_offset: bool = true
+
+			# Some furniture types need specific approach positions
+			match ftype:
+				"filing_cabinet":
+					spot_pos = _get_random_approach_for_furniture(furniture)
+					use_offset = false
+				"shredder":
+					spot_pos = _get_random_approach_for_furniture(furniture)
+					use_offset = false
+				"taskboard":
+					spot_pos = _get_random_approach_for_furniture(furniture)
+					use_offset = false
+				"meeting_table":
+					spot_pos = _get_random_approach_for_furniture(furniture)
+					use_offset = false
+
+			spots.append({
+				"type": "socialize",
+				"pos": spot_pos,
+				"name": phrase["name"],
+				"furniture": ftype,
+				"furniture_ref": furniture,  # Direct reference to furniture
+				"offset": use_offset,
+				"weight": phrase["weight"],
+				"cooldown_key": ftype,
+			})
+
+	return spots
+
+func _get_random_approach_for_furniture(furniture: FurnitureBase) -> Vector2:
+	## Get a random approach position from furniture's slots.
+	if furniture.slots.is_empty():
+		return furniture.position
+	var slot: Dictionary = furniture.slots[randi() % furniture.slots.size()]
+	return furniture.position + slot.offset
 
 func _choose_social_spot(options: Array) -> Dictionary:
 	return social.choose_social_spot(options)
@@ -1249,7 +1321,29 @@ func _start_delivering() -> void:
 	state = State.DELIVERING
 	if not document:
 		_create_document()
-	# Randomly choose between shredder (destroy) or filing cabinet (archive)
+
+	# Query delivery targets using trait system
+	if is_instance_valid(office_manager):
+		var delivery_furniture: Array = office_manager.find_all_with_trait("delivery")
+		if not delivery_furniture.is_empty():
+			# Pick random delivery target
+			var target: FurnitureBase = delivery_furniture[randi() % delivery_furniture.size()]
+			delivery_target = target.furniture_type
+			var delivery_pos: Vector2 = _get_random_approach_for_furniture(target)
+			_build_path_to(delivery_pos, delivery_target)
+
+			# Set status text based on target type
+			if visuals and visuals.status_label:
+				match delivery_target:
+					"shredder":
+						visuals.status_label.text = "Shredding docs..."
+					"filing_cabinet":
+						visuals.status_label.text = "Filing away..."
+					_:
+						visuals.status_label.text = "Delivering..."
+			return
+
+	# Fallback to old behavior if trait system unavailable
 	if randf() < 0.5:
 		delivery_target = "shredder"
 		var delivery_pos = _get_random_shredder_approach()
