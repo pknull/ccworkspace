@@ -1,12 +1,12 @@
-[gd_scene load_steps=3 format=3 uid="uid://cmain456"]
+[gd_scene load_steps=2 format=3 uid="uid://cmain456"]
 
 [ext_resource type="Script" path="res://scripts/OfficeManager.gd" id="1_manager"]
-[ext_resource type="Script" path="res://scripts/TCPServer.gd" id="2_server"]
+[ext_resource type="Script" path="res://scripts/McpServer.gd" id="3_mcp"]
 
 [node name="Main" type="Node2D"]
 
 [node name="OfficeManager" type="Node2D" parent="."]
 script = ExtResource("1_manager")
 
-[node name="EventServer" type="Node" parent="OfficeManager"]
-script = ExtResource("2_server")
+[node name="McpServer" type="Node" parent="OfficeManager"]
+script = ExtResource("3_mcp")

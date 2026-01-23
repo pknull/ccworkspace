@@ -9,15 +9,15 @@ Usage:
 """
 
 import json
-import socket
 import sys
 import time
+import urllib.request
+import urllib.error
 from pathlib import Path
 from datetime import datetime
 
 # Configuration
-GODOT_HOST = "localhost"
-GODOT_PORT = 9999
+GODOT_MCP_URL = "http://localhost:9999"
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 POLL_INTERVAL = 0.5  # seconds
 
@@ -29,14 +29,27 @@ pending_tools = {}  # tool_use_id -> {tool_name, timestamp}
 
 
 def send_to_godot(event: dict) -> bool:
-    """Send event to Godot via TCP."""
+    """Send event to Godot via HTTP MCP call."""
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(1.0)
-            sock.connect((GODOT_HOST, GODOT_PORT))
-            sock.sendall((json.dumps(event) + "\n").encode())
-        return True
-    except (socket.error, socket.timeout) as e:
+        # Build MCP tool call request
+        request_data = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "post_event",
+                "arguments": event
+            }
+        }
+        req = urllib.request.Request(
+            GODOT_MCP_URL,
+            data=json.dumps(request_data).encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=2.0) as response:
+            return response.status == 200
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
         print(f"  [!] Failed to send to Godot: {e}")
         return False
 
@@ -227,7 +240,7 @@ def watch_session(session_file: Path):
     print(f"Agent Office Watcher")
     print(f"{'='*60}")
     print(f"Watching: {session_file.name}")
-    print(f"Sending to: {GODOT_HOST}:{GODOT_PORT}")
+    print(f"Sending to: {GODOT_MCP_URL}")
     print(f"{'='*60}\n")
     print("Waiting for new transcript entries...\n")
 

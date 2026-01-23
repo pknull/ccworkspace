@@ -10,6 +10,7 @@ Tests:
 5. Agent interactions - multi-agent behaviors
 6. Stress tests - rapid event handling
 7. Edge cases - error handling and recovery
+8. Weather smoke test - cycles weather animations
 
 Usage:
     python3 smoke_test.py               # Quick smoke test (4 tests)
@@ -18,6 +19,7 @@ Usage:
     python3 smoke_test.py --interactions # Multi-agent tests
     python3 smoke_test.py --stress      # Rapid event stress test
     python3 smoke_test.py --edge        # Edge case handling
+    python3 smoke_test.py --weather     # Weather animation smoke test
     python3 smoke_test.py --all         # Run all tests
 """
 
@@ -30,6 +32,8 @@ from typing import Optional
 HOST = "localhost"
 PORT = 9999
 TIMEOUT = 2.0
+WEATHER_STATES = ["clear", "cloudy", "drizzle", "rain", "showers", "storm", "snow", "fog"]
+WEATHER_SMOKE_INTERVAL = 2.0
 
 
 def send_event(sock: socket.socket, event: dict) -> bool:
@@ -778,6 +782,87 @@ def run_edge_case_tests() -> bool:
 
 
 # =============================================================================
+# Weather Tests
+# =============================================================================
+
+def run_weather_tests() -> bool:
+    """Cycle weather states to verify animations and socket handling."""
+    print()
+    print("=" * 50)
+    print("Agent Office Smoke Test - Weather")
+    print("=" * 50)
+    print()
+    print("Testing:")
+    print("  - weather_set (single override)")
+    print("  - weather_smoke_test (cycle all states)")
+    print()
+
+    sock = connect()
+    if not sock:
+        print("FAIL: Cannot connect to server")
+        return False
+
+    passed = 0
+    failed = 0
+
+    # Test 1: weather_set override (with temperature)
+    print("[1/2] Sending weather_set (cloudy, 68F)...")
+    if send_event(sock, {
+        "event": "weather_set",
+        "state": "cloudy",
+        "temperature": 68,
+        "unit": "F",
+        "timestamp": timestamp()
+    }):
+        print("  PASS: weather_set sent")
+        passed += 1
+    else:
+        failed += 1
+
+    time.sleep(1.5)
+
+    # Test 2: weather_smoke_test cycle
+    print("[2/2] Cycling all weather states...")
+    if send_event(sock, {
+        "event": "weather_smoke_test",
+        "interval": WEATHER_SMOKE_INTERVAL,
+        "loop": False,
+        "states": WEATHER_STATES,
+        "timestamp": timestamp()
+    }):
+        print("  PASS: weather_smoke_test sent")
+        passed += 1
+    else:
+        failed += 1
+
+    total_time = WEATHER_SMOKE_INTERVAL * len(WEATHER_STATES) + 1.0
+    print(f"  Watching cycle for ~{total_time:.0f}s...")
+    time.sleep(total_time)
+
+    # Restore random weather
+    send_event(sock, {
+        "event": "weather_smoke_stop",
+        "keep": False,
+        "timestamp": timestamp()
+    })
+
+    sock.close()
+
+    print()
+    print("=" * 50)
+    print(f"Weather tests: {passed} passed, {failed} failed")
+    print("=" * 50)
+    print()
+    print("Visual verification:")
+    print("  1. Temperature display updated on cloudy")
+    print("  2. Each weather animation appeared in sequence")
+    print("  3. Weather returned to random after cycle")
+    print()
+
+    return failed == 0
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -789,10 +874,11 @@ def main():
     interactions_mode = "--interactions" in args
     stress_mode = "--stress" in args
     edge_mode = "--edge" in args
+    weather_mode = "--weather" in args
     all_mode = "--all" in args
 
     # If no specific mode, run basic tests
-    run_specific = tour_mode or refactor_mode or interactions_mode or stress_mode or edge_mode
+    run_specific = tour_mode or refactor_mode or interactions_mode or stress_mode or edge_mode or weather_mode
 
     # Always run basic tests first (unless specific mode selected)
     if not run_specific or all_mode:
@@ -824,6 +910,10 @@ def main():
         if not run_edge_case_tests():
             all_passed = False
 
+    if weather_mode or all_mode:
+        if not run_weather_tests():
+            all_passed = False
+
     if not run_specific and not all_mode:
         print("\nTips:")
         print("  --tour          Furniture accessibility tour")
@@ -831,6 +921,7 @@ def main():
         print("  --interactions  Multi-agent interaction tests")
         print("  --stress        Rapid event stress test")
         print("  --edge          Edge case handling")
+        print("  --weather       Weather animation smoke test")
         print("  --all           Run all tests")
 
     if all_mode and not all_passed:
