@@ -58,8 +58,8 @@ func _build_visuals() -> void:
 
 # --- Trait System ---
 
-func has_trait(trait: String) -> bool:
-	return trait in traits
+func has_trait(trait_name: String) -> bool:
+	return trait_name in traits
 
 func get_traits() -> Array[String]:
 	return traits
