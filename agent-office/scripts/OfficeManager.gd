@@ -463,56 +463,35 @@ func _create_pending_dynamic_furniture() -> void:
 		_add_furniture_with_id(ftype, pos, fid)
 	pending_dynamic_furniture.clear()
 
-func _add_furniture_with_id(furniture_type: String, position: Vector2, fid: String) -> void:
-	var node: Node2D = null
-	var obstacle_size = Vector2.ZERO
+func _add_furniture_with_id(furniture_type: String, pos: Vector2, fid: String) -> void:
+	# Map legacy type names to registry names
+	var registry_type := furniture_type
+	if furniture_type == "potted_plant":
+		registry_type = "plant"
 
-	match furniture_type:
-		"water_cooler":
-			node = OfficeVisualFactory.create_water_cooler(DraggableItemScript)
-			obstacle_size = OfficeConstants.WATER_COOLER_OBSTACLE
-		"potted_plant":
-			node = OfficeVisualFactory.create_potted_plant(DraggableItemScript)
-			obstacle_size = OfficeConstants.PLANT_OBSTACLE
-		"filing_cabinet":
-			node = OfficeVisualFactory.create_filing_cabinet(DraggableItemScript)
-			obstacle_size = OfficeConstants.FILING_CABINET_OBSTACLE
-		"shredder":
-			node = OfficeVisualFactory.create_shredder(DraggableItemScript)
-			obstacle_size = OfficeConstants.SHREDDER_OBSTACLE
-		"cat_bed":
-			node = OfficeVisualFactory.create_cat_bed(DraggableItemScript)
-			obstacle_size = Vector2(40, 25)
-		"meeting_table":
-			node = OfficeVisualFactory.create_meeting_table(DraggableItemScript)
-			obstacle_size = OfficeConstants.MEETING_TABLE_OBSTACLE
-		"taskboard":
-			node = OfficeVisualFactory.create_taskboard(DraggableItemScript)
-			obstacle_size = Vector2(50, 60)
-		_:
-			return
-
-	if node == null:
+	var furniture: FurnitureBase = furniture_registry.spawn_with_id(registry_type, pos, fid)
+	if not furniture:
+		push_warning("[OfficeManager] Failed to spawn furniture: %s" % furniture_type)
 		return
 
-	node.position = position
-	node.navigation_grid = navigation_grid
-	node.obstacle_size = obstacle_size
-	node.office_manager = self
-	node.item_name = fid
-	node.position_changed.connect(_on_dynamic_furniture_moved.bind(fid))
-	add_child(node)
+	furniture.navigation_grid = navigation_grid
+	furniture.office_manager = self
+	furniture.position_changed.connect(_on_dynamic_furniture_moved.bind(fid))
+	add_child(furniture)
+
+	# Register with trait system
+	register_trait_furniture(furniture)
 
 	placed_furniture.append({
 		"id": fid,
-		"type": furniture_type,
-		"position": position,
-		"node": node,
-		"obstacle_size": obstacle_size
+		"type": furniture_type,  # Keep original type for save/load compatibility
+		"position": pos,
+		"node": furniture,
+		"obstacle_size": furniture.obstacle_size
 	})
 
 	# Register obstacle with navigation grid
-	var obstacle_rect = Rect2(position - obstacle_size / 2, obstacle_size)
+	var obstacle_rect = Rect2(pos - furniture.obstacle_size / 2, furniture.obstacle_size)
 	navigation_grid.register_obstacle(obstacle_rect, fid)
 
 func _create_desks() -> void:
@@ -824,7 +803,7 @@ func _update_debug_visualizations() -> void:
 
 	# === DESK WORK POSITIONS ===
 	for i in range(desks.size()):
-		var desk: Desk = desks[i]
+		var desk: FurnitureDesk = desks[i]
 		var desk_pos = desk.position
 		var work_pos = desk.get_work_position()
 
@@ -1037,7 +1016,7 @@ func unregister_trait_furniture(furniture: FurnitureBase) -> void:
 	## Remove furniture from the trait system.
 	trait_furniture.erase(furniture)
 
-func _on_desk_position_changed(desk: Desk, new_position: Vector2) -> void:
+func _on_desk_position_changed(desk: FurnitureDesk, new_position: Vector2) -> void:
 	print("[OfficeManager] Desk moved to %s" % new_position)
 
 	# Update navigation grid - remove old position, add new
@@ -1086,12 +1065,14 @@ func _update_weather_visibility() -> void:
 		match weather_state:
 			WeatherSystem.WeatherState.CLEAR:
 				cloud_alpha = 0.3  # Lighter, fewer visible clouds
-			WeatherSystem.WeatherState.CLOUDY:
-				cloud_alpha = 1.0  # Full opacity, dense clouds
+			WeatherSystem.WeatherState.RAIN:
+				cloud_alpha = 0.8  # Denser clouds during rain
+			WeatherSystem.WeatherState.SNOW:
+				cloud_alpha = 0.7  # Medium clouds during snow
 			WeatherSystem.WeatherState.FOG:
 				cloud_alpha = 0.0  # Hidden (layer also hidden)
 			_:
-				cloud_alpha = 0.6  # Medium for rain/snow/etc
+				cloud_alpha = 0.6  # Medium fallback
 
 		for data in window_clouds:
 			var cloud = data["cloud"] as ColorRect
@@ -1433,32 +1414,20 @@ func _parse_weather_state(value) -> int:
 		if _get_all_weather_states().has(numeric_text):
 			return numeric_text
 	match text:
-		"clear":
+		"clear", "sunny":
 			return WeatherSystem.WeatherState.CLEAR
-		"cloudy":
-			return WeatherSystem.WeatherState.CLOUDY
-		"drizzle":
-			return WeatherSystem.WeatherState.DRIZZLE
-		"rain":
+		"rain", "rainy", "drizzle", "showers", "storm", "thunder", "thunderstorm":
 			return WeatherSystem.WeatherState.RAIN
-		"showers":
-			return WeatherSystem.WeatherState.SHOWERS
-		"storm", "thunder", "thunderstorm":
-			return WeatherSystem.WeatherState.STORM
-		"snow":
+		"snow", "snowy", "snowing":
 			return WeatherSystem.WeatherState.SNOW
-		"fog", "mist":
+		"fog", "foggy", "mist", "cloudy":
 			return WeatherSystem.WeatherState.FOG
 	return -1
 
 func _get_all_weather_states() -> Array[int]:
 	return [
 		WeatherSystem.WeatherState.CLEAR,
-		WeatherSystem.WeatherState.CLOUDY,
-		WeatherSystem.WeatherState.DRIZZLE,
 		WeatherSystem.WeatherState.RAIN,
-		WeatherSystem.WeatherState.SHOWERS,
-		WeatherSystem.WeatherState.STORM,
 		WeatherSystem.WeatherState.SNOW,
 		WeatherSystem.WeatherState.FOG,
 	]
@@ -1820,7 +1789,7 @@ func _configure_agent_positions(agent: Agent) -> void:
 	agent.set_taskboard_position(taskboard_position)
 	agent.set_meeting_table_position(meeting_table_position)
 
-func _find_available_desk() -> Desk:
+func _find_available_desk() -> FurnitureDesk:
 	for desk in desks:
 		if desk.is_available():
 			return desk
@@ -2408,64 +2377,38 @@ func _on_furniture_remove_requested(furniture_id: String) -> void:
 	if furniture_shelf_popup:
 		furniture_shelf_popup.show_shelf(_get_placed_furniture_list())
 
-func _add_furniture(furniture_type: String, position: Vector2) -> void:
+func _add_furniture(furniture_type: String, pos: Vector2) -> void:
 	furniture_id_counter += 1
 	var fid = "furniture_%d" % furniture_id_counter
 
-	var node: Node2D = null
-	var obstacle_size = Vector2.ZERO
+	# Map legacy type names to registry names
+	var registry_type := furniture_type
+	if furniture_type == "potted_plant":
+		registry_type = "plant"
 
-	match furniture_type:
-		"water_cooler":
-			node = OfficeVisualFactory.create_water_cooler(DraggableItemScript)
-			obstacle_size = OfficeConstants.WATER_COOLER_OBSTACLE
-		"potted_plant":
-			node = OfficeVisualFactory.create_potted_plant(DraggableItemScript)
-			obstacle_size = OfficeConstants.PLANT_OBSTACLE
-		"filing_cabinet":
-			node = OfficeVisualFactory.create_filing_cabinet(DraggableItemScript)
-			obstacle_size = OfficeConstants.FILING_CABINET_OBSTACLE
-		"shredder":
-			node = OfficeVisualFactory.create_shredder(DraggableItemScript)
-			obstacle_size = OfficeConstants.SHREDDER_OBSTACLE
-		"cat_bed":
-			node = OfficeVisualFactory.create_cat_bed(DraggableItemScript)
-			obstacle_size = Vector2(40, 25)
-		"meeting_table":
-			node = OfficeVisualFactory.create_meeting_table(DraggableItemScript)
-			obstacle_size = OfficeConstants.MEETING_TABLE_OBSTACLE
-		"taskboard":
-			node = OfficeVisualFactory.create_taskboard(DraggableItemScript)
-			obstacle_size = Vector2(50, 60)
-		"desk":
-			# Desks need special handling - defer for now
-			push_warning("[OfficeManager] Desk placement not yet implemented")
-			return
-		_:
-			push_warning("[OfficeManager] Unknown furniture type: %s" % furniture_type)
-			return
-
-	if node == null:
+	var furniture: FurnitureBase = furniture_registry.spawn_with_id(registry_type, pos, fid)
+	if not furniture:
+		push_warning("[OfficeManager] Unknown furniture type: %s" % furniture_type)
 		return
 
-	node.position = position
-	node.navigation_grid = navigation_grid
-	node.obstacle_size = obstacle_size
-	node.office_manager = self
-	node.item_name = fid  # Use unique ID as item name for tracking
-	node.position_changed.connect(_on_dynamic_furniture_moved.bind(fid))
-	add_child(node)
+	furniture.navigation_grid = navigation_grid
+	furniture.office_manager = self
+	furniture.position_changed.connect(_on_dynamic_furniture_moved.bind(fid))
+	add_child(furniture)
+
+	# Register with trait system
+	register_trait_furniture(furniture)
 
 	placed_furniture.append({
 		"id": fid,
-		"type": furniture_type,
-		"position": position,
-		"node": node,
-		"obstacle_size": obstacle_size
+		"type": furniture_type,  # Keep original type for save/load compatibility
+		"position": pos,
+		"node": furniture,
+		"obstacle_size": furniture.obstacle_size
 	})
 
 	# Register obstacle with navigation grid
-	var obstacle_rect = Rect2(position - obstacle_size / 2, obstacle_size)
+	var obstacle_rect = Rect2(pos - furniture.obstacle_size / 2, furniture.obstacle_size)
 	navigation_grid.register_obstacle(obstacle_rect, fid)
 
 	_save_positions()

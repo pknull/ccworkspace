@@ -1126,7 +1126,7 @@ func start_meeting(spot: Vector2) -> void:
 		visuals.status_label.text = "Heading to meeting..."
 
 func _process_working(delta: float) -> void:
-	var desk := assigned_desk as Desk
+	var desk := assigned_desk as FurnitureDesk
 	if desk == null or not is_instance_valid(desk):
 		_log_debug_event("STATE", "Working without desk - going idle")
 		assigned_desk = null

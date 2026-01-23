@@ -361,3 +361,17 @@ const RESULT_BUBBLE_BG = Color(GRUVBOX_AQUA_BRIGHT.r * 0.3 + GRUVBOX_LIGHT.r * 0
                                GRUVBOX_AQUA_BRIGHT.b * 0.3 + GRUVBOX_LIGHT.b * 0.7, 0.95)
 const RESULT_BUBBLE_BORDER = GRUVBOX_AQUA_FADED
 const RESULT_BUBBLE_TEXT = Color(0.207, 0.395, 0.251)  # GRUVBOX_AQUA_FADED darkened 0.2
+
+# =============================================================================
+# MCP MANAGER (Office manager character)
+# =============================================================================
+
+const MCP_MANAGER_SHIRT = GRUVBOX_LIGHT1            # Professional light shirt
+const MCP_MANAGER_TROUSERS = GRUVBOX_BG             # Dark trousers
+const MCP_MANAGER_TIE = GRUVBOX_YELLOW_BRIGHT       # Gold/yellow tie (MCP branding)
+const MCP_MANAGER_GLASSES_FRAME = GRUVBOX_BG        # Dark glasses frame
+const MCP_MANAGER_GLASSES_LENS = Color(GRUVBOX_BLUE_BRIGHT.r, GRUVBOX_BLUE_BRIGHT.g, GRUVBOX_BLUE_BRIGHT.b, 0.3)  # Tinted lens
+const MCP_MANAGER_CLIPBOARD = GRUVBOX_BG2           # Clipboard backing
+const MCP_MANAGER_CLIPBOARD_CLIP = GRUVBOX_GRAY     # Metal clip
+const MCP_MANAGER_PAPER = GRUVBOX_LIGHT             # Paper on clipboard
+const MCP_MANAGER_PAPER_LINES = GRUVBOX_LIGHT4      # Writing lines
