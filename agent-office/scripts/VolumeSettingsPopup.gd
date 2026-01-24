@@ -34,7 +34,7 @@ var achievement_value_label: Label
 var audio_manager = null
 
 func _init() -> void:
-	layer = OfficeConstants.Z_UI_POPUP_LAYER
+	layer = OfficeConstants.Z_UI_POPUP_LAYER + 1  # Above parent menu
 
 func _ready() -> void:
 	_create_visuals()

@@ -75,11 +75,11 @@ func _create_visuals() -> void:
 	var panel_x = screen_center.x - PANEL_WIDTH / 2
 	var panel_y = screen_center.y - panel_height / 2
 
-	# Semi-transparent background overlay (darker to better obscure office)
+	# Semi-transparent background overlay
 	background = ColorRect.new()
 	background.size = Vector2(OfficeConstants.SCREEN_WIDTH, OfficeConstants.SCREEN_HEIGHT)
 	background.position = Vector2.ZERO
-	background.color = Color(0, 0, 0, 0.85)
+	background.color = Color(0, 0, 0, 0.75)
 	background.mouse_filter = Control.MOUSE_FILTER_STOP
 	container.add_child(background)
 

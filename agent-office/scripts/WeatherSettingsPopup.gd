@@ -30,7 +30,7 @@ var weather_units_button: Button
 var weather_service = null
 
 func _init() -> void:
-	layer = OfficeConstants.Z_UI_POPUP_LAYER
+	layer = OfficeConstants.Z_UI_POPUP_LAYER + 1  # Above parent menu
 
 func _ready() -> void:
 	_create_visuals()

@@ -59,7 +59,7 @@ func _create_visuals() -> void:
 	background = ColorRect.new()
 	background.size = Vector2(OfficeConstants.SCREEN_WIDTH, OfficeConstants.SCREEN_HEIGHT)
 	background.position = Vector2.ZERO
-	background.color = Color(0, 0, 0, 0.85)
+	background.color = Color(0, 0, 0, 0.75)
 	background.mouse_filter = Control.MOUSE_FILTER_STOP
 	container.add_child(background)
 
