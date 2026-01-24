@@ -8,9 +8,17 @@ class_name ProfilePopup
 # Uses CanvasLayer to render above all game content
 
 signal close_requested()
+signal profile_updated(profile: AgentProfile)
 
 # Container for all visual elements
 var container: Control
+
+# Current profile being displayed
+var current_profile: AgentProfile = null
+
+# Edit appearance
+var edit_button: Button
+var appearance_editor: AppearanceEditorPopup = null
 
 # Visual elements
 var background: ColorRect
@@ -101,6 +109,7 @@ func show_profile(profile: AgentProfile) -> void:
 	if profile == null:
 		push_warning("[ProfilePopup] show_profile called with null profile")
 		return
+	current_profile = profile
 	visible = true
 	_populate_profile(profile)
 
@@ -114,7 +123,7 @@ func _create_visuals() -> void:
 	# Semi-transparent background overlay
 	background = ColorRect.new()
 	background.size = Vector2(OfficeConstants.SCREEN_WIDTH, OfficeConstants.SCREEN_HEIGHT)
-	background.color = Color(0, 0, 0, 0.85)
+	background.color = Color(0, 0, 0, 0.75)
 	background.mouse_filter = Control.MOUSE_FILTER_STOP
 	container.add_child(background)
 
@@ -126,7 +135,7 @@ func _create_visuals() -> void:
 	var border = ColorRect.new()
 	border.size = Vector2(PANEL_WIDTH + 4, PANEL_HEIGHT + 4)
 	border.position = Vector2(panel_x - 2, panel_y - 2)
-	border.color = OfficePalette.GRUVBOX_LIGHT4
+	border.color = OfficePalette.GRUVBOX_YELLOW
 	container.add_child(border)
 
 	panel = ColorRect.new()
@@ -139,17 +148,20 @@ func _create_visuals() -> void:
 	# Close button
 	close_button = Button.new()
 	close_button.text = "X"
-	close_button.position = Vector2(panel_x + PANEL_WIDTH - 30, panel_y + 5)
-	close_button.size = Vector2(25, 25)
+	close_button.position = Vector2(panel_x + PANEL_WIDTH - 30, panel_y + 8)
+	close_button.size = Vector2(24, 24)
+	close_button.add_theme_font_size_override("font_size", 12)
 	close_button.pressed.connect(_on_close_pressed)
 	container.add_child(close_button)
 
 	# Title: "AGENT PROFILE"
 	var title = Label.new()
 	title.text = "AGENT PROFILE"
-	title.position = Vector2(panel_x + PANEL_WIDTH / 2 - 60, panel_y + 10)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.position = Vector2(panel_x, panel_y + 12)
+	title.size = Vector2(PANEL_WIDTH, 24)
 	title.add_theme_font_size_override("font_size", FONT_SIZE_TITLE)
-	title.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT)
+	title.add_theme_color_override("font_color", OfficePalette.GRUVBOX_YELLOW)
 	container.add_child(title)
 
 	var content_y = panel_y + 45
@@ -168,6 +180,15 @@ func _create_visuals() -> void:
 	portrait_layer.position = Vector2.ZERO
 	portrait_layer.size = Vector2(80, 100)
 	portrait_container.add_child(portrait_layer)
+
+	# Edit button (inside portrait box at bottom)
+	edit_button = Button.new()
+	edit_button.text = "Edit"
+	edit_button.position = Vector2(5, 75)  # Inside portrait container
+	edit_button.size = Vector2(70, 20)
+	edit_button.add_theme_font_size_override("font_size", 10)
+	edit_button.pressed.connect(_on_edit_pressed)
+	portrait_container.add_child(edit_button)
 
 	# Name and title (next to portrait)
 	var info_x = panel_x + 130
@@ -396,11 +417,8 @@ func _update_portrait(profile: AgentProfile) -> void:
 	right_eye.color = OfficePalette.EYE_COLOR
 	portrait_layer.add_child(right_eye)
 
-	# Hair
-	if profile.is_female:
-		_create_female_portrait_hair(profile.hair_style_index, hair_color)
-	else:
-		_create_male_portrait_hair(hair_color)
+	# Hair (all styles available regardless of clothing)
+	_create_portrait_hair(profile.hair_style_index, hair_color)
 
 func _create_badge_icon(badge_id: String) -> Control:
 	var info = badge_system.get_badge_info(badge_id) if is_instance_valid(badge_system) else {}
@@ -444,16 +462,15 @@ func _create_badge_icon(badge_id: String) -> Control:
 
 	return badge
 
-func _create_male_portrait_hair(hair_color: Color) -> void:
-	var hair = ColorRect.new()
-	hair.size = Vector2(34, 10)
-	hair.position = Vector2(23, 20)
-	hair.color = hair_color
-	portrait_layer.add_child(hair)
-
-func _create_female_portrait_hair(style_index: int, hair_color: Color) -> void:
-	match style_index % 3:
-		0:
+func _create_portrait_hair(style_index: int, hair_color: Color) -> void:
+	match style_index % 4:
+		0:  # Short
+			var hair = ColorRect.new()
+			hair.size = Vector2(34, 10)
+			hair.position = Vector2(23, 20)
+			hair.color = hair_color
+			portrait_layer.add_child(hair)
+		1:  # Long
 			var hair_top = ColorRect.new()
 			hair_top.size = Vector2(36, 12)
 			hair_top.position = Vector2(22, 18)
@@ -471,7 +488,7 @@ func _create_female_portrait_hair(style_index: int, hair_color: Color) -> void:
 			hair_right.position = Vector2(54, 28)
 			hair_right.color = hair_color
 			portrait_layer.add_child(hair_right)
-		1:
+		2:  # Bob
 			var hair = ColorRect.new()
 			hair.size = Vector2(38, 16)
 			hair.position = Vector2(21, 20)
@@ -483,7 +500,7 @@ func _create_female_portrait_hair(style_index: int, hair_color: Color) -> void:
 			hair_sides.position = Vector2(20, 32)
 			hair_sides.color = hair_color
 			portrait_layer.add_child(hair_sides)
-		2:
+		3:  # Updo
 			var hair = ColorRect.new()
 			hair.size = Vector2(34, 12)
 			hair.position = Vector2(23, 20)
@@ -650,7 +667,32 @@ func _format_date(iso_date: String) -> String:
 
 func _on_close_pressed() -> void:
 	visible = false
+	current_profile = null
 	close_requested.emit()
+
+func _on_edit_pressed() -> void:
+	if current_profile == null:
+		return
+
+	# Create appearance editor if needed
+	if appearance_editor == null:
+		appearance_editor = AppearanceEditorPopup.new()
+		appearance_editor.close_requested.connect(_on_appearance_editor_closed)
+		appearance_editor.appearance_changed.connect(_on_appearance_changed)
+		get_tree().root.add_child(appearance_editor)
+		appearance_editor.visible = false
+
+	appearance_editor.show_editor(current_profile)
+
+func _on_appearance_editor_closed() -> void:
+	# Appearance editor closed without saving - nothing to do
+	pass
+
+func _on_appearance_changed(profile: AgentProfile) -> void:
+	# Update the portrait to reflect changes
+	_update_portrait(profile)
+	# Emit signal so the caller can update the agent visuals and save
+	profile_updated.emit(profile)
 
 func _input(event: InputEvent) -> void:
 	if visible and event is InputEventKey:

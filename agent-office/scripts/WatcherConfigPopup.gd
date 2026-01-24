@@ -7,13 +7,12 @@ class_name WatcherConfigPopup
 
 signal close_requested()
 
-const HARNESS_ORDER = ["claude", "codex", "opencode", "gemini", "mcp"]
+const HARNESS_ORDER = ["claude", "codex", "opencode", "gemini"]
 const HARNESS_LABELS = {
 	"claude": "Claude Code",
 	"codex": "Codex",
 	"opencode": "OpenCode",
 	"gemini": "Gemini",
-	"mcp": "MCP Server",
 }
 const HARNESS_PATH_HINTS = {
 	"opencode": "JSONL folder",
@@ -214,7 +213,7 @@ func _build_rows() -> void:
 	rows_container.add_child(mcp_row)
 
 	mcp_enabled = CheckBox.new()
-	mcp_enabled.text = "MCP HTTP"
+	mcp_enabled.text = "MCP Server"
 	mcp_enabled.custom_minimum_size = Vector2(160, 26)
 	mcp_enabled.add_theme_font_size_override("font_size", 12)
 	mcp_row.add_child(mcp_enabled)

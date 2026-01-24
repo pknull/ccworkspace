@@ -87,6 +87,7 @@ func load_roster() -> void:
 			print("[AgentRoster] FAILED to load agent id=%d" % agent_id)
 
 	print("[AgentRoster] Loaded %d agents" % agents.size())
+	_cleanup_orphaned_relationships()
 	roster_changed.emit()
 
 func _load_agent_profile(agent_id: int) -> AgentProfile:
@@ -107,6 +108,40 @@ func _load_agent_profile(agent_id: int) -> AgentProfile:
 		return null
 
 	return AgentProfile.from_dict(json.data)
+
+func _cleanup_orphaned_relationships() -> void:
+	# Remove chat/work records referencing agents that no longer exist
+	var valid_ids: Array = []
+	for id in agents.keys():
+		valid_ids.append(id)
+	var cleaned_count = 0
+
+	for agent in agents.values():
+		# Clean chatted_with
+		var orphaned_chats: Array = []
+		for id_key in agent.chatted_with.keys():
+			var id_int = int(id_key) if id_key is String else id_key
+			if id_int not in valid_ids:
+				orphaned_chats.append(id_key)
+		for id_key in orphaned_chats:
+			agent.chatted_with.erase(id_key)
+			cleaned_count += 1
+
+		# Clean worked_with
+		var orphaned_work: Array = []
+		for id_key in agent.worked_with.keys():
+			var id_int = int(id_key) if id_key is String else id_key
+			if id_int not in valid_ids:
+				orphaned_work.append(id_key)
+		for id_key in orphaned_work:
+			agent.worked_with.erase(id_key)
+			cleaned_count += 1
+
+	if cleaned_count > 0:
+		print("[AgentRoster] Cleaned %d orphaned relationship records" % cleaned_count)
+		# Save cleaned data
+		for agent in agents.values():
+			save_profile(agent)
 
 func save_roster() -> void:
 	_ensure_stable_dir()
@@ -132,11 +167,11 @@ func save_roster() -> void:
 
 	# Save each agent profile
 	for profile in agents.values():
-		_save_agent_profile(profile)
+		save_profile(profile)
 
 	print("[AgentRoster] Saved %d agents" % agents.size())
 
-func _save_agent_profile(profile: AgentProfile) -> void:
+func save_profile(profile: AgentProfile) -> void:
 	var path = "%s/agent_%03d.json" % [STABLE_DIR, profile.id]
 	var json_string = JSON.stringify(profile.to_dict(), "\t")
 
@@ -163,7 +198,7 @@ func hire_agent() -> AgentProfile:
 	roster_changed.emit()
 
 	# Save immediately
-	_save_agent_profile(profile)
+	save_profile(profile)
 	save_roster()
 
 	return profile
@@ -276,7 +311,7 @@ func record_task_completed(agent_id: int, skill_name: String, work_time: float) 
 	if new_level > 0:
 		agent_level_up.emit(profile, new_level)
 
-	_save_agent_profile(profile)
+	save_profile(profile)
 	roster_changed.emit()
 
 func record_task_failed(agent_id: int, skill_name: String, work_time: float) -> void:
@@ -285,7 +320,7 @@ func record_task_failed(agent_id: int, skill_name: String, work_time: float) -> 
 
 	var profile = agents[agent_id]
 	profile.add_task_failed(skill_name, work_time)
-	_save_agent_profile(profile)
+	save_profile(profile)
 	roster_changed.emit()
 
 func record_tool_use(agent_id: int, tool_name: String) -> void:
@@ -339,7 +374,7 @@ func record_orchestrator_session(agent_id: int) -> void:
 	if new_level > 0:
 		agent_level_up.emit(profile, new_level)
 
-	_save_agent_profile(profile)
+	save_profile(profile)
 	roster_changed.emit()
 
 # =============================================================================

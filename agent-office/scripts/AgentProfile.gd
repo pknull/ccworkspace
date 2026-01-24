@@ -42,11 +42,13 @@ var hired_at: String = ""
 var last_seen: String = ""
 
 # Appearance (persistent)
-var is_female: bool = false
+var is_female: bool = false  # true = blouse, false = shirt+tie
 var hair_color_index: int = 0
 var skin_color_index: int = 0
 var hair_style_index: int = 0
-var blouse_color_index: int = 0
+var blouse_color_index: int = 0  # top color (blouse or tie)
+var bottom_type: int = 0  # 0 = pants, 1 = skirt
+var bottom_color_index: int = 0
 
 # Progression
 var xp: int = 0
@@ -82,11 +84,13 @@ func _init(p_id: int = 0, p_name: String = "") -> void:
 	last_seen = hired_at
 
 	# Randomize appearance
-	is_female = randf() < 0.5
+	is_female = randf() < 0.5  # 50% blouse, 50% shirt+tie
 	hair_color_index = randi_range(0, 5)
 	skin_color_index = randi_range(0, 4)
-	hair_style_index = randi_range(0, 2)
+	hair_style_index = randi_range(0, 3)
 	blouse_color_index = randi_range(0, 3)
+	bottom_type = randi_range(0, 1)  # 0 = pants, 1 = skirt
+	bottom_color_index = randi_range(0, 3)
 
 static func _get_iso_timestamp() -> String:
 	var datetime = Time.get_datetime_dict_from_system()
@@ -242,6 +246,8 @@ func to_dict() -> Dictionary:
 			"skin_color_index": skin_color_index,
 			"hair_style_index": hair_style_index,
 			"blouse_color_index": blouse_color_index,
+			"bottom_type": bottom_type,
+			"bottom_color_index": bottom_color_index,
 		},
 		"progression": {
 			"xp": xp,
@@ -275,6 +281,14 @@ static func from_dict(data: Dictionary) -> AgentProfile:
 	profile.skin_color_index = appearance.get("skin_color_index", 0)
 	profile.hair_style_index = appearance.get("hair_style_index", 0)
 	profile.blouse_color_index = appearance.get("blouse_color_index", 0)
+	# New fields with backwards compatibility (migrate from old encoding)
+	if appearance.has("bottom_type"):
+		profile.bottom_type = appearance.get("bottom_type", 0)
+		profile.bottom_color_index = appearance.get("bottom_color_index", 0)
+	else:
+		# Migrate from old encoding: blouse_color_index % 2 == 0 meant skirt
+		profile.bottom_type = 1 if (profile.is_female and profile.blouse_color_index % 2 == 0) else 0
+		profile.bottom_color_index = 0
 
 	var progression = data.get("progression", {})
 	profile.xp = progression.get("xp", 0)

@@ -1448,6 +1448,40 @@ func start_walking_to_desk() -> void:
 		if visuals and visuals.status_label:
 			visuals.status_label.text = "Going to desk..."
 
+func resume_work() -> bool:
+	# Called when new work comes in and agent is idle/wandering
+	# Returns true if agent can resume work
+	if state != State.IDLE and state != State.WANDERING and state != State.SOCIALIZING and state != State.CHATTING:
+		return false
+
+	# Need a desk to work at
+	if not is_instance_valid(assigned_desk):
+		# Try to find an available desk
+		return false
+
+	# Stop any current activity
+	chatting_with = null
+	path_waypoints.clear()
+
+	# Reserve desk again if needed
+	if not assigned_desk.is_occupied:
+		assigned_desk.set_occupied(true, agent_id)
+
+	_log_debug_event("STATE", "Resuming work - heading back to desk")
+	state = State.WALKING_TO_DESK
+	_build_path_to(assigned_desk.get_work_position())
+	if visuals and visuals.status_label:
+		visuals.status_label.text = "Back to work!"
+	return true
+
+func can_resume_work() -> bool:
+	# Check if this agent can be recalled to work
+	if state == State.COMPLETING or state == State.LEAVING or state == State.SPAWNING:
+		return false
+	if state == State.WORKING or state == State.WALKING_TO_DESK:
+		return false  # Already working
+	return is_instance_valid(assigned_desk)
+
 func set_shredder_position(pos: Vector2) -> void:
 	shredder_position = pos
 
@@ -1465,9 +1499,6 @@ func set_taskboard_position(pos: Vector2) -> void:
 
 func set_meeting_table_position(pos: Vector2) -> void:
 	meeting_table_position = pos
-
-func set_door_position(pos: Vector2) -> void:
-	door_position = pos
 
 func set_description(desc: String) -> void:
 	description = desc
@@ -1489,6 +1520,11 @@ func apply_profile_appearance(profile) -> void:
 	else:
 		# Store for later - will be applied in _ready() after visuals are created
 		_pending_profile = profile
+
+func refresh_appearance(profile) -> void:
+	# Force refresh appearance (used when profile is edited in appearance editor)
+	if visuals:
+		visuals.refresh_appearance(profile)
 
 func force_complete(bypass_min_time: bool = false) -> void:
 	match state:

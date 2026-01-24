@@ -373,6 +373,7 @@ func _setup_office() -> void:
 
 	weather_service = WeatherServiceScript.new()
 	weather_service.configure(weather_system, temperature_display)
+	weather_service.weather_updated.connect(_on_weather_updated)
 	add_child(weather_service)
 
 	# Taskboard (now draggable, using new furniture system)
@@ -1305,6 +1306,11 @@ func _handle_session_exit(data: Dictionary) -> void:
 		_update_taskboard()
 	_prune_session_agent_ids(session_path.get_file().get_basename() if session_path else session_id)
 
+func _on_weather_updated(temperature: float, condition: String, location: String) -> void:
+	# Weather service fetched new data - update display if not overridden
+	if weather_system and weather_system.live_weather_enabled:
+		print("[OfficeManager] Weather updated: %.1f° %s (%s)" % [temperature, condition, location])
+
 func _handle_weather_set(data: Dictionary) -> void:
 	if not is_instance_valid(weather_system):
 		return
@@ -1499,6 +1505,9 @@ func _handle_agent_spawn(data: Dictionary) -> void:
 		var profile = agent_roster.assign_agent_for_task(is_orchestrator)
 		if profile:
 			agent.profile_id = profile.id
+			agent.profile_name = profile.agent_name
+			agent.profile_level = profile.level
+			agent.profile_badges = profile.badges.duplicate()
 			# Apply persistent appearance from profile
 			agent.apply_profile_appearance(profile)
 			# Optionally use the profile's name for display
@@ -1629,6 +1638,10 @@ func _handle_waiting_for_input(data: Dictionary) -> void:
 	# Find the best agent for this session - prefer working sub-agents over orchestrator
 	var target_agent: Agent = _find_working_agent_for_session(session_id)
 
+	# If no working agent found, try to recall idle agents from this session
+	if not target_agent:
+		target_agent = _recall_idle_agent_for_session(session_id)
+
 	if target_agent:
 		# Show the tool being used
 		if tool_name:
@@ -1665,6 +1678,30 @@ func _find_working_agent_for_session(session_id: String) -> Agent:
 
 	if OfficeConstants.DEBUG_AGENT_LOOKUP:
 		print("[OfficeManager] No working agent found for session '%s' (agents_by_session keys: %s, active: %s)" % [_get_session_short_id(session_id) if session_id else "?", str(agents_by_session.keys()).substr(0, 50), str(active_agents.size())])
+	return null
+
+func _recall_idle_agent_for_session(session_id: String) -> Agent:
+	# Look for idle agents belonging to this session and recall them to work
+	if not session_id or not agents_by_session.has(session_id):
+		return null
+
+	for agent_id in agents_by_session[session_id]:
+		if not active_agents.has(agent_id):
+			continue
+		var agent = active_agents[agent_id] as Agent
+		if agent.can_resume_work():
+			if agent.resume_work():
+				print("[OfficeManager] Recalled idle agent: %s" % agent_id)
+				return agent
+
+	# Fallback: check all active agents
+	for aid in active_agents.keys():
+		var agent = active_agents[aid] as Agent
+		if agent.can_resume_work():
+			if agent.resume_work():
+				print("[OfficeManager] Recalled idle agent (fallback): %s" % aid)
+				return agent
+
 	return null
 
 func _handle_input_received(data: Dictionary) -> void:
@@ -2287,7 +2324,7 @@ func _on_profile_updated(profile: AgentProfile) -> void:
 	for agent_id in active_agents.keys():
 		var agent = active_agents[agent_id] as Agent
 		if agent and is_instance_valid(agent) and agent.profile_id == profile.id:
-			agent.apply_profile_appearance(profile)
+			agent.refresh_appearance(profile)
 			# Update the agent's display name if it changed
 			if agent.visuals:
 				agent.visuals.update_tooltip()
@@ -2585,6 +2622,8 @@ func _show_pause_menu() -> void:
 	pause_menu = PauseMenuScript.new()
 	pause_menu.profiler_enabled = profiler_enabled
 	pause_menu.debug_enabled = debug_overlay_enabled
+	pause_menu.audio_manager = audio_manager
+	pause_menu.weather_service = weather_service
 	add_child(pause_menu)
 	pause_menu.resume_requested.connect(_on_pause_resume)
 	pause_menu.roster_requested.connect(_on_pause_roster)
@@ -2592,8 +2631,6 @@ func _show_pause_menu() -> void:
 	pause_menu.achievements_requested.connect(_on_pause_achievements)
 	pause_menu.watchers_requested.connect(_on_pause_watchers)
 	pause_menu.furniture_shelf_requested.connect(_on_pause_furniture_shelf)
-	pause_menu.volume_settings_requested.connect(_on_pause_volume_settings)
-	pause_menu.weather_settings_requested.connect(_on_pause_weather_settings)
 	pause_menu.profiler_toggled.connect(_on_pause_profiler_toggled)
 	pause_menu.debug_toggled.connect(_on_pause_debug_toggled)
 	pause_menu.event_log_requested.connect(_on_pause_event_log)
