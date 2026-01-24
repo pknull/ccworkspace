@@ -1,48 +1,35 @@
 # Active Context
 
-**Version:** 1
-**Last Updated:** 2026-01-23
+**Version:** 2
+**Last Updated:** 2026-01-24
 
 ## Current Status
 
-MCP Manager feature implementation complete with full office control via MCP tools.
+Agent behavior and UI polish complete. Orphaned relationship cleanup implemented. Code review passed.
 
-## Recent Session (2026-01-23)
+## Recent Session (2026-01-24)
 
 ### Accomplished
-- Added `remove_furniture` MCP tool - removes furniture by ID
-- Added `add_furniture` MCP tool - places new furniture at coordinates
-- Updated `get_office_state` to show furniture IDs (defaults vs dynamic arrays)
-- Fixed duplicate shredder bug (caused by both default and dynamic shredder in save)
-- Added `on_cat_petted()` reaction to McpManager - manager walks to cat
-- Connected cat_petted signal: OfficeCat → OfficeManager → McpManager
-- UI fixes: Edit button placement in portrait box, appearance panel border, badge refresh on roster changes
+- **Orphan Cleanup**: Added `_cleanup_orphaned_relationships()` to AgentRoster - automatically removes chat/work records for agents that no longer exist (cleaned 52 orphaned records)
+- **Idle Agent Recall**: When new work arrives, idle/wandering agents now return to their desks via `resume_work()` and `can_resume_work()` functions
+- **Tooltip Redesign**: AgentVisuals tooltips now use PanelContainer for proper rendering with agent name + role/task
+- **UI Polish**: Edit button repositioned inside portrait box, appearance editor made gender-neutral with all options available
+- **PauseMenu Refactor**: Converted to popup-based system, reduced code by ~500 lines
+- **Code Review**: Passed 4-way parallel review (security, logic, edge cases, style) - no blocking issues
 
 ### Key Technical Decisions
-- HTTP MCP connections are short-lived; using 30-second timeout for manager visibility
-- Furniture separated into "defaults" (built-in) and "dynamic" (user-placed) in state
-- Default furniture IDs use `default_` prefix; dynamic use `furniture_N` pattern
+- Badge cleanup runs on roster load to maintain data integrity
+- Idle agents check state machine before resuming (IDLE, WANDERING, SOCIALIZING, CHATTING allowed)
+- Tooltip sizing now dynamic based on content
 
-### MCP Tools Available (14 total)
-1. post_event - Office events
-2. set_weather - Weather control
-3. dismiss_agent - Single agent dismissal
-4. dismiss_all_agents - Mass dismissal
-5. quit_office - Clean shutdown
-6. get_office_state - Full state dump
-7. list_agents - Agent listing
-8. get_agent_profile - Profile details
-9. move_furniture - Reposition furniture
-10. move_desk - Reposition desks
-11. pet_cat - Cat interaction
-12. spawn_agent - Create agents
-13. remove_furniture - Delete furniture
-14. add_furniture - Place new furniture
+### Previous Session (2026-01-23)
+- MCP furniture tools (add/remove), manager cat reaction
+- 14 MCP tools fully operational
 
 ## Next Steps
 
-1. Test all MCP tools for edge cases
-2. Add taskboard MCP interaction (read/write tasks)
-3. Manager visual polish (animation timing, speech bubbles)
-4. Consider adding `list_furniture_types` tool for discoverability
-5. Test save/load persistence with various furniture configurations
+1. Commit pending changes (14 files, +430/-954 lines)
+2. Test idle agent recall behavior in practice
+3. Add taskboard MCP interaction (read/write tasks)
+4. Manager visual polish (animation timing, speech bubbles)
+5. Test save/load persistence with various configurations
