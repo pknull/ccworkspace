@@ -242,6 +242,11 @@ const SKIN_TAN = Color(0.65, 0.50, 0.40)
 const SKIN_DARK = Color(0.50, 0.38, 0.30)
 const SKIN_VERY_LIGHT = Color(0.92, 0.82, 0.72)
 
+# Centralized arrays - single source of truth for appearance UI
+# Order must match AgentVisuals and profile index expectations
+const HAIR_COLORS: Array[Color] = [HAIR_BROWN, HAIR_BLACK, HAIR_AUBURN, HAIR_BLONDE, HAIR_DARK_BROWN, HAIR_VERY_DARK]
+const SKIN_TONES: Array[Color] = [SKIN_LIGHT, SKIN_MEDIUM, SKIN_TAN, SKIN_DARK, SKIN_VERY_LIGHT]
+
 # Eyes
 const EYE_COLOR = GRUVBOX_BG
 

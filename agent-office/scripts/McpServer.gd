@@ -305,7 +305,7 @@ func _send_http_json_response(client_id: int, payload) -> void:
 	var response = "HTTP/1.1 200 OK\r\n"
 	response += "Content-Type: application/json\r\n"
 	response += "Content-Length: %d\r\n" % body.length()
-	response += "Access-Control-Allow-Origin: *\r\n"
+	response += "Access-Control-Allow-Origin: http://localhost\r\n"
 	response += "Access-Control-Allow-Methods: POST, OPTIONS\r\n"
 	response += "Access-Control-Allow-Headers: Content-Type\r\n"
 	response += "Connection: close\r\n"
@@ -327,7 +327,7 @@ func _send_http_error(client_id: int, status_code: int, message: String) -> void
 
 func _send_http_cors_preflight(client_id: int) -> void:
 	var response = "HTTP/1.1 204 No Content\r\n"
-	response += "Access-Control-Allow-Origin: *\r\n"
+	response += "Access-Control-Allow-Origin: http://localhost\r\n"
 	response += "Access-Control-Allow-Methods: POST, OPTIONS\r\n"
 	response += "Access-Control-Allow-Headers: Content-Type\r\n"
 	response += "Access-Control-Max-Age: 86400\r\n"
@@ -542,6 +542,29 @@ func _list_tools() -> Array[Dictionary]:
 			}
 		},
 		{
+			"name": "remove_desk",
+			"description": "Remove a desk from the office. Desk must be empty (no agent working at it).",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"desk_index": {"type": "integer", "description": "Desk index (use get_office_state to see desk indices)"}
+				},
+				"required": ["desk_index"]
+			}
+		},
+		{
+			"name": "add_desk",
+			"description": "Add a new desk to the office.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"x": {"type": "number", "description": "X position"},
+					"y": {"type": "number", "description": "Y position"}
+				},
+				"required": ["x", "y"]
+			}
+		},
+		{
 			"name": "pet_cat",
 			"description": "Pet the office cat. Returns cat's reaction.",
 			"inputSchema": {
@@ -584,6 +607,24 @@ func _list_tools() -> Array[Dictionary]:
 				},
 				"required": ["type", "x", "y"]
 			}
+		},
+		{
+			"name": "update_agent_appearance",
+			"description": "Update an agent's appearance. Use name OR profile_id. Hair colors: brown(0), black(1), auburn(2), blonde(3), dark_brown(4), very_dark(5). Skin tones: light(0), medium(1), tan(2), dark(3), very_light(4). Bottom type: pants(0), skirt(1).",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"name": {"type": "string", "description": "Agent name (e.g., 'Quinn')"},
+					"profile_id": {"type": "integer", "description": "Agent profile ID"},
+					"hair_color": {"type": ["string", "integer"], "description": "Hair color name (brown, black, auburn, blonde, dark_brown, very_dark) or index 0-5"},
+					"skin_color": {"type": ["string", "integer"], "description": "Skin tone name (light, medium, tan, dark, very_light) or index 0-4"},
+					"hair_style": {"type": "integer", "description": "Hair style index 0-3"},
+					"is_female": {"type": "boolean", "description": "true = blouse, false = shirt+tie"},
+					"top_color": {"type": "integer", "description": "Blouse or tie color index 0-3"},
+					"bottom_type": {"type": ["string", "integer"], "description": "pants(0) or skirt(1)"},
+					"bottom_color": {"type": "integer", "description": "Bottom color index 0-3"}
+				}
+			}
 		}
 	]
 
@@ -619,6 +660,10 @@ func _call_tool(params) -> Dictionary:
 			return _tool_move_furniture(args)
 		"move_desk":
 			return _tool_move_desk(args)
+		"remove_desk":
+			return _tool_remove_desk(args)
+		"add_desk":
+			return _tool_add_desk(args)
 		"pet_cat":
 			return _tool_pet_cat(args)
 		"spawn_agent":
@@ -627,6 +672,8 @@ func _call_tool(params) -> Dictionary:
 			return _tool_remove_furniture(args)
 		"add_furniture":
 			return _tool_add_furniture(args)
+		"update_agent_appearance":
+			return _tool_update_agent_appearance(args)
 		_:
 			return _tool_error("Unknown tool")
 
@@ -810,6 +857,20 @@ func _tool_move_furniture(args: Dictionary) -> Dictionary:
 	y = clamp(y, 100, 620)
 	var new_pos = Vector2(x, y)
 
+	# Check for dynamic furniture by ID first (furniture_9, etc.)
+	if item.begins_with("furniture_"):
+		for f in office_manager.placed_furniture:
+			if not f is Dictionary:
+				continue
+			if not f.has("id") or not f.has("node") or not f.has("position"):
+				continue
+			if f["id"] == item:
+				f["node"].position = new_pos
+				f["position"] = new_pos
+				office_manager._save_positions()
+				return _tool_ok("Moved %s to (%d, %d)" % [item, int(x), int(y)])
+		return _tool_error("Dynamic furniture not found: %s" % item)
+
 	match item:
 		"water_cooler":
 			if office_manager.draggable_water_cooler:
@@ -838,7 +899,7 @@ func _tool_move_furniture(args: Dictionary) -> Dictionary:
 				office_manager.meeting_table.position = new_pos
 				office_manager.meeting_table_position = new_pos
 		_:
-			return _tool_error("Unknown furniture: %s. Valid: water_cooler, plant, filing_cabinet, shredder, cat_bed, meeting_table" % item)
+			return _tool_error("Unknown furniture: %s. Valid: water_cooler, plant, filing_cabinet, shredder, cat_bed, meeting_table, or furniture_<id>" % item)
 
 	# Update navigation grid
 	if office_manager.has_method("_register_with_navigation_grid"):
@@ -861,13 +922,54 @@ func _tool_move_desk(args: Dictionary) -> Dictionary:
 	y = clamp(y, 150, 550)
 
 	var desk = office_manager.desks[desk_index]
-	desk.position = Vector2(x, y)
+	var new_pos = Vector2(x, y)
+	desk.position = new_pos
 
-	# Update navigation grid
-	if office_manager.has_method("_register_with_navigation_grid"):
-		office_manager._register_with_navigation_grid()
+	# Trigger position change handling (updates navigation, saves)
+	if desk.has_signal("position_changed"):
+		desk.position_changed.emit(desk, new_pos)
 
 	return _tool_ok("Moved desk %d to (%d, %d)" % [desk_index, int(x), int(y)])
+
+func _tool_remove_desk(args: Dictionary) -> Dictionary:
+	if not office_manager:
+		return _tool_error("Office manager not available")
+
+	var desk_index = int(args.get("desk_index", -1))
+	if desk_index < 0 or desk_index >= office_manager.desks.size():
+		return _tool_error("Invalid desk_index. Valid range: 0-%d" % (office_manager.desks.size() - 1))
+
+	var desk = office_manager.desks[desk_index]
+	if not desk.is_empty():
+		return _tool_error("Cannot remove desk %d - it is occupied by an agent" % desk_index)
+
+	if office_manager.has_method("_remove_desk"):
+		var success = office_manager._remove_desk(desk_index)
+		if success:
+			return _tool_ok("Removed desk %d" % desk_index)
+		else:
+			return _tool_error("Failed to remove desk %d" % desk_index)
+	else:
+		return _tool_error("Desk removal not supported")
+
+func _tool_add_desk(args: Dictionary) -> Dictionary:
+	if not office_manager:
+		return _tool_error("Office manager not available")
+
+	var x = float(args.get("x", 0))
+	var y = float(args.get("y", 0))
+
+	x = clamp(x, 50, 1200)
+	y = clamp(y, 150, 550)
+
+	if office_manager.has_method("_add_desk"):
+		var new_index = office_manager._add_desk(Vector2(x, y))
+		if new_index >= 0:
+			return _tool_ok("Added desk at (%d, %d) - index %d" % [int(x), int(y), new_index])
+		else:
+			return _tool_error("Failed to add desk at (%d, %d)" % [int(x), int(y)])
+	else:
+		return _tool_error("Desk addition not supported")
 
 func _tool_pet_cat(_args: Dictionary) -> Dictionary:
 	if not office_manager or not office_manager.office_cat:
@@ -963,6 +1065,188 @@ func _tool_add_furniture(args: Dictionary) -> Dictionary:
 	# Call the internal add furniture method
 	office_manager._add_furniture(ftype, Vector2(x, y))
 	return _tool_ok("Added %s at (%d, %d)" % [ftype, int(x), int(y)])
+
+# Appearance constants - must match AgentVisuals arrays
+const HAIR_COLOR_COUNT: int = 6
+const SKIN_TONE_COUNT: int = 5
+const HAIR_STYLE_COUNT: int = 4
+const TOP_COLOR_COUNT: int = 4
+const BOTTOM_COLOR_COUNT: int = 4
+
+# Color name mappings for appearance updates
+const HAIR_NAMES: Dictionary = {"brown": 0, "black": 1, "auburn": 2, "blonde": 3, "dark_brown": 4, "very_dark": 5}
+const SKIN_NAMES: Dictionary = {"light": 0, "medium": 1, "tan": 2, "dark": 3, "very_light": 4}
+
+func _parse_color_index(value, name_map: Dictionary, max_index: int) -> Array:
+	# Returns [success: bool, index: int, error: String]
+	if value is String:
+		var key = value.to_lower().replace(" ", "_")
+		if name_map.has(key):
+			return [true, name_map[key], ""]
+		return [false, -1, "Unknown color name '%s'. Valid: %s" % [value, ", ".join(name_map.keys())]]
+	elif value is int or value is float:
+		var idx = int(value)
+		if idx >= 0 and idx < max_index:
+			return [true, idx, ""]
+		return [false, -1, "Index %d out of range (0-%d)" % [idx, max_index - 1]]
+	return [false, -1, "Invalid type for color value"]
+
+func _find_agent_profile(args: Dictionary) -> Array:
+	# Returns [profile: AgentProfile or null, error: String]
+	if not office_manager or not office_manager.agent_roster:
+		return [null, "No agent roster available"]
+
+	var roster = office_manager.agent_roster
+	var search_name = str(args.get("name", "")).strip_edges()
+	var search_id_raw = args.get("profile_id", -1)
+	var search_id = int(search_id_raw) if (search_id_raw is int or search_id_raw is float) else -1
+
+	if not search_name.is_empty():
+		for p in roster.get_all_agents():
+			if p.agent_name.to_lower() == search_name.to_lower():
+				return [p, ""]
+		# Sanitize name for error message (remove control chars)
+		var safe_name = search_name.substr(0, 32).replace("\n", "").replace("\r", "")
+		return [null, "Agent not found: '%s'" % safe_name]
+	elif search_id >= 0:
+		var profile = roster.get_agent(search_id)
+		if profile:
+			return [profile, ""]
+		return [null, "Agent profile not found: %d" % search_id]
+	return [null, "Either name or profile_id is required"]
+
+func _refresh_agent_visuals(profile_id: int) -> bool:
+	if not office_manager:
+		return false
+	var refreshed = false
+	var agent_keys = office_manager.active_agents.keys().duplicate()
+	for aid in agent_keys:
+		if not office_manager.active_agents.has(aid):
+			continue
+		var agent = office_manager.active_agents[aid]
+		if agent == null or agent.profile_id != profile_id:
+			continue
+		if agent.visuals and agent.visuals.has_method("refresh_appearance"):
+			agent.visuals.refresh_appearance(office_manager.agent_roster.get_agent(profile_id))
+			refreshed = true
+	return refreshed
+
+func _tool_update_agent_appearance(args: Dictionary) -> Dictionary:
+	if not office_manager:
+		return _tool_error("No office_manager")
+
+	# Find agent profile
+	var result = _find_agent_profile(args)
+	var profile: AgentProfile = result[0]
+	if not profile:
+		return _tool_error(result[1])
+
+	var changes: Array[String] = []
+	var errors: Array[String] = []
+
+	# Hair color
+	if args.has("hair_color"):
+		var parsed = _parse_color_index(args["hair_color"], HAIR_NAMES, HAIR_COLOR_COUNT)
+		if parsed[0]:
+			profile.hair_color_index = parsed[1]
+			changes.append("hair_color=%d" % parsed[1])
+		else:
+			errors.append("hair_color: " + parsed[2])
+
+	# Skin color
+	if args.has("skin_color"):
+		var parsed = _parse_color_index(args["skin_color"], SKIN_NAMES, SKIN_TONE_COUNT)
+		if parsed[0]:
+			profile.skin_color_index = parsed[1]
+			changes.append("skin_color=%d" % parsed[1])
+		else:
+			errors.append("skin_color: " + parsed[2])
+
+	# Hair style (numeric only)
+	if args.has("hair_style"):
+		var hs_raw = args["hair_style"]
+		if hs_raw is int or hs_raw is float:
+			var hs = int(hs_raw)
+			if hs >= 0 and hs < HAIR_STYLE_COUNT:
+				profile.hair_style_index = hs
+				changes.append("hair_style=%d" % hs)
+			else:
+				errors.append("hair_style: Index %d out of range (0-%d)" % [hs, HAIR_STYLE_COUNT - 1])
+		else:
+			errors.append("hair_style: Must be integer")
+
+	# Gender presentation
+	if args.has("is_female"):
+		profile.is_female = bool(args["is_female"])
+		changes.append("is_female=%s" % str(profile.is_female))
+
+	# Top color
+	if args.has("top_color"):
+		var tc_raw = args["top_color"]
+		if tc_raw is int or tc_raw is float:
+			var tc = int(tc_raw)
+			if tc >= 0 and tc < TOP_COLOR_COUNT:
+				profile.blouse_color_index = tc
+				changes.append("top_color=%d" % tc)
+			else:
+				errors.append("top_color: Index %d out of range (0-%d)" % [tc, TOP_COLOR_COUNT - 1])
+		else:
+			errors.append("top_color: Must be integer")
+
+	# Bottom type
+	if args.has("bottom_type"):
+		var bt = args["bottom_type"]
+		if bt is String:
+			var bt_lower = bt.to_lower()
+			if bt_lower == "skirt":
+				profile.bottom_type = 1
+			elif bt_lower == "pants":
+				profile.bottom_type = 0
+			else:
+				errors.append("bottom_type: Must be 'pants' or 'skirt'")
+				bt = null
+			if bt != null:
+				changes.append("bottom_type=%d" % profile.bottom_type)
+		elif bt is int or bt is float:
+			var bti = int(bt)
+			if bti == 0 or bti == 1:
+				profile.bottom_type = bti
+				changes.append("bottom_type=%d" % bti)
+			else:
+				errors.append("bottom_type: Must be 0 (pants) or 1 (skirt)")
+		else:
+			errors.append("bottom_type: Invalid type")
+
+	# Bottom color
+	if args.has("bottom_color"):
+		var bc_raw = args["bottom_color"]
+		if bc_raw is int or bc_raw is float:
+			var bc = int(bc_raw)
+			if bc >= 0 and bc < BOTTOM_COLOR_COUNT:
+				profile.bottom_color_index = bc
+				changes.append("bottom_color=%d" % bc)
+			else:
+				errors.append("bottom_color: Index %d out of range (0-%d)" % [bc, BOTTOM_COLOR_COUNT - 1])
+		else:
+			errors.append("bottom_color: Must be integer")
+
+	# Report errors if any properties failed
+	if not errors.is_empty():
+		return _tool_error("Validation failed: " + "; ".join(errors))
+
+	if changes.is_empty():
+		return _tool_error("No appearance properties specified to update")
+
+	# Save and refresh
+	office_manager.agent_roster.save_profile(profile)
+	var refreshed = _refresh_agent_visuals(profile.id)
+	if office_manager.has_method("_update_vip_photo"):
+		office_manager._update_vip_photo()
+
+	var msg = "Updated %s: %s" % [profile.agent_name, ", ".join(changes)]
+	if refreshed:
+		msg += " (visuals refreshed)"
+	return _tool_ok(msg)
 
 func _tool_json(data: Dictionary) -> Dictionary:
 	return {

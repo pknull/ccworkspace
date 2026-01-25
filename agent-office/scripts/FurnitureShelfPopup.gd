@@ -10,6 +10,7 @@ class_name FurnitureShelfPopup
 signal close_requested()
 signal furniture_add_requested(furniture_type: String)
 signal furniture_remove_requested(furniture_id: String)
+signal wall_item_toggled(item_type: String, visible: bool)
 
 # Available furniture types with display info
 const FURNITURE_TYPES: Array[Dictionary] = [
@@ -21,6 +22,14 @@ const FURNITURE_TYPES: Array[Dictionary] = [
 	{"type": "shredder", "name": "Shredder", "color": Color(0.3, 0.3, 0.35), "size": Vector2(25, 30)},
 	{"type": "cat_bed", "name": "Cat Bed", "color": Color(0.9, 0.75, 0.6), "size": Vector2(35, 20)},
 	{"type": "taskboard", "name": "Taskboard", "color": Color(0.95, 0.95, 0.9), "size": Vector2(40, 50)},
+]
+
+# Wall-mounted items (can be shown/hidden and moved)
+const WALL_ITEM_TYPES: Array[Dictionary] = [
+	{"type": "wall_clock", "name": "Clock", "color": Color(0.9, 0.9, 0.85), "size": Vector2(30, 30)},
+	{"type": "weather_display", "name": "Weather", "color": Color(0.2, 0.3, 0.2), "size": Vector2(35, 20)},
+	{"type": "vip_photo", "name": "VIP Photo", "color": Color(0.8, 0.7, 0.2), "size": Vector2(25, 35)},
+	{"type": "roster_clipboard", "name": "Roster", "color": Color(0.7, 0.6, 0.4), "size": Vector2(25, 30)},
 ]
 
 # Layout constants
@@ -45,6 +54,7 @@ var placed_container: VBoxContainer
 
 # Data
 var placed_furniture: Array = []  # [{id, type, position}, ...]
+var wall_item_visibility: Dictionary = {}  # {type: bool}
 
 func _init() -> void:
 	layer = OfficeConstants.Z_UI_POPUP_LAYER
@@ -228,8 +238,9 @@ func _on_add_item_clicked(event: InputEvent, furniture_type: String) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		furniture_add_requested.emit(furniture_type)
 
-func show_shelf(current_furniture: Array) -> void:
+func show_shelf(current_furniture: Array, current_wall_items: Dictionary = {}) -> void:
 	placed_furniture = current_furniture
+	wall_item_visibility = current_wall_items.duplicate()
 	visible = true
 	_update_placed_list()
 
@@ -237,6 +248,36 @@ func _update_placed_list() -> void:
 	# Clear existing
 	for child in placed_container.get_children():
 		child.queue_free()
+
+	# Wall items section (checkboxes to show/hide)
+	if not WALL_ITEM_TYPES.is_empty():
+		var wall_header = Label.new()
+		wall_header.text = "Wall Items"
+		wall_header.add_theme_font_size_override("font_size", FONT_SIZE_SMALL)
+		wall_header.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
+		placed_container.add_child(wall_header)
+
+		for wtype in WALL_ITEM_TYPES:
+			var item_type = wtype.get("type", "")
+			var item_name = wtype.get("name", item_type)
+			var is_visible = wall_item_visibility.get(item_type, true)
+
+			var row = HBoxContainer.new()
+			row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.custom_minimum_size = Vector2(PANEL_WIDTH - 60, 24)
+			placed_container.add_child(row)
+
+			var checkbox = CheckBox.new()
+			checkbox.text = item_name
+			checkbox.button_pressed = is_visible
+			checkbox.add_theme_font_size_override("font_size", FONT_SIZE_BODY)
+			checkbox.toggled.connect(_on_wall_item_toggled.bind(item_type))
+			row.add_child(checkbox)
+
+		# Spacer between wall items and furniture
+		var spacer = Control.new()
+		spacer.custom_minimum_size = Vector2(0, 8)
+		placed_container.add_child(spacer)
 
 	if placed_furniture.is_empty():
 		var empty_label = Label.new()
@@ -259,6 +300,15 @@ func _update_placed_list() -> void:
 		var type_info = _get_type_info(ftype)
 		var type_name = type_info.get("name", ftype)
 
+		# Count occupied items (for desks)
+		var occupied_count = 0
+		var available_count = 0
+		for item in items:
+			if item.get("occupied", false):
+				occupied_count += 1
+			else:
+				available_count += 1
+
 		var row = HBoxContainer.new()
 		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.custom_minimum_size = Vector2(PANEL_WIDTH - 60, 28)
@@ -275,30 +325,45 @@ func _update_placed_list() -> void:
 		spacer1.custom_minimum_size = Vector2(8, 0)
 		row.add_child(spacer1)
 
-		# Name and count
+		# Name and count (show occupied if any)
 		var label = Label.new()
-		label.text = "%s x%d" % [type_name, items.size()]
+		if occupied_count > 0:
+			label.text = "%s x%d (%d in use)" % [type_name, items.size(), occupied_count]
+		else:
+			label.text = "%s x%d" % [type_name, items.size()]
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		label.add_theme_font_size_override("font_size", FONT_SIZE_BODY)
 		label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT)
 		row.add_child(label)
 
-		# Remove one button
+		# Remove one button (disable if all occupied)
 		var remove_btn = Button.new()
 		remove_btn.text = "-"
 		remove_btn.custom_minimum_size = Vector2(28, 24)
 		remove_btn.add_theme_font_size_override("font_size", 14)
-		remove_btn.tooltip_text = "Remove one %s" % type_name
-		remove_btn.pressed.connect(_on_remove_one.bind(ftype))
+		if available_count > 0:
+			remove_btn.tooltip_text = "Remove one %s" % type_name
+			remove_btn.pressed.connect(_on_remove_one.bind(ftype))
+		else:
+			remove_btn.tooltip_text = "All %s are in use" % type_name
+			remove_btn.disabled = true
 		row.add_child(remove_btn)
 
 func _on_remove_one(furniture_type: String) -> void:
-	# Find the last placed item of this type and remove it
+	# Find the last placed item of this type that isn't occupied and remove it
 	for i in range(placed_furniture.size() - 1, -1, -1):
-		if placed_furniture[i].get("type") == furniture_type:
-			var furniture_id = placed_furniture[i].get("id", "")
+		var item = placed_furniture[i]
+		if item.get("type") == furniture_type:
+			# Skip occupied items (like desks with agents)
+			if item.get("occupied", false):
+				continue
+			var furniture_id = item.get("id", "")
 			furniture_remove_requested.emit(furniture_id)
 			break
+
+func _on_wall_item_toggled(is_visible: bool, item_type: String) -> void:
+	wall_item_visibility[item_type] = is_visible
+	wall_item_toggled.emit(item_type, is_visible)
 
 func _get_type_info(furniture_type: String) -> Dictionary:
 	for ftype in FURNITURE_TYPES:

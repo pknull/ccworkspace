@@ -48,23 +48,9 @@ const PREVIEW_SIZE: float = 80
 const SWATCH_SIZE: float = 24
 const SWATCH_SPACING: float = 4
 
-# Color palettes (matching AgentVisuals)
-const SKIN_TONES: Array[Color] = [
-	Color(0.95, 0.82, 0.70),  # Light
-	Color(0.78, 0.60, 0.45),  # Medium
-	Color(0.55, 0.38, 0.28),  # Dark
-	Color(0.40, 0.28, 0.20),  # Very dark
-	Color(1.0, 0.90, 0.80),   # Very light
-]
-
-const HAIR_COLORS: Array[Color] = [
-	Color(0.45, 0.32, 0.22),  # Brown
-	Color(0.15, 0.12, 0.10),  # Black
-	Color(0.85, 0.75, 0.55),  # Blonde
-	Color(0.55, 0.25, 0.15),  # Red
-	Color(0.35, 0.35, 0.40),  # Gray
-	Color(0.08, 0.06, 0.05),  # Very dark
-]
+# Use centralized arrays from OfficePalette
+const SKIN_TONES = OfficePalette.SKIN_TONES
+const HAIR_COLORS = OfficePalette.HAIR_COLORS
 
 const BLOUSE_COLORS: Array[Color] = [
 	Color(0.976, 0.961, 0.890),  # White/Cream

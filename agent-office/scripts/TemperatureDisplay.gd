@@ -1,9 +1,9 @@
 extends Node2D
 class_name TemperatureDisplay
 
-const DISPLAY_SIZE: Vector2 = Vector2(96, 32)
+const DISPLAY_SIZE: Vector2 = Vector2(56, 28)
 const BORDER_THICKNESS: float = 1.0
-const TEXT_PADDING: Vector2 = Vector2(4, 3)
+const TEXT_PADDING: Vector2 = Vector2(3, 2)
 
 var background: ColorRect
 var border: ColorRect
@@ -32,17 +32,17 @@ func _create_visuals() -> void:
 
 	temp_label = Label.new()
 	temp_label.position = text_position
-	temp_label.size = Vector2(text_area.x, 13)
-	temp_label.add_theme_font_size_override("font_size", 10)
+	temp_label.size = Vector2(text_area.x, 12)
+	temp_label.add_theme_font_size_override("font_size", 9)
 	temp_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_GREEN_BRIGHT)
 	temp_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	temp_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	add_child(temp_label)
 
 	condition_label = Label.new()
-	condition_label.position = text_position + Vector2(0, 13)
-	condition_label.size = Vector2(text_area.x, 11)
-	condition_label.add_theme_font_size_override("font_size", 8)
+	condition_label.position = text_position + Vector2(0, 11)
+	condition_label.size = Vector2(text_area.x, 10)
+	condition_label.add_theme_font_size_override("font_size", 7)
 	condition_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_GREEN)
 	condition_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	condition_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER

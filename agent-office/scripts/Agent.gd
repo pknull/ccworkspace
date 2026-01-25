@@ -139,7 +139,7 @@ const WALK_STUCK_TIMEOUT: float = 1.2    # Seconds before stuck recovery trigger
 const WALK_NUDGE_RADIUS: float = 18.0    # Radius for random recovery nudge
 const WORKING_DESK_MAX_DISTANCE: float = 30.0
 
-# Safety timeouts to reset agents stuck in non-working roles.
+# Safety timeouts to reset agents stuck in states.
 const STATE_TIMEOUTS: Dictionary = {
 	State.WALKING_TO_DESK: 20.0,
 	State.DELIVERING: 20.0,
@@ -148,6 +148,7 @@ const STATE_TIMEOUTS: Dictionary = {
 	State.CHATTING: 20.0,
 	State.WANDERING: 25.0,
 	State.FURNITURE_TOUR: 45.0,
+	State.WORKING: 600.0,  # 10 minutes - dismiss if session dies without completion
 }
 
 # Cat interaction
@@ -545,6 +546,13 @@ func _reset_stuck_state() -> void:
 			spawn_timer = OfficeConstants.AGENT_SPAWN_FADE_TIME
 			if visuals and visuals.status_label:
 				visuals.status_label.text = "Goodbye!"
+		State.WORKING:
+			# Session timed out without completion - treat as abandoned
+			_log_debug_event("STATE", "Work session timed out - treating as abandoned")
+			result = "Session timed out"
+			if visuals and visuals.status_label:
+				visuals.status_label.text = "Session lost..."
+			_start_leaving()
 		State.CHATTING:
 			end_chat()
 		State.SOCIALIZING:

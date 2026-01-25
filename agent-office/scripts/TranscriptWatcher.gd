@@ -130,6 +130,7 @@ func _remove_stale_sessions(current_time: float) -> void:
 	for path in to_remove:
 		print("[TranscriptWatcher] Stopped watching inactive: %s" % path.get_file())
 		var session_id = _derive_session_id(path)
+		var harness = _derive_harness(path)
 		_cleanup_pending_for_session(path)
 		watched_sessions.erase(path)
 		# Emit session_end so orchestrator can take a break
@@ -137,6 +138,8 @@ func _remove_stale_sessions(current_time: float) -> void:
 			"event": "session_end",
 			"session_id": session_id,
 			"session_path": path,
+			"harness_id": harness,
+			"harness_label": harness.capitalize() if harness else "",
 			"timestamp": Time.get_datetime_string_from_system()
 		})
 
@@ -159,10 +162,13 @@ func start_watching_session(file_path: String) -> void:
 		push_warning("[TranscriptWatcher] Cannot open: %s" % file_path)
 
 func _emit_session_start(session_id: String, session_path: String) -> void:
+	var harness = _derive_harness(session_path)
 	event_received.emit({
 		"event": "session_start",
 		"session_id": session_id,
 		"session_path": session_path,
+		"harness_id": harness,
+		"harness_label": harness.capitalize() if harness else "",
 		"timestamp": Time.get_datetime_string_from_system()
 	})
 
@@ -222,11 +228,14 @@ func process_line(line: String, session_path: String = "") -> void:
 				if user_content.contains("<command-name>/exit</command-name>") or \
 				   user_content.contains("<command-name>/quit</command-name>"):
 					var session_id = _derive_session_id(session_path)
+					var harness = _derive_harness(session_path)
 					print("[TranscriptWatcher] EXIT detected for session: %s" % session_id)
 					event_received.emit({
 						"event": "session_exit",
 						"session_id": session_id,
 						"session_path": session_path,
+						"harness_id": harness,
+						"harness_label": harness.capitalize() if harness else "",
 						"timestamp": entry.get("timestamp", Time.get_datetime_string_from_system())
 					})
 					return  # Don't process further for exit commands
@@ -324,6 +333,7 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 
 		print("[TranscriptWatcher] SPAWN: %s - %s (id: %s)" % [agent_type, description, tool_id.substr(0, 12)])
 
+		var harness = _derive_harness(session_path)
 		event_received.emit({
 			"event": "agent_spawn",
 			"agent_id": tool_id.substr(0, 12),  # Use 12 chars to reduce collision risk
@@ -331,7 +341,9 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 			"description": description,
 			"parent_id": "main",
 			"timestamp": timestamp,
-			"session_path": session_path
+			"session_path": session_path,
+			"harness_id": harness,
+			"harness_label": harness.capitalize() if harness else ""
 		})
 	else:
 		# ALL tools can potentially wait for permission - track them all
@@ -355,6 +367,7 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 
 		print("[TranscriptWatcher] TOOL: %s (id: %s)" % [tool_name, tool_id.substr(0, 12)])
 
+		var harness = _derive_harness(session_path)
 		# Emit waiting_for_input - monitor turns red until result comes back
 		event_received.emit({
 			"event": "waiting_for_input",
@@ -362,7 +375,9 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 			"tool": tool_name,
 			"description": tool_desc,
 			"timestamp": timestamp,
-			"session_path": session_path
+			"session_path": session_path,
+			"harness_id": harness,
+			"harness_label": harness.capitalize() if harness else ""
 		})
 
 func process_tool_result(item: Dictionary, entry: Dictionary) -> void:
@@ -461,6 +476,14 @@ func _derive_session_id(file_path: String) -> String:
 		if not trimmed.is_empty():
 			return trimmed
 	return basename
+
+func _derive_harness(session_path: String) -> String:
+	# Determine if this is a claude or codex session based on path
+	if session_path.contains("/.claude/"):
+		return "claude"
+	elif session_path.contains("/.codex/"):
+		return "codex"
+	return ""
 
 func get_watched_count() -> int:
 	return watched_sessions.size()
