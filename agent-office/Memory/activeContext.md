@@ -1,35 +1,47 @@
 # Active Context
 
-**Version:** 2
-**Last Updated:** 2026-01-24
+**Version:** 3
+**Last Updated:** 2026-01-25
 
 ## Current Status
 
-Agent behavior and UI polish complete. Orphaned relationship cleanup implemented. Code review passed.
+MCP tooling expanded significantly. Code review fixes applied. Settings MCP tools added but architecture identified as non-universal - centralized settings registry needed.
 
-## Recent Session (2026-01-24)
+## Recent Session (2026-01-25)
 
 ### Accomplished
-- **Orphan Cleanup**: Added `_cleanup_orphaned_relationships()` to AgentRoster - automatically removes chat/work records for agents that no longer exist (cleaned 52 orphaned records)
-- **Idle Agent Recall**: When new work arrives, idle/wandering agents now return to their desks via `resume_work()` and `can_resume_work()` functions
-- **Tooltip Redesign**: AgentVisuals tooltips now use PanelContainer for proper rendering with agent name + role/task
-- **UI Polish**: Edit button repositioned inside portrait box, appearance editor made gender-neutral with all options available
-- **PauseMenu Refactor**: Converted to popup-based system, reduced code by ~500 lines
-- **Code Review**: Passed 4-way parallel review (security, logic, edge cases, style) - no blocking issues
+- **Code Review Fixes**: Applied fixes from 4-way parallel review:
+  - CORS restricted from `*` to `http://localhost`
+  - Dictionary validation for placed_furniture access
+  - Refactored 128-line function into 3 helper methods
+  - Added constants for appearance bounds (HAIR_COLOR_COUNT, etc.)
+  - Fixed unused `sock` parameter in smoke_test.py
+  - Centralized HAIR_COLORS/SKIN_TONES arrays in OfficePalette.gd
+- **Roster MCP Tools**: Added `list_roster` and `fire_agent` tools, fired 11 agents to trim roster to top 10
+- **Settings MCP Tools**: Added `get_settings`, `set_volume`, `set_watcher`, `set_weather_config`
+- **API Alignment**: Fixed WeatherService API usage (use_fahrenheit not use_celsius, proper setter methods)
 
-### Key Technical Decisions
-- Badge cleanup runs on roster load to maintain data integrity
-- Idle agents check state machine before resuming (IDLE, WANDERING, SOCIALIZING, CHATTING allowed)
-- Tooltip sizing now dynamic based on content
+### Key Learnings
+- Settings are scattered across components (AudioManager, WeatherService, TranscriptWatcher, McpServer)
+- Each has its own settings file and API - no universal registry
+- MCP tools manually hardcoded to know about specific properties
+- Need centralized SettingsRegistry for dynamic discoverability
 
-### Previous Session (2026-01-23)
-- MCP furniture tools (add/remove), manager cat reaction
-- 14 MCP tools fully operational
+### Commits This Session
+- `46eca25` - feat: Add MCP settings tools for volume, watchers, and weather
+- Previous review fixes committed earlier in session
 
 ## Next Steps
 
-1. Commit pending changes (14 files, +430/-954 lines)
-2. Test idle agent recall behavior in practice
-3. Add taskboard MCP interaction (read/write tasks)
-4. Manager visual polish (animation timing, speech bubbles)
-5. Test save/load persistence with various configurations
+1. **Centralized Settings Registry** (in progress):
+   - Create SettingsRegistry class with registration API
+   - Settings declare metadata (type, range, description, category)
+   - MCP tools query registry dynamically
+   - Migrate existing settings to use registry
+
+2. Resume furniture grid preview system (plan exists at snuggly-doodling-fox.md)
+3. Test save/load persistence with various configurations
+
+## Previous Session (2026-01-24)
+- Orphan cleanup, idle agent recall, UI polish, PauseMenu refactor
+- 14 MCP tools operational
