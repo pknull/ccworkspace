@@ -170,6 +170,33 @@ func update_obstacle(obstacle_id: String, new_world_rect: Rect2) -> void:
 	unregister_obstacle(obstacle_id)
 	register_obstacle(new_world_rect, obstacle_id)
 
+func get_obstacle_bounds(obstacle_id: String) -> Rect2:
+	## Returns world-space bounding rect for an obstacle (for debug visualization)
+	if not obstacles.has(obstacle_id):
+		return Rect2()
+	var cells: Array = obstacles[obstacle_id]
+	if cells.is_empty():
+		return Rect2()
+	# Find bounding box of all cells
+	var min_cell: Vector2i = cells[0]
+	var max_cell: Vector2i = cells[0]
+	for cell in cells:
+		min_cell.x = mini(min_cell.x, cell.x)
+		min_cell.y = mini(min_cell.y, cell.y)
+		max_cell.x = maxi(max_cell.x, cell.x)
+		max_cell.y = maxi(max_cell.y, cell.y)
+	# Convert to world coordinates
+	var top_left = grid_to_world(min_cell)
+	var bottom_right = grid_to_world(max_cell + Vector2i(1, 1))
+	return Rect2(top_left, bottom_right - top_left)
+
+func get_all_obstacle_ids() -> Array[String]:
+	## Returns all registered obstacle IDs
+	var ids: Array[String] = []
+	for key in obstacles.keys():
+		ids.append(key)
+	return ids
+
 func can_place_obstacle(world_rect: Rect2, exclude_obstacle_id: String = "") -> bool:
 	# Check if the given rect can be placed without overlapping other obstacles
 	var grid_cells = _rect_to_grid_cells(world_rect)

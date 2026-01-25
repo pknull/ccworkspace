@@ -140,7 +140,10 @@ const TASKBOARD_POINTS: Array[Vector2] = [
 
 # Taskboard dimensions for dragging
 const TASKBOARD_SIZE: Vector2 = Vector2(170, 130)
-const TASKBOARD_OBSTACLE: Vector2 = Vector2(170, 130)  # Full board blocks navigation
+# Taskboard obstacle is just the easel legs/brace footprint (not the board)
+const TASKBOARD_OBSTACLE: Vector2 = Vector2(150, 30)  # Leg footprint width x depth
+# Offset from taskboard position (top-left) to obstacle center (legs are below board)
+const TASKBOARD_OBSTACLE_OFFSET: Vector2 = Vector2(85, 180)  # Center of leg/brace area
 
 # Cat bed dimensions (floor item)
 const CAT_BED_SIZE: Vector2 = Vector2(60, 36)
@@ -244,7 +247,7 @@ const GRID_HEIGHT: int = 28  # (625 - 85) / 20 ≈ 27, round to 28
 const GRID_ORIGIN: Vector2 = Vector2(0.0, 85.0)  # Top-left of walkable area
 
 # Work position offset from desk (where agent stands)
-const WORK_POSITION_OFFSET: float = 55.0  # Pixels in front of desk center
+const WORK_POSITION_OFFSET: float = 45.0  # Pixels in front of desk center (closer = head overlaps monitor)
 
 # =============================================================================
 # UTILITY FUNCTIONS

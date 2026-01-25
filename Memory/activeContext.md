@@ -1,9 +1,9 @@
 ---
-version: "2.2"
-lastUpdated: "2026-01-20 UTC"
+version: "2.3"
+lastUpdated: "2026-01-24 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - Desk drag bug fix during pause menu"
+changeTrigger: "Session save - Furniture grid preview system and taskboard collision"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -21,6 +21,29 @@ dependencies: ["communicationStyle.md"]
 - Agent mood system (tired/frustrated/irate)
 
 **Recent Activities** (last 7 days):
+- **2026-01-24 (Session 13)**: Furniture grid preview system:
+  - **Feature**: Added visual feedback during furniture dragging:
+    - 7x7 grid overlay centered on item (subtle white cells)
+    - Semi-transparent ghost preview at snap target position
+    - Green/red color tint for valid/invalid placement
+    - Original furniture hidden during drag (only ghost visible)
+  - **Implementation**:
+    - DraggableItem.gd: Added ghost_preview, grid_overlay, visual_center_offset
+    - _create_ghost_preview() duplicates ColorRect children with 0.6 alpha
+    - _create_grid_overlay() draws 7x7 grid using CELL_SIZE (20px)
+    - _update_ghost_validity() tints with GRUVBOX_GREEN/RED
+    - _cleanup_drag_visuals() restores visibility and frees preview nodes
+  - **Bug fixes**:
+    - Self-collision during drag: Synced item_name with furniture_id
+    - Debug visualization broken: Changed to use navigation_grid.get_all_obstacle_ids()
+    - Orphan collision boxes: Added conditional obstacle registration
+    - Taskboard grid offset: Added visual_center_offset property
+  - **Taskboard as floor object**:
+    - User clarified taskboard is rolling whiteboard, not wall-mounted
+    - Added TASKBOARD_OBSTACLE (150x30) for easel legs
+    - Added TASKBOARD_OBSTACLE_OFFSET (85, 180) for proper collision registration
+    - Legs now block pathfinding like desk monitors
+
 - **2026-01-20 (Session 12)**: Desk drag bug during pause menu:
   - **Bug**: Adjusting volume sliders in pause menu caused desks to move
   - **Root cause**: `Desk.gd` used `_input()` for drag handling without popup check
@@ -343,3 +366,33 @@ Short-term stuck detection (1.5s, 0.75px) misses "dodging in place" where an ent
 
 ### xdotool for Visual Verification
 `xdotool search --name "Window Name"` finds window IDs, `import -window $ID file.png` captures screenshots. Useful for visual verification during development. May need `wmctrl -i -a $ID` to focus window first if on different workspace.
+
+### Ghost Preview for Drag Operations
+When dragging items with snapping behavior, hide the original and show a semi-transparent ghost at the snap position. Users see exactly where the item will land. Pattern:
+```gdscript
+func _create_ghost_preview() -> void:
+    for child in get_children():
+        if child is ColorRect:
+            child.visible = false  # Hide original
+            # Create ghost copy at snap position
+```
+
+### Visual Center Offset for Non-Centered Items
+Items with position at top-left (like taskboard) need visual_center_offset to properly align grid overlays. The offset points from the node position to the item's visual/collision center:
+```gdscript
+visual_center_offset = Vector2(85, 161)  # Top-left to legs center
+```
+
+### Obstacle Registration Requires Conditional Checks
+When spawning furniture dynamically, don't register obstacles unconditionally. Check if the furniture was actually created before registering its collision:
+```gdscript
+if draggable_water_cooler:
+    _register_furniture_obstacle("water_cooler", pos, size)
+```
+
+### Navigation Grid as Source of Truth
+Debug visualizations should query NavigationGrid directly rather than maintaining separate obstacle arrays. Prevents synchronization bugs when indices shift:
+```gdscript
+for obstacle_id in navigation_grid.get_all_obstacle_ids():
+    var bounds = navigation_grid.get_obstacle_bounds(obstacle_id)
+```
