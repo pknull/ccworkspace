@@ -625,6 +625,25 @@ func _list_tools() -> Array[Dictionary]:
 					"bottom_color": {"type": "integer", "description": "Bottom color index 0-3"}
 				}
 			}
+		},
+		{
+			"name": "list_roster",
+			"description": "List all agents in the roster sorted by XP (highest first). Shows name, XP, level, tasks completed, and whether currently working.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {}
+			}
+		},
+		{
+			"name": "fire_agent",
+			"description": "Fire (permanently remove) an agent from the roster. Cannot fire agents currently working.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"name": {"type": "string", "description": "Agent name"},
+					"profile_id": {"type": "integer", "description": "Agent profile ID"}
+				}
+			}
 		}
 	]
 
@@ -674,6 +693,10 @@ func _call_tool(params) -> Dictionary:
 			return _tool_add_furniture(args)
 		"update_agent_appearance":
 			return _tool_update_agent_appearance(args)
+		"list_roster":
+			return _tool_list_roster(args)
+		"fire_agent":
+			return _tool_fire_agent(args)
 		_:
 			return _tool_error("Unknown tool")
 
@@ -1247,6 +1270,55 @@ func _tool_update_agent_appearance(args: Dictionary) -> Dictionary:
 	if refreshed:
 		msg += " (visuals refreshed)"
 	return _tool_ok(msg)
+
+func _tool_list_roster(_args: Dictionary) -> Dictionary:
+	if not office_manager or not office_manager.agent_roster:
+		return _tool_error("No roster available")
+
+	var roster = office_manager.agent_roster
+	var agents = roster.get_agents_sorted_by_xp()
+
+	if agents.is_empty():
+		return _tool_ok("No agents in roster")
+
+	var lines: Array[String] = []
+	lines.append("Roster (%d agents, sorted by XP):" % agents.size())
+	lines.append("")
+
+	var rank = 1
+	for agent in agents:
+		var status = "working" if roster.is_working(agent.id) else "idle"
+		var line = "%2d. %-12s  Lvl %d  XP: %5d  Tasks: %d  [%s]" % [
+			rank, agent.agent_name, agent.level, agent.xp, agent.tasks_completed, status
+		]
+		lines.append(line)
+		rank += 1
+
+	return _tool_ok("\n".join(lines))
+
+func _tool_fire_agent(args: Dictionary) -> Dictionary:
+	if not office_manager or not office_manager.agent_roster:
+		return _tool_error("No roster available")
+
+	var roster = office_manager.agent_roster
+
+	# Find agent by name or profile_id
+	var result = _find_agent_profile(args)
+	var profile: AgentProfile = result[0]
+	if not profile:
+		return _tool_error(result[1])
+
+	# Check if working
+	if roster.is_working(profile.id):
+		return _tool_error("Cannot fire %s - currently working" % profile.agent_name)
+
+	# Fire the agent
+	var agent_name = profile.agent_name
+	var success = roster.fire_agent(profile.id)
+	if success:
+		return _tool_ok("Fired %s" % agent_name)
+	else:
+		return _tool_error("Failed to fire %s" % agent_name)
 
 func _tool_json(data: Dictionary) -> Dictionary:
 	return {
