@@ -1,0 +1,145 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  GODOT_VERSION: 4.5
+  PROJECT_PATH: agent-office
+
+jobs:
+  export:
+    name: Export Game
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.5.0
+          use-dotnet: false
+          include-templates: true
+
+      - name: Verify Godot
+        run: godot --version
+
+      - name: Import project
+        run: |
+          cd ${{ env.PROJECT_PATH }}
+          godot --headless --import
+
+      - name: Export Linux
+        run: |
+          cd ${{ env.PROJECT_PATH }}
+          mkdir -p builds/linux
+          godot --headless --export-release "Linux" builds/linux/inference-inc.x86_64
+
+      - name: Export Windows
+        run: |
+          cd ${{ env.PROJECT_PATH }}
+          mkdir -p builds/windows
+          godot --headless --export-release "Windows" builds/windows/inference-inc.exe
+
+      - name: Export macOS
+        run: |
+          cd ${{ env.PROJECT_PATH }}
+          mkdir -p builds/macos
+          godot --headless --export-release "macOS" builds/macos/inference-inc.zip
+
+      - name: Export Web
+        run: |
+          cd ${{ env.PROJECT_PATH }}
+          mkdir -p builds/web
+          godot --headless --export-release "Web" builds/web/inference-inc.html
+
+      - name: Package releases
+        run: |
+          cd ${{ env.PROJECT_PATH }}/builds
+          VERSION=${GITHUB_REF_NAME}
+
+          cd linux && zip -9 ../inference-inc-${VERSION}-linux-x86_64.zip inference-inc.x86_64 && cd ..
+          cd windows && zip -9 ../inference-inc-${VERSION}-windows-x86_64.zip inference-inc.exe && cd ..
+          mv macos/inference-inc.zip inference-inc-${VERSION}-macos-universal.zip
+          cd web && zip -9 ../inference-inc-${VERSION}-web.zip * && cd ..
+
+          ls -la *.zip
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: ${{ env.PROJECT_PATH }}/builds/inference-inc-*-linux-x86_64.zip
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: ${{ env.PROJECT_PATH }}/builds/inference-inc-*-windows-x86_64.zip
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: ${{ env.PROJECT_PATH }}/builds/inference-inc-*-macos-universal.zip
+
+      - name: Upload Web artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build
+          path: ${{ env.PROJECT_PATH }}/builds/inference-inc-*-web.zip
+
+  release:
+    name: Create Release
+    needs: export
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          find artifacts -name "*.zip" -exec mv {} release/ \;
+          ls -la release/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.zip
+          generate_release_notes: true
+          body: |
+            ## Inference Inc. ${{ github.ref_name }}
+
+            Virtual office simulation that visualizes AI agent activity from Claude Code and Codex CLI sessions.
+
+            ### Downloads
+
+            | Platform | File |
+            |----------|------|
+            | Linux x86_64 | inference-inc-${{ github.ref_name }}-linux-x86_64.zip |
+            | Windows x86_64 | inference-inc-${{ github.ref_name }}-windows-x86_64.zip |
+            | macOS Universal | inference-inc-${{ github.ref_name }}-macos-universal.zip |
+            | Web | inference-inc-${{ github.ref_name }}-web.zip |
+
+            ### Requirements
+            - Claude Code or Codex CLI for session monitoring
+            - MCP server runs on port 9999
+
+            ### Quick Start
+            1. Download for your platform
+            2. Extract and run the application
+            3. Start a Claude Code or Codex CLI session
+            4. Watch agents appear in the office!
