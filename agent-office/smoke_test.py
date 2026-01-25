@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Smoke test for Agent Office TCP server on port 9999.
+Smoke test for Agent Office MCP server on port 9999.
 
 Tests:
 1. Connection to server
@@ -28,27 +28,82 @@ import socket
 import sys
 import time
 from typing import Optional
+import urllib.request
+import urllib.error
 
 HOST = "localhost"
 PORT = 9999
-TIMEOUT = 2.0
+TIMEOUT = 5.0
 WEATHER_STATES = ["clear", "cloudy", "drizzle", "rain", "showers", "storm", "snow", "fog"]
 WEATHER_SMOKE_INTERVAL = 2.0
 
+# JSON-RPC request ID counter
+_rpc_id = 0
 
-def send_event(sock: socket.socket, event: dict) -> bool:
-    """Send a JSON event to the server."""
+
+def _next_rpc_id() -> int:
+    global _rpc_id
+    _rpc_id += 1
+    return _rpc_id
+
+
+def send_event(event: dict) -> bool:
+    """Send an event via MCP post_event tool using HTTP JSON-RPC.
+
+    Creates a new HTTP connection for each request.
+    Returns True if server responded with HTTP 200 OK.
+    """
     try:
-        message = json.dumps(event) + "\n"
-        sock.sendall(message.encode())
-        return True
+        # Build JSON-RPC request for post_event tool
+        rpc_request = {
+            "jsonrpc": "2.0",
+            "id": _next_rpc_id(),
+            "method": "tools/call",
+            "params": {
+                "name": "post_event",
+                "arguments": event
+            }
+        }
+        body = json.dumps(rpc_request)
+        body_bytes = body.encode('utf-8')
+
+        # Build HTTP request with correct Content-Length for UTF-8 bytes
+        http_request = (
+            f"POST / HTTP/1.1\r\n"
+            f"Host: {HOST}:{PORT}\r\n"
+            f"Content-Type: application/json\r\n"
+            f"Content-Length: {len(body_bytes)}\r\n"
+            f"Connection: close\r\n"
+            f"\r\n"
+        ).encode('utf-8') + body_bytes
+
+        # Create new connection for each request
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(TIMEOUT)
+            s.connect((HOST, PORT))
+            s.sendall(http_request)
+
+            # Read complete response
+            response = b""
+            while True:
+                try:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        break
+                    response += chunk
+                except socket.timeout:
+                    break  # Timeout reading is acceptable for smoke tests
+
+        # Check for HTTP 200 OK
+        response_str = response.decode('utf-8', errors='replace')
+        return response_str.startswith("HTTP/1.1 200")
     except socket.error as e:
         print(f"  FAIL: Send error - {e}")
         return False
 
 
 def connect() -> Optional[socket.socket]:
-    """Establish TCP connection."""
+    """Test TCP connection to MCP server."""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(TIMEOUT)
@@ -88,7 +143,7 @@ def test_agent_spawn(sock: socket.socket, agent_id: str = "smoke001") -> bool:
         "parent_id": "main",
         "timestamp": timestamp()
     }
-    if send_event(sock, event):
+    if send_event(event):
         print("  PASS: agent_spawn sent")
         return True
     return False
@@ -105,7 +160,7 @@ def test_waiting_for_input(sock: socket.socket, agent_id: str = "smoke001") -> b
         "session_path": "/tmp/smoke-test",
         "timestamp": timestamp()
     }
-    if send_event(sock, event):
+    if send_event(event):
         print("  PASS: waiting_for_input sent")
         return True
     return False
@@ -120,7 +175,7 @@ def test_agent_complete(sock: socket.socket, agent_id: str = "smoke001") -> bool
         "success": "true",
         "timestamp": timestamp()
     }
-    if send_event(sock, event):
+    if send_event(event):
         print("  PASS: agent_complete sent")
         return True
     return False
@@ -211,7 +266,7 @@ def run_furniture_tour() -> bool:
         "timestamp": timestamp()
     }
 
-    if send_event(sock, event):
+    if send_event(event):
         print("  PASS: furniture_tour event sent")
     else:
         print("  FAIL: Could not send event")
@@ -270,7 +325,7 @@ def run_refactor_tests() -> bool:
 
     # Test 1: Spawn agent with visuals
     print("[1/5] Spawning agent (tests AgentVisuals)...")
-    if send_event(sock, {
+    if send_event({
         "event": "agent_spawn",
         "agent_id": "refactor001",
         "agent_type": "typescript-pro",
@@ -287,7 +342,7 @@ def run_refactor_tests() -> bool:
 
     # Test 2: Trigger tool display (tests visuals.show_tool)
     print("[2/5] Triggering tool display...")
-    if send_event(sock, {
+    if send_event({
         "event": "waiting_for_input",
         "agent_id": "refactor001",
         "tool": "Read",
@@ -304,7 +359,7 @@ def run_refactor_tests() -> bool:
 
     # Test 3: Clear tool display
     print("[3/5] Clearing tool display...")
-    if send_event(sock, {
+    if send_event({
         "event": "input_received",
         "agent_id": "refactor001",
         "tool": "Read",
@@ -320,7 +375,7 @@ def run_refactor_tests() -> bool:
 
     # Test 4: Spawn second agent (tests social interactions)
     print("[4/5] Spawning second agent (tests AgentSocial)...")
-    if send_event(sock, {
+    if send_event({
         "event": "agent_spawn",
         "agent_id": "refactor002",
         "agent_type": "debugger",
@@ -339,7 +394,7 @@ def run_refactor_tests() -> bool:
     print("[5/5] Completing agents (tests AgentBubbles)...")
     success = True
     for agent_id in ["refactor001", "refactor002"]:
-        if not send_event(sock, {
+        if not send_event({
             "event": "agent_complete",
             "agent_id": agent_id,
             "success": "true",
@@ -398,7 +453,7 @@ def run_interaction_tests() -> bool:
 
     # Test 1: Session start (creates orchestrator)
     print("[1/4] Starting session (creates orchestrator)...")
-    if send_event(sock, {
+    if send_event({
         "event": "session_start",
         "session_id": "interaction-test",
         "session_path": "/tmp/interaction-test.jsonl",
@@ -416,7 +471,7 @@ def run_interaction_tests() -> bool:
     agent_types = ["typescript-pro", "debugger", "python-pro", "tdd", "security-auditor", "devops-engineer"]
     spawn_success = True
     for i, agent_type in enumerate(agent_types):
-        if not send_event(sock, {
+        if not send_event({
             "event": "agent_spawn",
             "agent_id": f"interact{i:03d}",
             "agent_type": agent_type,
@@ -439,7 +494,7 @@ def run_interaction_tests() -> bool:
     print("[3/4] Spawning 4 more agents (tests meeting overflow)...")
     overflow_success = True
     for i in range(6, 10):
-        if not send_event(sock, {
+        if not send_event({
             "event": "agent_spawn",
             "agent_id": f"interact{i:03d}",
             "agent_type": "full-stack-developer",
@@ -460,7 +515,7 @@ def run_interaction_tests() -> bool:
 
     # Test 4: End session (completes orchestrator)
     print("[4/4] Ending session...")
-    if send_event(sock, {
+    if send_event({
         "event": "session_end",
         "session_id": "interaction-test",
         "session_path": "/tmp/interaction-test.jsonl",
@@ -473,7 +528,7 @@ def run_interaction_tests() -> bool:
 
     # Complete all agents (force=true bypasses MIN_WORK_TIME for immediate cleanup)
     for i in range(10):
-        send_event(sock, {
+        send_event({
             "event": "agent_complete",
             "agent_id": f"interact{i:03d}",
             "success": "true",
@@ -529,7 +584,7 @@ def run_stress_tests() -> bool:
     print("[1/3] Spawning 20 agents rapidly...")
     start = time.time()
     for i in range(20):
-        if not send_event(sock, {
+        if not send_event({
             "event": "agent_spawn",
             "agent_id": f"stress{i:03d}",
             "agent_type": "smoke-test",
@@ -555,7 +610,7 @@ def run_stress_tests() -> bool:
     errors = 0
     start = time.time()
     for i in range(50):
-        if not send_event(sock, {
+        if not send_event({
             "event": "waiting_for_input",
             "agent_id": "stress000",
             "tool": "Bash",
@@ -564,7 +619,7 @@ def run_stress_tests() -> bool:
             "timestamp": timestamp()
         }):
             errors += 1
-        if not send_event(sock, {
+        if not send_event({
             "event": "input_received",
             "agent_id": "stress000",
             "tool": "Bash",
@@ -588,7 +643,7 @@ def run_stress_tests() -> bool:
     start = time.time()
     for i in range(10):
         agent_id = f"cycle{i:03d}"
-        if not send_event(sock, {
+        if not send_event({
             "event": "agent_spawn",
             "agent_id": agent_id,
             "agent_type": "smoke-test",
@@ -598,7 +653,7 @@ def run_stress_tests() -> bool:
         }):
             errors += 1
         time.sleep(0.3)  # Brief work
-        if not send_event(sock, {
+        if not send_event({
             "event": "agent_complete",
             "agent_id": agent_id,
             "success": "true",
@@ -618,7 +673,7 @@ def run_stress_tests() -> bool:
 
     # Cleanup: Complete all stress and cycle agents (force=true bypasses MIN_WORK_TIME)
     for i in range(20):
-        send_event(sock, {
+        send_event({
             "event": "agent_complete",
             "agent_id": f"stress{i:03d}",
             "success": "true",
@@ -627,7 +682,7 @@ def run_stress_tests() -> bool:
         })
         time.sleep(0.02)
     for i in range(10):
-        send_event(sock, {
+        send_event({
             "event": "agent_complete",
             "agent_id": f"cycle{i:03d}",
             "success": "true",
@@ -680,7 +735,7 @@ def run_edge_case_tests() -> bool:
 
     # Test 1: Complete non-existent agent (should be ignored gracefully)
     print("[1/5] Completing non-existent agent...")
-    if send_event(sock, {
+    if send_event({
         "event": "agent_complete",
         "agent_id": "nonexistent999",
         "success": "true",
@@ -695,7 +750,7 @@ def run_edge_case_tests() -> bool:
 
     # Test 2: Invalid event type (should be ignored)
     print("[2/5] Sending invalid event type...")
-    if send_event(sock, {
+    if send_event({
         "event": "invalid_event_type",
         "data": "test",
         "timestamp": timestamp()
@@ -709,7 +764,7 @@ def run_edge_case_tests() -> bool:
 
     # Test 3: Missing required fields
     print("[3/5] Sending agent_spawn without agent_id...")
-    if send_event(sock, {
+    if send_event({
         "event": "agent_spawn",
         "agent_type": "test",
         "description": "Missing ID test",
@@ -724,7 +779,7 @@ def run_edge_case_tests() -> bool:
 
     # Test 4: Spawn agent, then spawn with same ID
     print("[4/5] Testing duplicate agent ID...")
-    send_event(sock, {
+    send_event({
         "event": "agent_spawn",
         "agent_id": "duplicate001",
         "agent_type": "smoke-test",
@@ -733,7 +788,7 @@ def run_edge_case_tests() -> bool:
         "timestamp": timestamp()
     })
     time.sleep(0.5)
-    if send_event(sock, {
+    if send_event({
         "event": "agent_spawn",
         "agent_id": "duplicate001",
         "agent_type": "smoke-test",
@@ -750,14 +805,14 @@ def run_edge_case_tests() -> bool:
 
     # Test 5: Empty event
     print("[5/5] Sending empty JSON...")
-    if send_event(sock, {}):
+    if send_event({}):
         print("  PASS: Empty event sent (server should ignore)")
         passed += 1
     else:
         failed += 1
 
     # Cleanup
-    send_event(sock, {
+    send_event({
         "event": "agent_complete",
         "agent_id": "duplicate001",
         "success": "true",
@@ -807,7 +862,7 @@ def run_weather_tests() -> bool:
 
     # Test 1: weather_set override (with temperature)
     print("[1/2] Sending weather_set (cloudy, 68F)...")
-    if send_event(sock, {
+    if send_event({
         "event": "weather_set",
         "state": "cloudy",
         "temperature": 68,
@@ -823,7 +878,7 @@ def run_weather_tests() -> bool:
 
     # Test 2: weather_smoke_test cycle
     print("[2/2] Cycling all weather states...")
-    if send_event(sock, {
+    if send_event({
         "event": "weather_smoke_test",
         "interval": WEATHER_SMOKE_INTERVAL,
         "loop": False,
@@ -840,7 +895,7 @@ def run_weather_tests() -> bool:
     time.sleep(total_time)
 
     # Restore random weather
-    send_event(sock, {
+    send_event({
         "event": "weather_smoke_stop",
         "keep": False,
         "timestamp": timestamp()
