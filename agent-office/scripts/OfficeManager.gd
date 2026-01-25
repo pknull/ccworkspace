@@ -118,6 +118,20 @@ var placed_furniture: Array = []  # [{id: String, type: String, position: Vector
 var furniture_id_counter: int = 0
 var removed_default_furniture: Array[String] = []  # IDs of removed default furniture
 var pending_dynamic_furniture: Array = []  # Loaded from save, created after defaults
+var saved_desk_positions: Array = []  # Loaded from save, used by _create_desks
+
+# Wall item tracking (movable, show/hide)
+var wall_item_visibility: Dictionary = {
+	"wall_clock": true,
+	"weather_display": true,
+	"vip_photo": true,
+	"roster_clipboard": true,
+}
+var wall_item_positions: Dictionary = {}  # {type: Vector2}
+var draggable_wall_clock: DraggableItem = null
+var draggable_weather: DraggableItem = null
+var draggable_vip_photo: DraggableItem = null
+var draggable_roster: DraggableItem = null
 
 # Trait-based furniture system (new)
 var furniture_registry: FurnitureRegistry = null
@@ -353,21 +367,19 @@ func _setup_office() -> void:
 	# Title sign
 	OfficeVisualFactory.create_title_sign(self)
 
-	# Wall decorations (between windows and title sign)
+	# Wall decorations (between windows and title sign) - wrapped in DraggableItem
 	temperature_display = OfficeVisualFactory.create_temperature_display()
-	temperature_display.position = OfficeConstants.TEMPERATURE_DISPLAY_POSITION
-	add_child(temperature_display)
+	draggable_weather = _wrap_wall_item(temperature_display, "weather_display", OfficeConstants.TEMPERATURE_DISPLAY_POSITION)
 
 	wall_clock = OfficeVisualFactory.create_wall_clock()
-	wall_clock.position = OfficeConstants.WALL_CLOCK_POSITION
-	add_child(wall_clock)
+	draggable_wall_clock = _wrap_wall_item(wall_clock, "wall_clock", OfficeConstants.WALL_CLOCK_POSITION)
 
 	vip_photo = OfficeVisualFactory.create_vip_photo()
-	add_child(vip_photo)
+	draggable_vip_photo = _wrap_wall_item(vip_photo, "vip_photo", OfficeConstants.VIP_PHOTO_POSITION)
 	vip_photo.clicked.connect(_on_vip_photo_clicked)
 
 	roster_clipboard = OfficeVisualFactory.create_roster_clipboard()
-	add_child(roster_clipboard)
+	draggable_roster = _wrap_wall_item(roster_clipboard, "roster_clipboard", OfficeConstants.ROSTER_CLIPBOARD_POSITION)
 	roster_clipboard.setup(agent_roster)
 	roster_clipboard.clicked.connect(_on_roster_clipboard_clicked)
 
@@ -422,6 +434,48 @@ func _create_furniture() -> void:
 	# Create any pending dynamic furniture from save file
 	_create_pending_dynamic_furniture()
 
+func _wrap_wall_item(item: Node2D, item_type: String, default_pos: Vector2) -> DraggableItem:
+	## Wrap a wall item (clock, weather, etc.) in a DraggableItem for drag support.
+	var wrapper = DraggableItem.new()
+	wrapper.item_name = item_type
+	wrapper.snap_to_grid = false  # Wall items don't need grid snapping
+	wrapper.use_dynamic_z_index = false  # Wall items stay at fixed z
+	wrapper.drag_bounds_min = Vector2(100, 20)  # Wall bounds
+	wrapper.drag_bounds_max = Vector2(1180, 70)
+	wrapper.office_manager = self
+
+	# Use saved position if available
+	var pos = wall_item_positions.get(item_type, default_pos)
+	wrapper.position = pos
+
+	# Set click area based on item type
+	match item_type:
+		"wall_clock":
+			wrapper.click_area = Rect2(-25, -25, 50, 50)
+		"weather_display":
+			wrapper.click_area = Rect2(-30, -18, 60, 36)
+		"vip_photo":
+			wrapper.click_area = Rect2(-20, -28, 40, 56)
+		"roster_clipboard":
+			wrapper.click_area = Rect2(-20, -25, 40, 50)
+
+	# Add item as child (centered)
+	item.position = Vector2.ZERO
+	wrapper.add_child(item)
+
+	# Connect position changed
+	wrapper.position_changed.connect(_on_wall_item_position_changed)
+
+	# Respect visibility
+	wrapper.visible = wall_item_visibility.get(item_type, true)
+
+	add_child(wrapper)
+	return wrapper
+
+func _on_wall_item_position_changed(item_name: String, new_position: Vector2) -> void:
+	wall_item_positions[item_name] = new_position
+	_save_positions()
+
 func _spawn_default_furniture(furniture_type: String, pos: Vector2) -> FurnitureBase:
 	## Spawn furniture using the new trait-based system and register it.
 	var furniture := furniture_registry.spawn(furniture_type, pos)
@@ -431,6 +485,7 @@ func _spawn_default_furniture(furniture_type: String, pos: Vector2) -> Furniture
 
 	# Set up common properties
 	furniture.furniture_id = furniture_type  # Default furniture uses type as ID
+	furniture.item_name = furniture_type     # Keep in sync for collision exclusion
 	furniture.position_changed.connect(_on_item_position_changed)
 	add_child(furniture)
 
@@ -496,6 +551,29 @@ func _add_furniture_with_id(furniture_type: String, pos: Vector2, fid: String) -
 	navigation_grid.register_obstacle(obstacle_rect, fid)
 
 func _create_desks() -> void:
+	# Use saved desk positions if available, otherwise use defaults
+	if not saved_desk_positions.is_empty():
+		var desk_index := 0
+		for saved in saved_desk_positions:
+			var pos = saved.get("position", Vector2.ZERO)
+			var desk := furniture_registry.spawn("desk", pos) as FurnitureDesk
+			if not desk:
+				push_warning("Failed to spawn desk at %s" % pos)
+				continue
+
+			desk.furniture_id = saved.get("id", "desk_%d" % desk_index)
+			desk.navigation_grid = navigation_grid
+			desk.office_manager = self
+			desk.position_changed.connect(_on_desk_position_changed)
+			add_child(desk)
+
+			desks.append(desk)
+			register_trait_furniture(desk)
+			desk_index += 1
+		saved_desk_positions.clear()
+		return
+
+	# Default desk layout
 	var desk_x_positions = OfficeConstants.DESK_POSITIONS_X
 	var desk_y_positions = [
 		OfficeConstants.ROW1_DESK_Y,
@@ -635,13 +713,23 @@ func _register_with_navigation_grid() -> void:
 		var work_pos = desk.get_work_position()
 		navigation_grid.register_work_position(work_pos, desk)
 
-	# Register furniture
-	_register_furniture_obstacle("water_cooler", water_cooler_position, OfficeConstants.WATER_COOLER_OBSTACLE)
-	_register_furniture_obstacle("plant", plant_position, OfficeConstants.PLANT_OBSTACLE)
-	_register_furniture_obstacle("filing_cabinet", filing_cabinet_position, OfficeConstants.FILING_CABINET_OBSTACLE)
-	_register_furniture_obstacle("shredder", shredder_position, OfficeConstants.SHREDDER_OBSTACLE)
-	_register_furniture_obstacle("meeting_table", meeting_table_position, OfficeConstants.MEETING_TABLE_OBSTACLE)
-	_register_furniture_obstacle("cat_bed", cat_bed_position, OfficeConstants.CAT_BED_OBSTACLE)
+	# Register furniture (only if it was actually spawned)
+	if draggable_water_cooler:
+		_register_furniture_obstacle("water_cooler", water_cooler_position, OfficeConstants.WATER_COOLER_OBSTACLE)
+	if draggable_plant:
+		_register_furniture_obstacle("plant", plant_position, OfficeConstants.PLANT_OBSTACLE)
+	if draggable_filing_cabinet:
+		_register_furniture_obstacle("filing_cabinet", filing_cabinet_position, OfficeConstants.FILING_CABINET_OBSTACLE)
+	if draggable_shredder:
+		_register_furniture_obstacle("shredder", shredder_position, OfficeConstants.SHREDDER_OBSTACLE)
+	if meeting_table:
+		_register_furniture_obstacle("meeting_table", meeting_table_position, OfficeConstants.MEETING_TABLE_OBSTACLE)
+	if draggable_cat_bed:
+		_register_furniture_obstacle("cat_bed", cat_bed_position, OfficeConstants.CAT_BED_OBSTACLE)
+	# Taskboard uses top-left positioning, so calculate obstacle center from offset
+	if draggable_taskboard:
+		var taskboard_obstacle_center = taskboard_position + OfficeConstants.TASKBOARD_OBSTACLE_OFFSET
+		_register_furniture_obstacle("taskboard", taskboard_obstacle_center, OfficeConstants.TASKBOARD_OBSTACLE)
 
 func _register_furniture_obstacle(obstacle_id: String, pos: Vector2, size: Vector2) -> void:
 	var rect = Rect2(pos.x - size.x / 2, pos.y - size.y / 2, size.x, size.y)
@@ -692,48 +780,53 @@ func _update_debug_visualizations() -> void:
 	# Screen bounds for offscreen check
 	var screen_rect = Rect2(0, 0, OfficeConstants.SCREEN_WIDTH, OfficeConstants.SCREEN_HEIGHT)
 
-	# === OBSTACLE BOUNDING BOXES ===
-	for obstacle in office_obstacles:
-		var obs_rect = ColorRect.new()
-		obs_rect.size = obstacle.size
-		obs_rect.position = obstacle.position
-		obs_rect.color = Color(1.0, 0.0, 0.0, 0.15)  # Semi-transparent red
-		obs_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		debug_layer.add_child(obs_rect)
+	# === OBSTACLE BOUNDING BOXES (from navigation grid) ===
+	if navigation_grid:
+		for obstacle_id in navigation_grid.get_all_obstacle_ids():
+			var obstacle = navigation_grid.get_obstacle_bounds(obstacle_id)
+			if obstacle.size == Vector2.ZERO:
+				continue
+			var obs_rect = ColorRect.new()
+			obs_rect.size = obstacle.size
+			obs_rect.position = obstacle.position
+			obs_rect.color = Color(1.0, 0.0, 0.0, 0.15)  # Semi-transparent red
+			obs_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			debug_layer.add_child(obs_rect)
 
-		# Border outline
-		var border = Line2D.new()
-		border.add_point(obstacle.position)
-		border.add_point(obstacle.position + Vector2(obstacle.size.x, 0))
-		border.add_point(obstacle.position + obstacle.size)
-		border.add_point(obstacle.position + Vector2(0, obstacle.size.y))
-		border.add_point(obstacle.position)
-		border.width = 1.0
-		border.default_color = Color(1.0, 0.3, 0.3, 0.4)
-		debug_layer.add_child(border)
+			# Border outline
+			var border = Line2D.new()
+			border.add_point(obstacle.position)
+			border.add_point(obstacle.position + Vector2(obstacle.size.x, 0))
+			border.add_point(obstacle.position + obstacle.size)
+			border.add_point(obstacle.position + Vector2(0, obstacle.size.y))
+			border.add_point(obstacle.position)
+			border.width = 1.0
+			border.default_color = Color(1.0, 0.3, 0.3, 0.4)
+			debug_layer.add_child(border)
 
-	# === FURNITURE INTERACTION POINTS ===
-	# Use actual draggable node positions (not the position variables which may be stale)
-	var furniture_points = {
-		"water_cooler": {"node": draggable_water_cooler, "points": OfficeConstants.WATER_COOLER_POINTS, "color": Color.CYAN},
-		"plant": {"node": draggable_plant, "points": OfficeConstants.PLANT_POINTS, "color": Color.GREEN},
-		"filing_cabinet": {"node": draggable_filing_cabinet, "points": OfficeConstants.FILING_CABINET_POINTS, "color": Color.GRAY},
-		"shredder": {"node": draggable_shredder, "points": OfficeConstants.SHREDDER_POINTS, "color": Color.RED},
-		"taskboard": {"node": draggable_taskboard, "points": OfficeConstants.TASKBOARD_POINTS, "color": Color.YELLOW},
+	# === FURNITURE INTERACTION POINTS (from trait system) ===
+	# Colors for different furniture types
+	var type_colors = {
+		"water_cooler": Color.CYAN,
+		"plant": Color.GREEN,
+		"filing_cabinet": Color.GRAY,
+		"shredder": Color.RED,
+		"taskboard": Color.YELLOW,
+		"desk": Color.ORANGE,
+		"meeting_table": Color.MAGENTA,
+		"cat_bed": Color.PURPLE,
 	}
 
-	for furniture_name in furniture_points:
-		var data = furniture_points[furniture_name]
-		var node = data["node"]
-		if not node:
+	for furniture in trait_furniture:
+		if not is_instance_valid(furniture):
 			continue
-		var base_pos: Vector2 = node.position
-		var points: Array = data["points"]
-		var point_color: Color = data["color"]
+		var base_pos: Vector2 = furniture.position
+		var ftype: String = furniture.furniture_type
+		var point_color: Color = type_colors.get(ftype, Color.WHITE)
 
-		# Draw line from furniture center to each point
-		for i in range(points.size()):
-			var offset: Vector2 = points[i]
+		# Draw slot positions from FurnitureBase
+		for i in range(furniture.slots.size()):
+			var offset: Vector2 = furniture.get_slot_offset(i)
 			var world_pos: Vector2 = base_pos + offset
 
 			# Check if endpoint is offscreen or collides with obstacle
@@ -758,9 +851,10 @@ func _update_debug_visualizations() -> void:
 			marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			debug_layer.add_child(marker)
 
-			# Label
+			# Label (short type name)
 			var label = Label.new()
-			label.text = "%s[%d]%s" % [furniture_name.substr(0, 3), i, "!" if is_problem else ""]
+			var short_name = ftype.substr(0, 3) if ftype.length() > 3 else ftype
+			label.text = "%s[%d]%s" % [short_name, i, "!" if is_problem else ""]
 			label.position = world_pos + Vector2(5, -5)
 			label.add_theme_font_size_override("font_size", 8)
 			label.add_theme_color_override("font_color", Color.RED if is_problem else point_color)
@@ -972,7 +1066,7 @@ func find_all_with_trait(trait_name: String) -> Array:
 	## Get all furniture with the given trait (for weighted random selection).
 	var result: Array = []
 	for furniture in trait_furniture:
-		if furniture.has_trait(trait_name):
+		if furniture and is_instance_valid(furniture) and furniture.has_trait(trait_name):
 			result.append(furniture)
 	return result
 
@@ -985,6 +1079,8 @@ func find_available_with_trait_weighted(trait_name: String, weights = null) -> D
 	var total_weight: float = 0.0
 
 	for furniture in trait_furniture:
+		if not furniture or not is_instance_valid(furniture):
+			continue
 		if furniture.has_trait(trait_name) and not furniture.is_full():
 			var weight: float = weights.get(furniture.furniture_type, 1.0) if weights else 1.0
 			candidates.append({"furniture": furniture, "weight": weight})
@@ -1037,6 +1133,9 @@ func _on_desk_position_changed(desk: FurnitureDesk, new_position: Vector2) -> vo
 
 	# Update cat's obstacles (desks + furniture)
 	_update_cat_obstacles()
+
+	# Save new desk positions
+	_save_positions()
 
 # =============================================================================
 # ANIMATION
@@ -1932,9 +2031,13 @@ func _on_item_position_changed(item_name: String, new_position: Vector2) -> void
 				office_cat.set_cat_bed_position(new_position)
 		"taskboard":
 			taskboard_position = new_position
-			# Taskboard is on the wall, no floor navigation impact
+			# Taskboard uses top-left positioning, update easel leg obstacle
+			var tb_obstacle_center = new_position + OfficeConstants.TASKBOARD_OBSTACLE_OFFSET
+			var ts = OfficeConstants.TASKBOARD_OBSTACLE
+			if navigation_grid:
+				navigation_grid.update_obstacle("taskboard", Rect2(tb_obstacle_center.x - ts.x / 2, tb_obstacle_center.y - ts.y / 2, ts.x, ts.y))
 
-	# Update navigation grid (skip for taskboard which is on the wall)
+	# Update navigation grid (skip for taskboard which has custom handling above)
 	if navigation_grid and obstacle_size != Vector2.ZERO:
 		var new_rect = Rect2(new_position.x - obstacle_size.x / 2, new_position.y - obstacle_size.y / 2, obstacle_size.x, obstacle_size.y)
 		navigation_grid.update_obstacle(item_name, new_rect)
@@ -1992,31 +2095,36 @@ func _update_profiler_overlay() -> void:
 	profiler_label.text = "FPS: %d | Agents: %d | Sessions: %d" % [fps, agent_count, session_count]
 
 func _update_taskboard() -> void:
-	if not transcript_watcher or not taskboard:
+	if not taskboard:
 		return
 
+	const TASKBOARD_MAX_Y = 108  # Leave room for "+X more" indicator
+	const LABEL_HEIGHT = 12
 	var y_offset = 28
-
-	var harnesses: Array = []
-	if transcript_watcher.has_method("get_harness_summary"):
-		harnesses = transcript_watcher.get_harness_summary()
-
 	var active_keys: Dictionary = {}
-	for harness in harnesses:
-		var harness_id = harness.get("id", "")
-		if harness_id.is_empty():
-			continue
-		active_keys[harness_id] = true
-		var label_text = harness.get("label", harness_id)
-		var session_count = int(harness.get("session_count", 0))
-		var configured = bool(harness.get("configured", false))
-		var enabled = bool(harness.get("enabled", true))
-		var count_text = "off" if not enabled else (str(session_count) if configured else "--")
-		var text = "%s [%s]" % [label_text, count_text]
+	var overflow_count = 0
 
-		if taskboard_labels.has(harness_id):
-			taskboard_labels[harness_id].text = text
-			taskboard_labels[harness_id].position = Vector2(10, y_offset)
+	# Show active agents/sessions
+	for agent_id in active_agents.keys():
+		var agent = active_agents[agent_id]
+		if not agent:
+			continue
+
+		# Check if we've run out of space
+		if y_offset > TASKBOARD_MAX_Y:
+			overflow_count += 1
+			continue
+
+		active_keys[agent_id] = true
+		var name = agent.profile_name if agent.profile_name else agent_id
+		var agent_type = agent.agent_type if agent.agent_type else "agent"
+		var harness = _get_agent_harness(agent)
+		var harness_short = harness.substr(0, 6) if harness.length() > 6 else harness
+		var text = "%s (%s)" % [name, harness_short] if harness else "%s [%s]" % [name, agent_type]
+
+		if taskboard_labels.has(agent_id):
+			taskboard_labels[agent_id].text = text
+			taskboard_labels[agent_id].position = Vector2(10, y_offset)
 		else:
 			var label = Label.new()
 			label.text = text
@@ -2024,9 +2132,38 @@ func _update_taskboard() -> void:
 			label.add_theme_font_size_override("font_size", 10)
 			label.add_theme_color_override("font_color", OfficePalette.UI_TEXT_DARK)
 			taskboard.add_child(label)
-			taskboard_labels[harness_id] = label
+			taskboard_labels[agent_id] = label
 
-		y_offset += 12
+		y_offset += LABEL_HEIGHT
+
+	# Show overflow indicator if there are more agents than fit
+	var overflow_key = "_overflow_"
+	if overflow_count > 0:
+		active_keys[overflow_key] = true
+		var overflow_text = "+%d more" % overflow_count
+		if taskboard_labels.has(overflow_key):
+			taskboard_labels[overflow_key].text = overflow_text
+		else:
+			var label = Label.new()
+			label.text = overflow_text
+			label.position = Vector2(10, TASKBOARD_MAX_Y + LABEL_HEIGHT)
+			label.add_theme_font_size_override("font_size", 9)
+			label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
+			taskboard.add_child(label)
+			taskboard_labels[overflow_key] = label
+
+	# Show "No active sessions" if empty
+	if active_agents.is_empty():
+		var empty_key = "_empty_"
+		active_keys[empty_key] = true
+		if not taskboard_labels.has(empty_key):
+			var label = Label.new()
+			label.text = "(no active sessions)"
+			label.position = Vector2(10, y_offset)
+			label.add_theme_font_size_override("font_size", 9)
+			label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
+			taskboard.add_child(label)
+			taskboard_labels[empty_key] = label
 
 	var to_remove: Array[String] = []
 	for key in taskboard_labels.keys():
@@ -2035,6 +2172,17 @@ func _update_taskboard() -> void:
 			to_remove.append(key)
 	for key in to_remove:
 		taskboard_labels.erase(key)
+
+func _get_agent_harness(agent) -> String:
+	# Try to get harness/watcher info from agent
+	if not agent:
+		return ""
+	# First check the agent's own harness fields (set from events)
+	if "harness_label" in agent and not agent.harness_label.is_empty():
+		return agent.harness_label
+	if "harness_id" in agent and not agent.harness_id.is_empty():
+		return agent.harness_id
+	return ""
 
 func _get_session_short_id(session_id: String) -> String:
 	if session_id.is_empty():
@@ -2136,6 +2284,26 @@ func _load_positions() -> void:
 	if data.has("furniture_id_counter"):
 		furniture_id_counter = int(data["furniture_id_counter"])
 
+	# Load saved desk positions
+	if data.has("desks"):
+		saved_desk_positions.clear()
+		for item in data["desks"]:
+			saved_desk_positions.append({
+				"id": str(item.get("id", "")),
+				"position": Vector2(item.get("x", 0), item.get("y", 0))
+			})
+
+	# Load wall item visibility
+	if data.has("wall_item_visibility"):
+		for key in data["wall_item_visibility"]:
+			wall_item_visibility[key] = data["wall_item_visibility"][key]
+
+	# Load wall item positions
+	if data.has("wall_item_positions"):
+		for key in data["wall_item_positions"]:
+			var pos_data = data["wall_item_positions"][key]
+			wall_item_positions[key] = Vector2(pos_data.get("x", 0), pos_data.get("y", 0))
+
 	print("[OfficeManager] Loaded saved furniture positions")
 
 func _save_positions() -> void:
@@ -2178,6 +2346,32 @@ func _save_positions() -> void:
 		})
 	data["dynamic_furniture"] = dynamic_items
 	data["furniture_id_counter"] = furniture_id_counter
+
+	# Save desk positions
+	var desk_items: Array = []
+	for desk in desks:
+		if is_instance_valid(desk):
+			desk_items.append({
+				"id": desk.furniture_id,
+				"x": desk.position.x,
+				"y": desk.position.y
+			})
+	data["desks"] = desk_items
+
+	# Save wall item visibility
+	data["wall_item_visibility"] = wall_item_visibility.duplicate()
+
+	# Save wall item positions
+	var wall_positions: Dictionary = {}
+	if draggable_wall_clock and is_instance_valid(draggable_wall_clock):
+		wall_positions["wall_clock"] = {"x": draggable_wall_clock.position.x, "y": draggable_wall_clock.position.y}
+	if draggable_weather and is_instance_valid(draggable_weather):
+		wall_positions["weather_display"] = {"x": draggable_weather.position.x, "y": draggable_weather.position.y}
+	if draggable_vip_photo and is_instance_valid(draggable_vip_photo):
+		wall_positions["vip_photo"] = {"x": draggable_vip_photo.position.x, "y": draggable_vip_photo.position.y}
+	if draggable_roster and is_instance_valid(draggable_roster):
+		wall_positions["roster_clipboard"] = {"x": draggable_roster.position.x, "y": draggable_roster.position.y}
+	data["wall_item_positions"] = wall_positions
 
 	var json_string = JSON.stringify(data, "\t")
 	var file = FileAccess.open(POSITIONS_FILE, FileAccess.WRITE)
@@ -2368,18 +2562,43 @@ func _show_furniture_shelf() -> void:
 		return
 	furniture_shelf_popup = FurnitureShelfPopup.new()
 	add_child(furniture_shelf_popup)
-	furniture_shelf_popup.show_shelf(_get_placed_furniture_list())
+	furniture_shelf_popup.show_shelf(_get_placed_furniture_list(), wall_item_visibility)
 	furniture_shelf_popup.close_requested.connect(_on_furniture_shelf_closed)
 	furniture_shelf_popup.furniture_add_requested.connect(_on_furniture_add_requested)
 	furniture_shelf_popup.furniture_remove_requested.connect(_on_furniture_remove_requested)
+	furniture_shelf_popup.wall_item_toggled.connect(_on_wall_item_toggled)
 
 func _on_furniture_shelf_closed() -> void:
 	if furniture_shelf_popup:
 		furniture_shelf_popup.queue_free()
 		furniture_shelf_popup = null
 
+func _on_wall_item_toggled(item_type: String, is_visible: bool) -> void:
+	wall_item_visibility[item_type] = is_visible
+	match item_type:
+		"wall_clock":
+			if draggable_wall_clock:
+				draggable_wall_clock.visible = is_visible
+		"weather_display":
+			if draggable_weather:
+				draggable_weather.visible = is_visible
+		"vip_photo":
+			if draggable_vip_photo:
+				draggable_vip_photo.visible = is_visible
+		"roster_clipboard":
+			if draggable_roster:
+				draggable_roster.visible = is_visible
+	_save_positions()
+
 func _get_placed_furniture_list() -> Array:
 	var result: Array = []
+	# Add desks
+	for i in range(desks.size()):
+		var desk = desks[i]
+		if desk and is_instance_valid(desk):
+			var desk_id = desk.furniture_id if desk.furniture_id != "" else "desk_%d" % i
+			var occupied = not desk.is_empty()
+			result.append({"id": desk_id, "type": "desk", "position": desk.position, "occupied": occupied})
 	# Add default furniture (the original single instances)
 	if draggable_water_cooler and is_instance_valid(draggable_water_cooler):
 		result.append({"id": "default_water_cooler", "type": "water_cooler", "position": water_cooler_position})
@@ -2409,12 +2628,33 @@ func _on_furniture_add_requested(furniture_type: String) -> void:
 		furniture_shelf_popup.show_shelf(_get_placed_furniture_list())
 
 func _on_furniture_remove_requested(furniture_id: String) -> void:
-	_remove_furniture(furniture_id)
+	# Check if it's a desk
+	if furniture_id.begins_with("desk_"):
+		var desk_index = _find_desk_by_id(furniture_id)
+		if desk_index >= 0:
+			if not _remove_desk(desk_index):
+				print("[OfficeManager] Failed to remove desk %s (may be occupied)" % furniture_id)
+	else:
+		_remove_furniture(furniture_id)
 	# Refresh the shelf display
 	if furniture_shelf_popup:
 		furniture_shelf_popup.show_shelf(_get_placed_furniture_list())
 
+func _find_desk_by_id(furniture_id: String) -> int:
+	for i in range(desks.size()):
+		var desk = desks[i]
+		if desk and is_instance_valid(desk):
+			var desk_id = desk.furniture_id if desk.furniture_id != "" else "desk_%d" % i
+			if desk_id == furniture_id:
+				return i
+	return -1
+
 func _add_furniture(furniture_type: String, pos: Vector2) -> void:
+	# Handle desks specially
+	if furniture_type == "desk":
+		_add_desk(pos)
+		return
+
 	furniture_id_counter += 1
 	var fid = "furniture_%d" % furniture_id_counter
 
@@ -2455,7 +2695,14 @@ func _on_dynamic_furniture_moved(item_name: String, new_position: Vector2, furni
 	for f in placed_furniture:
 		if f.id == furniture_id:
 			f.position = new_position
+			# Update navigation grid obstacle
+			var obstacle_size = f.obstacle_size if f.has("obstacle_size") else Vector2(40, 40)
+			var new_rect = Rect2(new_position - obstacle_size / 2, obstacle_size)
+			navigation_grid.update_obstacle(furniture_id, new_rect)
+			print("[OfficeManager] Dynamic furniture %s moved to %s" % [furniture_id, new_position])
 			break
+	# Update cat obstacles
+	_update_cat_obstacles()
 	_save_positions()
 
 func _remove_furniture(furniture_id: String) -> void:
@@ -2520,6 +2767,65 @@ func _remove_default_furniture(furniture_id: String) -> void:
 		node.queue_free()
 		_save_positions()
 		print("[OfficeManager] Removed default furniture: %s" % furniture_id)
+
+# =============================================================================
+# DESK MANAGEMENT
+# =============================================================================
+
+func _remove_desk(desk_index: int) -> bool:
+	if desk_index < 0 or desk_index >= desks.size():
+		return false
+
+	var desk = desks[desk_index]
+	if desk == null or not is_instance_valid(desk):
+		return false
+
+	# Don't remove if occupied
+	if not desk.is_empty():
+		return false
+
+	# Unregister from navigation grid
+	var desk_id = desk.furniture_id if desk.furniture_id != "" else "desk_%d" % desk.get_instance_id()
+	navigation_grid.unregister_obstacle(desk_id)
+
+	# Unregister from trait furniture system
+	unregister_trait_furniture(desk)
+
+	# Remove from array and free node
+	desks.remove_at(desk_index)
+	desk.queue_free()
+
+	_save_positions()
+	print("[OfficeManager] Removed desk at index %d" % desk_index)
+	return true
+
+func _add_desk(pos: Vector2) -> int:
+	var desk := furniture_registry.spawn("desk", pos) as FurnitureDesk
+	if not desk:
+		return -1
+
+	var desk_index = desks.size()
+	desk.furniture_id = "desk_%d" % desk_index
+	desk.navigation_grid = navigation_grid
+	desk.office_manager = self
+	desk.position_changed.connect(_on_desk_position_changed)
+	add_child(desk)
+
+	desks.append(desk)
+	register_trait_furniture(desk)
+
+	# Register obstacle
+	var desk_rect = Rect2(
+		pos.x - OfficeConstants.DESK_WIDTH / 2,
+		pos.y,
+		OfficeConstants.DESK_WIDTH,
+		OfficeConstants.DESK_DEPTH
+	)
+	navigation_grid.register_obstacle(desk_rect, desk.furniture_id)
+
+	_save_positions()
+	print("[OfficeManager] Added desk at %s (index %d)" % [pos, desk_index])
+	return desk_index
 
 # =============================================================================
 # VOLUME SETTINGS POPUP

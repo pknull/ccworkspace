@@ -28,6 +28,10 @@ func _init() -> void:
 	pass
 
 func _ready() -> void:
+	# Sync item_name with furniture_id for DraggableItem collision exclusion
+	if item_name.is_empty() and not furniture_id.is_empty():
+		item_name = furniture_id
+
 	super._ready()
 
 	# Override z-index behavior for wall-mounted furniture
