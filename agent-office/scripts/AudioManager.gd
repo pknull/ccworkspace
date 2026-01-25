@@ -51,9 +51,61 @@ var sounds_enabled: bool = true
 var sounds_loaded: bool = false
 
 func _ready() -> void:
-	_load_settings()
+	_register_with_settings()
 	_setup_audio_players()
 	_load_sounds()
+
+func _register_with_settings() -> void:
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if not registry:
+		# Fallback to legacy loading if registry not available
+		_load_settings()
+		return
+
+	var schema: Array = [
+		{"key": "typing_volume", "type": "float", "default": 0.5, "min": 0.0, "max": 1.0, "description": "Typing sound volume"},
+		{"key": "meow_volume", "type": "float", "default": 0.7, "min": 0.0, "max": 1.0, "description": "Cat meow volume"},
+		{"key": "achievement_volume", "type": "float", "default": 0.8, "min": 0.0, "max": 1.0, "description": "Achievement sound volume"},
+		{"key": "office_volume", "type": "float", "default": 0.6, "min": 0.0, "max": 1.0, "description": "Office sounds volume (shredder, filing)"},
+		{"key": "sounds_enabled", "type": "bool", "default": true, "description": "Enable/disable all sounds"}
+	]
+
+	registry.register_category("audio", SETTINGS_FILE, schema, _on_setting_changed)
+
+	# Load values from registry with defaults
+	var v_typing = registry.get_setting("audio", "typing_volume")
+	typing_volume = v_typing if v_typing != null else 0.5
+	var v_meow = registry.get_setting("audio", "meow_volume")
+	meow_volume = v_meow if v_meow != null else 0.7
+	var v_ach = registry.get_setting("audio", "achievement_volume")
+	achievement_volume = v_ach if v_ach != null else 0.8
+	var v_office = registry.get_setting("audio", "office_volume")
+	office_volume = v_office if v_office != null else 0.6
+	var v_enabled = registry.get_setting("audio", "sounds_enabled")
+	sounds_enabled = v_enabled if v_enabled != null else true
+
+func _on_setting_changed(key: String, value: Variant) -> void:
+	match key:
+		"typing_volume":
+			typing_volume = float(value)
+			if typing_player:
+				typing_player.volume_db = _volume_to_db(typing_volume, DEFAULT_TYPING_VOLUME_DB)
+		"meow_volume":
+			meow_volume = float(value)
+			if meow_player:
+				meow_player.volume_db = _volume_to_db(meow_volume, DEFAULT_MEOW_VOLUME_DB)
+		"achievement_volume":
+			achievement_volume = float(value)
+			if stapler_player:
+				stapler_player.volume_db = _volume_to_db(achievement_volume, DEFAULT_ACHIEVEMENT_VOLUME_DB)
+		"office_volume":
+			office_volume = float(value)
+			if shredder_player:
+				shredder_player.volume_db = _volume_to_db(office_volume, DEFAULT_OFFICE_VOLUME_DB)
+			if filing_player:
+				filing_player.volume_db = _volume_to_db(office_volume, DEFAULT_OFFICE_VOLUME_DB)
+		"sounds_enabled":
+			sounds_enabled = bool(value)
 
 func _setup_audio_players() -> void:
 	typing_player = AudioStreamPlayer.new()
@@ -163,37 +215,58 @@ func play_filing() -> void:
 	filing_player.play()
 
 func set_sounds_enabled(enabled: bool) -> void:
-	sounds_enabled = enabled
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if registry:
+		registry.set_setting("audio", "sounds_enabled", enabled)
+	else:
+		sounds_enabled = enabled
+		_save_settings()
 
 func is_sounds_enabled() -> bool:
 	return sounds_enabled
 
 # Volume setters (0.0 to 1.0)
 func set_typing_volume(volume: float) -> void:
-	typing_volume = clampf(volume, 0.0, 1.0)
-	if typing_player:
-		typing_player.volume_db = _volume_to_db(typing_volume, DEFAULT_TYPING_VOLUME_DB)
-	_save_settings()
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if registry:
+		registry.set_setting("audio", "typing_volume", volume)
+	else:
+		typing_volume = clampf(volume, 0.0, 1.0)
+		if typing_player:
+			typing_player.volume_db = _volume_to_db(typing_volume, DEFAULT_TYPING_VOLUME_DB)
+		_save_settings()
 
 func set_meow_volume(volume: float) -> void:
-	meow_volume = clampf(volume, 0.0, 1.0)
-	if meow_player:
-		meow_player.volume_db = _volume_to_db(meow_volume, DEFAULT_MEOW_VOLUME_DB)
-	_save_settings()
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if registry:
+		registry.set_setting("audio", "meow_volume", volume)
+	else:
+		meow_volume = clampf(volume, 0.0, 1.0)
+		if meow_player:
+			meow_player.volume_db = _volume_to_db(meow_volume, DEFAULT_MEOW_VOLUME_DB)
+		_save_settings()
 
 func set_achievement_volume(volume: float) -> void:
-	achievement_volume = clampf(volume, 0.0, 1.0)
-	if stapler_player:
-		stapler_player.volume_db = _volume_to_db(achievement_volume, DEFAULT_ACHIEVEMENT_VOLUME_DB)
-	_save_settings()
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if registry:
+		registry.set_setting("audio", "achievement_volume", volume)
+	else:
+		achievement_volume = clampf(volume, 0.0, 1.0)
+		if stapler_player:
+			stapler_player.volume_db = _volume_to_db(achievement_volume, DEFAULT_ACHIEVEMENT_VOLUME_DB)
+		_save_settings()
 
 func set_office_volume(volume: float) -> void:
-	office_volume = clampf(volume, 0.0, 1.0)
-	if shredder_player:
-		shredder_player.volume_db = _volume_to_db(office_volume, DEFAULT_OFFICE_VOLUME_DB)
-	if filing_player:
-		filing_player.volume_db = _volume_to_db(office_volume, DEFAULT_OFFICE_VOLUME_DB)
-	_save_settings()
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if registry:
+		registry.set_setting("audio", "office_volume", volume)
+	else:
+		office_volume = clampf(volume, 0.0, 1.0)
+		if shredder_player:
+			shredder_player.volume_db = _volume_to_db(office_volume, DEFAULT_OFFICE_VOLUME_DB)
+		if filing_player:
+			filing_player.volume_db = _volume_to_db(office_volume, DEFAULT_OFFICE_VOLUME_DB)
+		_save_settings()
 
 # Volume getters
 func get_typing_volume() -> float:

@@ -31,8 +31,54 @@ var office_manager: Node = null
 var recent_events: Array = []
 
 func _ready() -> void:
-	_load_mcp_config()
+	_register_with_settings()
 	_start_server()
+
+func _register_with_settings() -> void:
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if not registry:
+		_load_mcp_config()
+		return
+
+	var schema: Array = [
+		{"key": "enabled", "type": "bool", "default": true, "description": "Enable MCP HTTP server"},
+		{"key": "port", "type": "int", "default": DEFAULT_PORT, "min": 1, "max": 65535, "description": "MCP server port"},
+		{"key": "bind_address", "type": "string", "default": DEFAULT_BIND_ADDRESS, "description": "MCP server bind address"}
+	]
+
+	registry.register_category("mcp", WATCHER_CONFIG_FILE, schema, _on_setting_changed)
+
+	# Load values from registry with defaults
+	var v_enabled = registry.get_setting("mcp", "enabled")
+	enabled = v_enabled if v_enabled != null else true
+	var v_port = registry.get_setting("mcp", "port")
+	port = v_port if v_port != null else DEFAULT_PORT
+	var v_bind = registry.get_setting("mcp", "bind_address")
+	bind_address = v_bind if v_bind != null and not str(v_bind).is_empty() else DEFAULT_BIND_ADDRESS
+
+func _on_setting_changed(key: String, value: Variant) -> void:
+	var needs_restart = false
+	match key:
+		"enabled":
+			var new_enabled = bool(value)
+			if new_enabled != enabled:
+				enabled = new_enabled
+				needs_restart = true
+		"port":
+			var new_port = int(value)
+			if new_port != port:
+				port = new_port
+				needs_restart = true
+		"bind_address":
+			var new_bind = str(value).strip_edges() if value != null else DEFAULT_BIND_ADDRESS
+			if new_bind.is_empty():
+				new_bind = DEFAULT_BIND_ADDRESS
+			if new_bind != bind_address:
+				bind_address = new_bind
+				needs_restart = true
+
+	if needs_restart:
+		_restart_server()
 
 func _process(_delta: float) -> void:
 	if tcp_server == null:
@@ -63,19 +109,28 @@ func get_transport() -> String:
 	return transport
 
 func set_mcp_config(config: Dictionary) -> void:
-	var next_enabled = bool(config.get("enabled", enabled))
-	var next_port = int(config.get("port", port))
-	var next_bind = str(config.get("bind_address", bind_address)).strip_edges()
-	if next_bind.is_empty():
-		next_bind = bind_address
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if registry:
+		if config.has("enabled"):
+			registry.set_setting("mcp", "enabled", config["enabled"])
+		if config.has("port"):
+			registry.set_setting("mcp", "port", config["port"])
+		if config.has("bind_address"):
+			registry.set_setting("mcp", "bind_address", config["bind_address"])
+	else:
+		var next_enabled = bool(config.get("enabled", enabled))
+		var next_port = int(config.get("port", port))
+		var next_bind = str(config.get("bind_address", bind_address)).strip_edges()
+		if next_bind.is_empty():
+			next_bind = bind_address
 
-	var changed = next_enabled != enabled or next_port != port or next_bind != bind_address
-	enabled = next_enabled
-	port = next_port
-	bind_address = next_bind
-	_save_mcp_config()
-	if changed:
-		_restart_server()
+		var changed = next_enabled != enabled or next_port != port or next_bind != bind_address
+		enabled = next_enabled
+		port = next_port
+		bind_address = next_bind
+		_save_mcp_config()
+		if changed:
+			_restart_server()
 
 func _start_server() -> void:
 	if not enabled:
@@ -646,47 +701,34 @@ func _list_tools() -> Array[Dictionary]:
 			}
 		},
 		{
-			"name": "get_settings",
-			"description": "Get current office settings (volume, watchers, weather config).",
+			"name": "list_settings",
+			"description": "List all available settings categories with their schemas. Returns category names and metadata for each setting.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {}
 			}
 		},
 		{
-			"name": "set_volume",
-			"description": "Set audio volume levels (0.0 to 1.0).",
+			"name": "get_settings",
+			"description": "Get current settings values. Specify a category to get only those settings, or omit for all.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"typing": {"type": "number", "description": "Typing sound volume (0.0-1.0)"},
-					"meow": {"type": "number", "description": "Cat meow volume (0.0-1.0)"},
-					"achievement": {"type": "number", "description": "Achievement sound volume (0.0-1.0)"}
+					"category": {"type": "string", "description": "Category name (audio, weather, watchers, mcp). Omit for all."}
 				}
 			}
 		},
 		{
-			"name": "set_watcher",
-			"description": "Enable or disable a harness watcher.",
+			"name": "set_setting",
+			"description": "Set a specific setting value. Use list_settings to see available categories and keys.",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"harness": {"type": "string", "description": "Harness name: claude, codex, opencode, gemini"},
-					"enabled": {"type": "boolean", "description": "Enable (true) or disable (false)"},
-					"path": {"type": "string", "description": "Path for opencode/gemini watchers (optional)"}
+					"category": {"type": "string", "description": "Category name (audio, weather, watchers, mcp)"},
+					"key": {"type": "string", "description": "Setting key (e.g., typing_volume, use_fahrenheit)"},
+					"value": {"type": ["string", "number", "boolean"], "description": "Value to set"}
 				},
-				"required": ["harness", "enabled"]
-			}
-		},
-		{
-			"name": "set_weather_config",
-			"description": "Configure weather display settings. Empty location enables auto-detection.",
-			"inputSchema": {
-				"type": "object",
-				"properties": {
-					"location": {"type": "string", "description": "Location query (e.g., 'Seattle, WA'). Empty string for auto-detect."},
-					"units": {"type": "string", "description": "Temperature units: celsius or fahrenheit"}
-				}
+				"required": ["category", "key", "value"]
 			}
 		}
 	]
@@ -741,14 +783,12 @@ func _call_tool(params) -> Dictionary:
 			return _tool_list_roster(args)
 		"fire_agent":
 			return _tool_fire_agent(args)
+		"list_settings":
+			return _tool_list_settings(args)
 		"get_settings":
-			return _tool_get_settings(args)
-		"set_volume":
-			return _tool_set_volume(args)
-		"set_watcher":
-			return _tool_set_watcher(args)
-		"set_weather_config":
-			return _tool_set_weather_config(args)
+			return _tool_get_settings_new(args)
+		"set_setting":
+			return _tool_set_setting(args)
 		_:
 			return _tool_error("Unknown tool")
 
@@ -1372,6 +1412,85 @@ func _tool_fire_agent(args: Dictionary) -> Dictionary:
 	else:
 		return _tool_error("Failed to fire %s" % agent_name)
 
+func _tool_list_settings(_args: Dictionary) -> Dictionary:
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if not registry:
+		return _tool_error("Settings registry not available")
+
+	var all_schemas = registry.get_all_schemas()
+	var result: Dictionary = {}
+
+	for category in all_schemas.keys():
+		var cat_data = all_schemas[category]
+		var schema_info: Array = []
+		for field in cat_data.get("schema", []):
+			var field_info: Dictionary = {
+				"key": field.get("key", ""),
+				"type": field.get("type", "string"),
+				"description": field.get("description", "")
+			}
+			if field.has("default"):
+				field_info["default"] = field["default"]
+			if field.has("min"):
+				field_info["min"] = field["min"]
+			if field.has("max"):
+				field_info["max"] = field["max"]
+			if field.has("options"):
+				field_info["options"] = field["options"]
+			schema_info.append(field_info)
+		result[category] = schema_info
+
+	return _tool_json(result)
+
+func _tool_get_settings_new(args: Dictionary) -> Dictionary:
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if not registry:
+		return _tool_error("Settings registry not available")
+
+	var category = str(args.get("category", "")).strip_edges()
+
+	if category.is_empty():
+		# Return all categories
+		var all_schemas = registry.get_all_schemas()
+		var result: Dictionary = {}
+		for cat in all_schemas.keys():
+			result[cat] = all_schemas[cat].get("values", {})
+		return _tool_json(result)
+	else:
+		# Return specific category
+		var values = registry.get_category(category)
+		if values.is_empty():
+			return _tool_error("Unknown category: %s" % category)
+		return _tool_json({category: values})
+
+func _tool_set_setting(args: Dictionary) -> Dictionary:
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if not registry:
+		return _tool_error("Settings registry not available")
+
+	var category = str(args.get("category", "")).strip_edges()
+	var key = str(args.get("key", "")).strip_edges()
+	var value = args.get("value")
+
+	if category.is_empty():
+		return _tool_error("category is required")
+	if key.is_empty():
+		return _tool_error("key is required")
+
+	# Check if category exists
+	var categories = registry.list_categories()
+	if not category in categories:
+		return _tool_error("Unknown category: %s. Valid: %s" % [category, ", ".join(categories)])
+
+	# Try to set the value
+	var success = registry.set_setting(category, key, value)
+	if not success:
+		return _tool_error("Failed to set %s.%s - check key name and value type" % [category, key])
+
+	var new_value = registry.get_setting(category, key)
+	return _tool_ok("Set %s.%s = %s" % [category, key, str(new_value)])
+
+# Legacy function - kept for backwards compatibility but no longer used
 func _tool_get_settings(_args: Dictionary) -> Dictionary:
 	if not office_manager:
 		return _tool_error("No office_manager")

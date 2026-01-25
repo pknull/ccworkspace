@@ -40,9 +40,66 @@ var refresh_timer: Timer
 var request_in_flight: bool = false
 
 func _ready() -> void:
-	_load_settings()
+	_register_with_settings()
 	_setup_requests()
 	_refresh_weather()
+
+func _register_with_settings() -> void:
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if not registry:
+		# Fallback to legacy loading
+		_load_settings()
+		return
+
+	var schema: Array = [
+		{"key": "use_auto_location", "type": "bool", "default": true, "description": "Auto-detect location via IP"},
+		{"key": "location_query", "type": "string", "default": "", "description": "Custom location query (e.g. 'Seattle, WA')"},
+		{"key": "use_fahrenheit", "type": "bool", "default": false, "description": "Use Fahrenheit instead of Celsius"},
+		{"key": "saved_lat", "type": "float", "default": NAN, "min": -90.0, "max": 90.0, "description": "Cached latitude"},
+		{"key": "saved_lon", "type": "float", "default": NAN, "min": -180.0, "max": 180.0, "description": "Cached longitude"},
+		{"key": "saved_location_name", "type": "string", "default": "", "description": "Cached location name"}
+	]
+
+	registry.register_category("weather", SETTINGS_FILE, schema, _on_setting_changed)
+
+	# Load values from registry with defaults
+	var v_auto = registry.get_setting("weather", "use_auto_location")
+	use_auto_location = v_auto if v_auto != null else true
+	var v_query = registry.get_setting("weather", "location_query")
+	location_query = v_query if v_query != null else ""
+	var v_fahr = registry.get_setting("weather", "use_fahrenheit")
+	use_fahrenheit = v_fahr if v_fahr != null else false
+	var s_lat = registry.get_setting("weather", "saved_lat")
+	var s_lon = registry.get_setting("weather", "saved_lon")
+	saved_lat = NAN if s_lat == null or is_nan(float(s_lat)) else float(s_lat)
+	saved_lon = NAN if s_lon == null or is_nan(float(s_lon)) else float(s_lon)
+	var v_name = registry.get_setting("weather", "saved_location_name")
+	saved_location_name = v_name if v_name != null else ""
+
+func _on_setting_changed(key: String, value: Variant) -> void:
+	var should_refresh = false
+	match key:
+		"use_auto_location":
+			use_auto_location = bool(value)
+			should_refresh = true
+		"location_query":
+			location_query = str(value) if value != null else ""
+			should_refresh = true
+		"use_fahrenheit":
+			var new_val = bool(value)
+			if use_fahrenheit != new_val:
+				use_fahrenheit = new_val
+				_apply_unit_conversion()
+				should_refresh = true
+		"saved_lat":
+			saved_lat = NAN if value == null else float(value)
+		"saved_lon":
+			saved_lon = NAN if value == null else float(value)
+		"saved_location_name":
+			saved_location_name = str(value) if value != null else ""
+
+	if should_refresh:
+		_refresh_weather()
 
 func configure(weather_node: Node, display_node: Node) -> void:
 	weather_system = weather_node
@@ -59,28 +116,45 @@ func is_fahrenheit() -> bool:
 	return use_fahrenheit
 
 func set_use_auto_location(enabled: bool) -> void:
-	use_auto_location = enabled
-	_save_settings()
-	_refresh_weather()
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if registry:
+		registry.set_setting("weather", "use_auto_location", enabled)
+	else:
+		use_auto_location = enabled
+		_save_settings()
+		_refresh_weather()
 
 func set_custom_location(query: String) -> void:
 	var trimmed = query.strip_edges()
-	if trimmed == "":
-		location_query = ""
-		use_auto_location = true
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if registry:
+		if trimmed == "":
+			registry.set_setting("weather", "location_query", "")
+			registry.set_setting("weather", "use_auto_location", true)
+		else:
+			registry.set_setting("weather", "location_query", trimmed)
+			registry.set_setting("weather", "use_auto_location", false)
 	else:
-		location_query = trimmed
-		use_auto_location = false
-	_save_settings()
-	_refresh_weather()
+		if trimmed == "":
+			location_query = ""
+			use_auto_location = true
+		else:
+			location_query = trimmed
+			use_auto_location = false
+		_save_settings()
+		_refresh_weather()
 
 func set_use_fahrenheit(enabled: bool) -> void:
 	if use_fahrenheit == enabled:
 		return
-	use_fahrenheit = enabled
-	_apply_unit_conversion()
-	_save_settings()
-	_refresh_weather()
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if registry:
+		registry.set_setting("weather", "use_fahrenheit", enabled)
+	else:
+		use_fahrenheit = enabled
+		_apply_unit_conversion()
+		_save_settings()
+		_refresh_weather()
 
 func _setup_requests() -> void:
 	ip_request = HTTPRequest.new()
@@ -261,7 +335,13 @@ func _save_location_cache() -> void:
 	saved_lat = location_lat
 	saved_lon = location_lon
 	saved_location_name = location_name
-	_save_settings()
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if registry:
+		registry.set_setting("weather", "saved_lat", saved_lat)
+		registry.set_setting("weather", "saved_lon", saved_lon)
+		registry.set_setting("weather", "saved_location_name", saved_location_name)
+	else:
+		_save_settings()
 
 func _has_saved_location() -> bool:
 	return not is_nan(saved_lat) and not is_nan(saved_lon)

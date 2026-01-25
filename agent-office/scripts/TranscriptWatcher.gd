@@ -10,6 +10,17 @@ const POLL_INTERVAL = OfficeConstants.TRANSCRIPT_POLL_INTERVAL
 const SCAN_INTERVAL = 1.0  # seconds - how often to scan for new sessions (fast to catch subagent sessions)
 const ACTIVE_THRESHOLD = 300  # seconds - consider sessions active if modified within this time (longer than SESSION_INACTIVE_TIMEOUT)
 const PENDING_AGENT_TIMEOUT = 1800  # seconds - consider pending agents stale after this long without updates
+const WATCHER_CONFIG_FILE = "user://watchers.json"
+
+# Harness enable/disable configuration
+var harness_enabled: Dictionary = {
+	"claude": true,
+	"codex": true
+}
+var harness_paths: Dictionary = {
+	"claude": "",
+	"codex": ""
+}
 
 # Track multiple sessions
 var watched_sessions: Dictionary = {}  # file_path -> {position: int, last_modified: int}
@@ -23,8 +34,134 @@ var pending_agents: Dictionary = {}  # tool_use_id -> {agent_type, description, 
 var pending_tools: Dictionary = {}  # tool_use_id -> {tool_name, session_path}
 
 func _ready() -> void:
+	_register_with_settings()
 	# Find and start watching all active sessions
 	scan_for_sessions()
+
+func _register_with_settings() -> void:
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if not registry:
+		_load_config()
+		return
+
+	var schema: Array = [
+		{"key": "claude_enabled", "type": "bool", "default": true, "description": "Enable Claude transcript watcher"},
+		{"key": "codex_enabled", "type": "bool", "default": true, "description": "Enable Codex transcript watcher"},
+		{"key": "claude_path", "type": "string", "default": "", "description": "Custom path for Claude projects"},
+		{"key": "codex_path", "type": "string", "default": "", "description": "Custom path for Codex sessions"}
+	]
+
+	registry.register_category("watchers", WATCHER_CONFIG_FILE, schema, _on_setting_changed)
+
+	# Load values from registry with defaults
+	var v_claude_en = registry.get_setting("watchers", "claude_enabled")
+	harness_enabled["claude"] = v_claude_en if v_claude_en != null else true
+	var v_codex_en = registry.get_setting("watchers", "codex_enabled")
+	harness_enabled["codex"] = v_codex_en if v_codex_en != null else true
+	var v_claude_path = registry.get_setting("watchers", "claude_path")
+	harness_paths["claude"] = v_claude_path if v_claude_path != null else ""
+	var v_codex_path = registry.get_setting("watchers", "codex_path")
+	harness_paths["codex"] = v_codex_path if v_codex_path != null else ""
+
+func _on_setting_changed(key: String, value: Variant) -> void:
+	match key:
+		"claude_enabled":
+			harness_enabled["claude"] = bool(value)
+		"codex_enabled":
+			harness_enabled["codex"] = bool(value)
+		"claude_path":
+			harness_paths["claude"] = str(value) if value != null else ""
+		"codex_path":
+			harness_paths["codex"] = str(value) if value != null else ""
+
+func _load_config() -> void:
+	if not FileAccess.file_exists(WATCHER_CONFIG_FILE):
+		return
+	var file = FileAccess.open(WATCHER_CONFIG_FILE, FileAccess.READ)
+	if not file:
+		return
+	var json = JSON.new()
+	if json.parse(file.get_as_text()) != OK:
+		file.close()
+		return
+	file.close()
+	var data = json.get_data()
+	if not data is Dictionary:
+		return
+	var harnesses = data.get("harnesses", {})
+	if harnesses is Dictionary:
+		for harness_name in harnesses.keys():
+			var h = harnesses[harness_name]
+			if h is Dictionary:
+				if h.has("enabled"):
+					harness_enabled[harness_name] = bool(h["enabled"])
+				if h.has("path"):
+					harness_paths[harness_name] = str(h["path"])
+
+func save_config() -> void:
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if registry:
+		registry.save_category("watchers")
+		return
+
+	# Legacy save
+	var data: Dictionary = {}
+	if FileAccess.file_exists(WATCHER_CONFIG_FILE):
+		var file = FileAccess.open(WATCHER_CONFIG_FILE, FileAccess.READ)
+		if file:
+			var json = JSON.new()
+			if json.parse(file.get_as_text()) == OK and json.data is Dictionary:
+				data = json.data
+			file.close()
+
+	data["version"] = 1
+	data["harnesses"] = {}
+	for harness_name in harness_enabled.keys():
+		data["harnesses"][harness_name] = {
+			"enabled": harness_enabled.get(harness_name, true),
+			"path": harness_paths.get(harness_name, "")
+		}
+
+	var out = FileAccess.open(WATCHER_CONFIG_FILE, FileAccess.WRITE)
+	if out:
+		out.store_string(JSON.stringify(data, "\t"))
+		out.close()
+
+func get_harness_config() -> Dictionary:
+	var result: Dictionary = {}
+	for harness_name in harness_enabled.keys():
+		result[harness_name] = {
+			"enabled": harness_enabled.get(harness_name, true),
+			"path": harness_paths.get(harness_name, "")
+		}
+	return result
+
+func set_harness_enabled(harness: String, enabled: bool) -> void:
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if registry:
+		registry.set_setting("watchers", harness + "_enabled", enabled)
+	else:
+		harness_enabled[harness] = enabled
+
+func set_harness_path(harness: String, path: String) -> void:
+	var registry = get_node_or_null("/root/SettingsRegistry")
+	if registry:
+		registry.set_setting("watchers", harness + "_path", path)
+	else:
+		harness_paths[harness] = path
+
+func get_harness_summary() -> Dictionary:
+	var summary: Dictionary = {}
+	for harness_name in harness_enabled.keys():
+		var active_count = 0
+		for path in watched_sessions.keys():
+			if _derive_harness(path) == harness_name:
+				active_count += 1
+		summary[harness_name] = {
+			"enabled": harness_enabled.get(harness_name, true),
+			"active_sessions": active_count
+		}
+	return summary
 
 func _process(delta: float) -> void:
 	# Poll existing sessions for new entries
@@ -42,13 +179,20 @@ func _process(delta: float) -> void:
 func scan_for_sessions() -> void:
 	var current_time = Time.get_unix_time_from_system()
 
-	_scan_claude_sessions(current_time)
-	_scan_codex_sessions(current_time)
+	if harness_enabled.get("claude", true):
+		_scan_claude_sessions(current_time)
+	if harness_enabled.get("codex", true):
+		_scan_codex_sessions(current_time)
 	_remove_stale_sessions(current_time)
 
 func _scan_claude_sessions(current_time: float) -> void:
-	var home_dir = OS.get_environment("HOME")
-	var projects_dir = home_dir + CLAUDE_PROJECTS_DIR
+	var custom_path = harness_paths.get("claude", "")
+	var projects_dir: String
+	if not custom_path.is_empty():
+		projects_dir = custom_path
+	else:
+		var home_dir = OS.get_environment("HOME")
+		projects_dir = home_dir + CLAUDE_PROJECTS_DIR
 
 	var dir = DirAccess.open(projects_dir)
 	if not dir:
@@ -111,6 +255,9 @@ func _scan_jsonl_recursive(dir_path: String, current_time: float, depth: int) ->
 	dir.list_dir_end()
 
 func _get_codex_sessions_dir() -> String:
+	var custom_path = harness_paths.get("codex", "")
+	if not custom_path.is_empty():
+		return custom_path
 	var codex_home = OS.get_environment("CODEX_HOME")
 	if codex_home.is_empty():
 		var home_dir = OS.get_environment("HOME")
