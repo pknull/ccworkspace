@@ -8,6 +8,8 @@ on:
 env:
   GODOT_VERSION: 4.5
   PROJECT_PATH: agent-office
+  ITCH_USER: pknull
+  ITCH_GAME: inference-inc
 
 jobs:
   export:
@@ -143,3 +145,39 @@ jobs:
             2. Extract and run the application
             3. Start a Claude Code or Codex CLI session
             4. Watch agents appear in the office!
+
+  publish-itch:
+    name: Publish to itch.io
+    needs: export
+    runs-on: ubuntu-latest
+    if: ${{ vars.PUBLISH_ITCH != 'false' }}
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare files
+        run: |
+          mkdir -p release
+          find artifacts -name "*.zip" -exec mv {} release/ \;
+          ls -la release/
+
+      - name: Install Butler
+        run: |
+          curl -L -o butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
+          unzip butler.zip
+          chmod +x butler
+          ./butler -V
+
+      - name: Push to itch.io
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+
+          ./butler push release/inference-inc-${VERSION}-linux-x86_64.zip ${{ env.ITCH_USER }}/${{ env.ITCH_GAME }}:linux --userversion ${VERSION}
+          ./butler push release/inference-inc-${VERSION}-windows-x86_64.zip ${{ env.ITCH_USER }}/${{ env.ITCH_GAME }}:windows --userversion ${VERSION}
+          ./butler push release/inference-inc-${VERSION}-macos-universal.zip ${{ env.ITCH_USER }}/${{ env.ITCH_GAME }}:mac --userversion ${VERSION}
+          ./butler push release/inference-inc-${VERSION}-web.zip ${{ env.ITCH_USER }}/${{ env.ITCH_GAME }}:html5 --userversion ${VERSION}
