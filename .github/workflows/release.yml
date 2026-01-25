@@ -164,20 +164,42 @@ jobs:
           find artifacts -name "*.zip" -exec mv {} release/ \;
           ls -la release/
 
-      - name: Install Butler
-        run: |
-          curl -L -o butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
-          unzip butler.zip
-          chmod +x butler
-          ./butler -V
-
-      - name: Push to itch.io
+      - name: Push Linux to itch.io
+        uses: yeslayla/butler-publish-itchio-action@v1.0.3
         env:
-          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
-        run: |
-          VERSION=${GITHUB_REF_NAME}
+          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
+          CHANNEL: linux
+          ITCH_GAME: ${{ env.ITCH_GAME }}
+          ITCH_USER: ${{ env.ITCH_USER }}
+          PACKAGE: release/inference-inc-${{ github.ref_name }}-linux-x86_64.zip
+          VERSION: ${{ github.ref_name }}
 
-          ./butler push release/inference-inc-${VERSION}-linux-x86_64.zip ${{ env.ITCH_USER }}/${{ env.ITCH_GAME }}:linux --userversion ${VERSION}
-          ./butler push release/inference-inc-${VERSION}-windows-x86_64.zip ${{ env.ITCH_USER }}/${{ env.ITCH_GAME }}:windows --userversion ${VERSION}
-          ./butler push release/inference-inc-${VERSION}-macos-universal.zip ${{ env.ITCH_USER }}/${{ env.ITCH_GAME }}:mac --userversion ${VERSION}
-          ./butler push release/inference-inc-${VERSION}-web.zip ${{ env.ITCH_USER }}/${{ env.ITCH_GAME }}:html5 --userversion ${VERSION}
+      - name: Push Windows to itch.io
+        uses: yeslayla/butler-publish-itchio-action@v1.0.3
+        env:
+          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
+          CHANNEL: windows
+          ITCH_GAME: ${{ env.ITCH_GAME }}
+          ITCH_USER: ${{ env.ITCH_USER }}
+          PACKAGE: release/inference-inc-${{ github.ref_name }}-windows-x86_64.zip
+          VERSION: ${{ github.ref_name }}
+
+      - name: Push macOS to itch.io
+        uses: yeslayla/butler-publish-itchio-action@v1.0.3
+        env:
+          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
+          CHANNEL: mac
+          ITCH_GAME: ${{ env.ITCH_GAME }}
+          ITCH_USER: ${{ env.ITCH_USER }}
+          PACKAGE: release/inference-inc-${{ github.ref_name }}-macos-universal.zip
+          VERSION: ${{ github.ref_name }}
+
+      - name: Push Web to itch.io
+        uses: yeslayla/butler-publish-itchio-action@v1.0.3
+        env:
+          BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
+          CHANNEL: html5
+          ITCH_GAME: ${{ env.ITCH_GAME }}
+          ITCH_USER: ${{ env.ITCH_USER }}
+          PACKAGE: release/inference-inc-${{ github.ref_name }}-web.zip
+          VERSION: ${{ github.ref_name }}
