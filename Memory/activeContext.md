@@ -1,9 +1,9 @@
 ---
-version: "2.3"
-lastUpdated: "2026-01-24 UTC"
+version: "2.4"
+lastUpdated: "2026-01-25 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - Furniture grid preview system and taskboard collision"
+changeTrigger: "Session save - Centralized SettingsRegistry and universal MCP tools"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -21,6 +21,26 @@ dependencies: ["communicationStyle.md"]
 - Agent mood system (tired/frustrated/irate)
 
 **Recent Activities** (last 7 days):
+- **2026-01-25 (Session 14)**: Centralized SettingsRegistry system:
+  - **Goal**: Create universal settings system where components register settings with metadata, MCP discovers dynamically
+  - **Created**: `scripts/SettingsRegistry.gd` - Core registry with schema validation, persistence, change signals
+  - **Modified**:
+    - `project.godot` - Added SettingsRegistry to AutoLoad
+    - `AudioManager.gd` - Registers 5 settings (typing/meow/achievement/office volumes, sounds_enabled)
+    - `WeatherService.gd` - Registers 6 settings (auto_location, location_query, fahrenheit, cached coords)
+    - `TranscriptWatcher.gd` - Registers 4 settings, added missing `get_harness_config()`, `set_harness_enabled()`, `set_harness_path()`, `save_config()`, `get_harness_summary()`
+    - `McpServer.gd` - Registers 3 settings (enabled, port, bind_address), replaced manual tools
+  - **New MCP Tools**:
+    - `list_settings` - Returns schemas for all categories
+    - `get_settings` - Returns current values (optional category filter)
+    - `set_setting` - Sets any setting with validation
+  - **Architecture**:
+    - In-game UI → Component methods → SettingsRegistry → JSON persistence
+    - MCP tools → SettingsRegistry → callback to components
+    - Adding new settings: just add to component's schema array, MCP discovers automatically
+  - **Bug fix**: Removed `class_name` from autoloaded SettingsRegistry (conflicts with autoload singleton)
+  - **Code review**: Fixed null safety issues in all registry value reads
+
 - **2026-01-24 (Session 13)**: Furniture grid preview system:
   - **Feature**: Added visual feedback during furniture dragging:
     - 7x7 grid overlay centered on item (subtle white cells)
@@ -395,4 +415,20 @@ Debug visualizations should query NavigationGrid directly rather than maintainin
 ```gdscript
 for obstacle_id in navigation_grid.get_all_obstacle_ids():
     var bounds = navigation_grid.get_obstacle_bounds(obstacle_id)
+```
+
+### AutoLoad vs class_name Conflict
+Scripts added to AutoLoad cannot also have `class_name` declarations - Godot treats them as conflicting global identifiers. Remove `class_name` from autoloaded scripts; access via `/root/NodeName` instead.
+
+### Registry Pattern for Settings
+Centralize settings via registry where components register schemas with metadata (type, range, description). Benefits:
+- New settings auto-discovered by external tools (MCP)
+- Validation happens once in registry
+- Components receive change callbacks
+- Single persistence layer
+Pattern:
+```gdscript
+func _ready():
+    var registry = get_node_or_null("/root/SettingsRegistry")
+    registry.register_category("audio", "user://audio.json", schema, _on_change)
 ```
