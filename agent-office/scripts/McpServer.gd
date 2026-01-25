@@ -644,6 +644,50 @@ func _list_tools() -> Array[Dictionary]:
 					"profile_id": {"type": "integer", "description": "Agent profile ID"}
 				}
 			}
+		},
+		{
+			"name": "get_settings",
+			"description": "Get current office settings (volume, watchers, weather config).",
+			"inputSchema": {
+				"type": "object",
+				"properties": {}
+			}
+		},
+		{
+			"name": "set_volume",
+			"description": "Set audio volume levels (0.0 to 1.0).",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"typing": {"type": "number", "description": "Typing sound volume (0.0-1.0)"},
+					"meow": {"type": "number", "description": "Cat meow volume (0.0-1.0)"},
+					"achievement": {"type": "number", "description": "Achievement sound volume (0.0-1.0)"}
+				}
+			}
+		},
+		{
+			"name": "set_watcher",
+			"description": "Enable or disable a harness watcher.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"harness": {"type": "string", "description": "Harness name: claude, codex, opencode, gemini"},
+					"enabled": {"type": "boolean", "description": "Enable (true) or disable (false)"},
+					"path": {"type": "string", "description": "Path for opencode/gemini watchers (optional)"}
+				},
+				"required": ["harness", "enabled"]
+			}
+		},
+		{
+			"name": "set_weather_config",
+			"description": "Configure weather display settings. Empty location enables auto-detection.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {
+					"location": {"type": "string", "description": "Location query (e.g., 'Seattle, WA'). Empty string for auto-detect."},
+					"units": {"type": "string", "description": "Temperature units: celsius or fahrenheit"}
+				}
+			}
 		}
 	]
 
@@ -697,6 +741,14 @@ func _call_tool(params) -> Dictionary:
 			return _tool_list_roster(args)
 		"fire_agent":
 			return _tool_fire_agent(args)
+		"get_settings":
+			return _tool_get_settings(args)
+		"set_volume":
+			return _tool_set_volume(args)
+		"set_watcher":
+			return _tool_set_watcher(args)
+		"set_weather_config":
+			return _tool_set_weather_config(args)
 		_:
 			return _tool_error("Unknown tool")
 
@@ -1319,6 +1371,138 @@ func _tool_fire_agent(args: Dictionary) -> Dictionary:
 		return _tool_ok("Fired %s" % agent_name)
 	else:
 		return _tool_error("Failed to fire %s" % agent_name)
+
+func _tool_get_settings(_args: Dictionary) -> Dictionary:
+	if not office_manager:
+		return _tool_error("No office_manager")
+
+	var settings: Dictionary = {}
+
+	# Volume settings
+	if office_manager.audio_manager:
+		var am = office_manager.audio_manager
+		settings["volume"] = {
+			"typing": am.typing_volume if "typing_volume" in am else 1.0,
+			"meow": am.meow_volume if "meow_volume" in am else 1.0,
+			"achievement": am.achievement_volume if "achievement_volume" in am else 1.0
+		}
+
+	# Watcher settings
+	if office_manager.transcript_watcher:
+		var tw = office_manager.transcript_watcher
+		if tw.has_method("get_harness_config"):
+			settings["watchers"] = tw.get_harness_config()
+		elif tw.has_method("get_harness_summary"):
+			settings["watchers"] = tw.get_harness_summary()
+
+	# Weather settings
+	if office_manager.weather_service:
+		var ws = office_manager.weather_service
+		settings["weather"] = {
+			"location": ws.location_query if "location_query" in ws else "",
+			"auto_location": ws.use_auto_location if "use_auto_location" in ws else true,
+			"units": "fahrenheit" if (ws.use_fahrenheit if "use_fahrenheit" in ws else false) else "celsius",
+			"location_name": ws.location_name if "location_name" in ws else ""
+		}
+
+	return _tool_json(settings)
+
+func _tool_set_volume(args: Dictionary) -> Dictionary:
+	if not office_manager or not office_manager.audio_manager:
+		return _tool_error("No audio_manager")
+
+	var am = office_manager.audio_manager
+	var changes: Array[String] = []
+
+	if args.has("typing"):
+		var vol = clamp(float(args["typing"]), 0.0, 1.0)
+		if am.has_method("set_typing_volume"):
+			am.set_typing_volume(vol)
+		else:
+			am.typing_volume = vol
+		changes.append("typing=%.1f" % vol)
+
+	if args.has("meow"):
+		var vol = clamp(float(args["meow"]), 0.0, 1.0)
+		if am.has_method("set_meow_volume"):
+			am.set_meow_volume(vol)
+		else:
+			am.meow_volume = vol
+		changes.append("meow=%.1f" % vol)
+
+	if args.has("achievement"):
+		var vol = clamp(float(args["achievement"]), 0.0, 1.0)
+		if am.has_method("set_achievement_volume"):
+			am.set_achievement_volume(vol)
+		else:
+			am.achievement_volume = vol
+		changes.append("achievement=%.1f" % vol)
+
+	if changes.is_empty():
+		return _tool_error("No volume settings specified")
+
+	return _tool_ok("Volume updated: " + ", ".join(changes))
+
+func _tool_set_watcher(args: Dictionary) -> Dictionary:
+	if not office_manager or not office_manager.transcript_watcher:
+		return _tool_error("No transcript_watcher")
+
+	var harness = str(args.get("harness", "")).strip_edges().to_lower()
+	var enabled = bool(args.get("enabled", false))
+	var path = str(args.get("path", "")).strip_edges()
+
+	var valid_harnesses = ["claude", "codex", "opencode", "gemini"]
+	if not harness in valid_harnesses:
+		return _tool_error("Invalid harness. Valid: " + ", ".join(valid_harnesses))
+
+	var tw = office_manager.transcript_watcher
+	if tw.has_method("set_harness_enabled"):
+		tw.set_harness_enabled(harness, enabled)
+		if not path.is_empty() and tw.has_method("set_harness_path"):
+			tw.set_harness_path(harness, path)
+		if tw.has_method("save_config"):
+			tw.save_config()
+		var status = "enabled" if enabled else "disabled"
+		var msg = "%s watcher %s" % [harness.capitalize(), status]
+		if not path.is_empty():
+			msg += " (path: %s)" % path
+		return _tool_ok(msg)
+	else:
+		return _tool_error("Watcher configuration not supported")
+
+func _tool_set_weather_config(args: Dictionary) -> Dictionary:
+	if not office_manager or not office_manager.weather_service:
+		return _tool_error("No weather_service")
+
+	var ws = office_manager.weather_service
+	var changes: Array[String] = []
+
+	if args.has("location"):
+		var loc = str(args["location"]).strip_edges()
+		if ws.has_method("set_custom_location"):
+			ws.set_custom_location(loc)
+			if loc.is_empty():
+				changes.append("location=auto")
+			else:
+				changes.append("location='%s'" % loc)
+		else:
+			ws.location_query = loc
+			ws.use_auto_location = loc.is_empty()
+			changes.append("location='%s'" % loc)
+
+	if args.has("units"):
+		var units = str(args["units"]).strip_edges().to_lower()
+		var use_f = units == "fahrenheit" or units == "f"
+		if ws.has_method("set_use_fahrenheit"):
+			ws.set_use_fahrenheit(use_f)
+		else:
+			ws.use_fahrenheit = use_f
+		changes.append("units=%s" % ("fahrenheit" if use_f else "celsius"))
+
+	if changes.is_empty():
+		return _tool_error("No weather settings specified (valid: location, units)")
+
+	return _tool_ok("Weather config updated: " + ", ".join(changes))
 
 func _tool_json(data: Dictionary) -> Dictionary:
 	return {
