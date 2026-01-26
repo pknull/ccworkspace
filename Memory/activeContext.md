@@ -1,9 +1,9 @@
 ---
-version: "2.4"
-lastUpdated: "2026-01-25 UTC"
+version: "2.5"
+lastUpdated: "2026-01-26 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - Centralized SettingsRegistry and universal MCP tools"
+changeTrigger: "Session save - Fixed orchestrator respawn and monitor cleanup bugs"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -21,6 +21,17 @@ dependencies: ["communicationStyle.md"]
 - Agent mood system (tired/frustrated/irate)
 
 **Recent Activities** (last 7 days):
+- **2026-01-26 (Session 15)**: Fixed orchestrator respawn and monitor cleanup bugs:
+  - **Bug report**: User noticed agents not appearing despite active Claude sessions elsewhere, plus orphan monitors (3 on, only 2 agents)
+  - **Root cause 1 - Missing orchestrator respawn**: TranscriptWatcher only emits `session_start` when session first detected. If orchestrator leaves (idle timeout) while session still watched, it can't respawn when activity resumes.
+  - **Root cause 2 - Monitor cleanup gap**: `force_complete()` in SPAWNING/WALKING_TO_DESK states skipped directly to LEAVING without releasing desk or turning off monitor
+  - **Fixes implemented**:
+    - `Agent.gd force_complete()` - Now releases desk and turns off monitor when bypassing early states
+    - `Agent.gd _exit_tree()` - Explicitly turns off monitor as safety net before releasing desk
+    - `TranscriptWatcher.gd` - New `session_activity` event emitted when new content detected on watched session
+    - `OfficeManager.gd` - New `_handle_session_activity()` respawns missing orchestrators
+  - **Verification**: After restart, asha-marketplace session (`orch_60dd8fe6`) appeared correctly alongside ccworkspace session
+
 - **2026-01-25 (Session 14)**: Centralized SettingsRegistry system:
   - **Goal**: Create universal settings system where components register settings with metadata, MCP discovers dynamically
   - **Created**: `scripts/SettingsRegistry.gd` - Core registry with schema validation, persistence, change signals
@@ -432,3 +443,18 @@ func _ready():
     var registry = get_node_or_null("/root/SettingsRegistry")
     registry.register_category("audio", "user://audio.json", schema, _on_change)
 ```
+
+### Multi-Path Cleanup Safety Net
+When agents can leave through multiple paths (idle timeout, force_complete with bypass, normal completion, _exit_tree), ALL paths must properly clean up resources. Add explicit cleanup in _exit_tree() as a safety net even if normal paths should handle it:
+```gdscript
+func _exit_tree() -> void:
+    if is_instance_valid(assigned_desk):
+        assigned_desk.set_monitor_active(false)  # Safety net
+        assigned_desk.set_occupied(false, agent_id)
+```
+
+### Session Detection vs Activity Pattern
+Distinguish between one-time detection (`session_start` when first discovered) and ongoing activity (`session_activity` when content added). Enables proper lifecycle management when entities can leave and return:
+- `session_start` - First detection, spawn orchestrator
+- `session_activity` - Content detected, respawn if orchestrator missing
+- `session_end` - Session stale, orchestrator leaves

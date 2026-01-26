@@ -342,15 +342,30 @@ func check_session_for_entries(file_path: String) -> void:
 	file.seek(session.position)
 
 	# Read new lines
+	var had_content = false
 	while not file.eof_reached():
 		var line = file.get_line()
 		if line.strip_edges().is_empty():
 			continue
+		had_content = true
 		process_line(line, file_path)
 
 	# Update position
 	watched_sessions[file_path].position = file.get_position()
 	file.close()
+
+	# Emit session_activity so OfficeManager can respawn missing orchestrators
+	if had_content:
+		var session_id = _derive_session_id(file_path)
+		var harness = _derive_harness(file_path)
+		event_received.emit({
+			"event": "session_activity",
+			"session_id": session_id,
+			"session_path": file_path,
+			"harness_id": harness,
+			"harness_label": harness.capitalize() if harness else "",
+			"timestamp": Time.get_datetime_string_from_system()
+		})
 
 func process_line(line: String, session_path: String = "") -> void:
 	var json = JSON.new()

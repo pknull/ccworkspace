@@ -252,8 +252,11 @@ func _exit_tree() -> void:
 		if is_in_meeting and office_manager.has_method("_release_meeting_spot"):
 			office_manager._release_meeting_spot(agent_id)
 
-	# Release desk reservation
+	# Release desk reservation and ensure monitor is off
 	if is_instance_valid(assigned_desk):
+		# Explicitly turn off monitor as safety net (in case release doesn't find agent)
+		if assigned_desk.has_method("set_monitor_active"):
+			assigned_desk.set_monitor_active(false)
 		assigned_desk.set_occupied(false, agent_id)
 		if assigned_desk.has_method("hide_tool"):
 			assigned_desk.hide_tool()
@@ -1555,6 +1558,12 @@ func force_complete(bypass_min_time: bool = false) -> void:
 					visuals.status_label.text = "Wrapping up meeting..."
 		State.SPAWNING, State.WALKING_TO_DESK:
 			if bypass_min_time:
+				# Release desk before leaving (was reserved but agent never arrived)
+				if is_instance_valid(assigned_desk):
+					if assigned_desk.has_method("set_monitor_active"):
+						assigned_desk.set_monitor_active(false)
+					assigned_desk.set_occupied(false, agent_id)
+				assigned_desk = null
 				# Skip to leaving immediately
 				state = State.LEAVING
 				spawn_timer = OfficeConstants.AGENT_EXIT_FADE_TIME

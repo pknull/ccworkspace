@@ -1319,6 +1319,9 @@ func _on_event_received(event_data: Dictionary) -> void:
 	if event_type == "session_exit":
 		_handle_session_exit(event_data)
 		return
+	if event_type == "session_activity":
+		_handle_session_activity(event_data)
+		return
 
 	# Update status
 	var tool_name = event_data.get("tool", "")
@@ -1404,6 +1407,31 @@ func _handle_session_exit(data: Dictionary) -> void:
 			orchestrator.force_complete()
 		_update_taskboard()
 	_prune_session_agent_ids(session_path.get_file().get_basename() if session_path else session_id)
+
+func _handle_session_activity(data: Dictionary) -> void:
+	# Activity detected on a watched session - respawn orchestrator if missing
+	var session_id = data.get("session_id", "")
+	var session_path = data.get("session_path", "")
+	var harness_id = data.get("harness_id", "")
+	var harness_label = data.get("harness_label", "")
+	if not session_id:
+		return
+
+	var orch_id = "orch_" + _get_session_short_id(session_id)
+	# Only spawn if orchestrator doesn't exist (left due to idle timeout)
+	if not active_agents.has(orch_id):
+		print("[OfficeManager] Session activity - respawning orchestrator: %s" % _get_session_short_id(session_id))
+		var orch_data = {
+			"agent_id": orch_id,
+			"agent_type": "orchestrator",
+			"description": "Session: " + _get_session_short_id(session_id),
+			"session_path": session_path,
+			"harness_id": harness_id,
+			"harness_label": harness_label,
+			"is_orchestrator": true
+		}
+		_handle_agent_spawn(orch_data)
+		_update_taskboard()
 
 func _on_weather_updated(temperature: float, condition: String, location: String) -> void:
 	# Weather service fetched new data - update display if not overridden
