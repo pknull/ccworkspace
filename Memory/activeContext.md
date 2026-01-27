@@ -1,9 +1,9 @@
 ---
-version: "2.5"
-lastUpdated: "2026-01-26 UTC"
+version: "2.6"
+lastUpdated: "2026-01-27 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - Fixed orchestrator respawn and monitor cleanup bugs"
+changeTrigger: "Session save - v2.0.2 release: desk collision fix, monitor cleanup, typing sounds"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -12,7 +12,7 @@ dependencies: ["communicationStyle.md"]
 
 ## Current Project Status
 
-**Primary Focus**: Feature-complete office simulation - user considers project essentially done
+**Primary Focus**: Feature-complete office simulation - published on itch.io
 
 **Active Work**:
 - Weather system with rain/snow particles
@@ -21,6 +21,20 @@ dependencies: ["communicationStyle.md"]
 - Agent mood system (tired/frustrated/irate)
 
 **Recent Activities** (last 7 days):
+- **2026-01-27 (Session 16)**: v2.0.2 release - desk collision fix, monitor cleanup, typing sounds:
+  - **Bug report 1**: Typing sounds continue after agent leaves desk
+  - **Fix**: Added `stop_typing()` method to AudioManager, called in `complete_work()` and `_start_leaving()`
+  - **Bug report 2**: Desk collision boxes don't move when desks are moved
+  - **Root cause 1**: Signal signature mismatch - DraggableItem emits `(item_name: String, position)` but `_on_desk_position_changed` expected `(desk: FurnitureDesk, position)`
+  - **Root cause 2**: Inconsistent obstacle IDs - `_add_desk` registered with `furniture_id` but move handler used `get_instance_id()`
+  - **Fixes**:
+    - `FurnitureDesk._input()` - Override drag end to emit `(self, position)` matching handler expectation
+    - `OfficeManager._add_desk()` - Use `get_instance_id()` for obstacle registration
+    - `OfficeManager._remove_desk()` - Always use `get_instance_id()` for consistency
+  - **Cleanup**: Removed unused `tasks_failed` tracking from AgentProfile, AgentRoster, AgentStable, McpServer, ProfilePopup
+  - **Monitor cleanup hardening**: `force_complete()` now explicitly turns off monitor for IDLE/CHATTING/WANDERING/FURNITURE_TOUR states and during DELIVERING/SOCIALIZING/LEAVING/COMPLETING states
+  - **Release**: Tagged v2.0.2, pushed to GitHub, CI workflow building Linux/Windows/macOS exports
+
 - **2026-01-26 (Session 15)**: Fixed orchestrator respawn and monitor cleanup bugs:
   - **Bug report**: User noticed agents not appearing despite active Claude sessions elsewhere, plus orphan monitors (3 on, only 2 agents)
   - **Root cause 1 - Missing orchestrator respawn**: TranscriptWatcher only emits `session_start` when session first detected. If orchestrator leaves (idle timeout) while session still watched, it can't respawn when activity resumes.
@@ -284,12 +298,8 @@ Port 9999, JSON messages with `"event"` field:
 - [x] All bugs fixed (floor boundary, cat stuck, drag popups, tie color)
 - [x] Agent.gd refactor complete (51% reduction)
 - [x] Comprehensive smoke test suite (22 tests, 5 modes)
-- [ ] **Set up itch.io publishing workflow** (user doing tonight)
-  - Create itch.io account/project
-  - Export Godot builds (Windows/Linux/macOS/Web)
-  - Set up GitHub Action with Butler
-  - Configure Butler credentials as secret
-- [ ] First public release on itch.io
+- [x] Set up itch.io publishing workflow (GitHub Actions with Butler)
+- [x] v2.0.2 released - desk collision fix, monitor cleanup, typing sounds
 
 **Blocked**:
 - None
@@ -458,3 +468,13 @@ Distinguish between one-time detection (`session_start` when first discovered) a
 - `session_start` - First detection, spawn orchestrator
 - `session_activity` - Content detected, respawn if orchestrator missing
 - `session_end` - Session stale, orchestrator leaves
+
+### Signal Signature Mismatch with Inheritance
+When a base class defines a signal with one signature (e.g., `(item_name: String, position)`) but handlers expect a different signature (e.g., `(item: Node, position)`), GDScript's dynamic signal system will pass whatever is emitted. The handler receives wrong types and method calls fail silently or crash. Fix: Override the signal emission in subclasses to match handler expectations.
+
+### Consistent IDs for Navigation Grid Operations
+When registering/unregistering obstacles in NavigationGrid, use the SAME ID scheme everywhere:
+- `_register_with_navigation_grid()` uses `"desk_%d" % desk.get_instance_id()`
+- `_add_desk()` must use same format, NOT `desk.furniture_id`
+- `_remove_desk()` and `_on_desk_position_changed()` must use same format
+Using different ID schemes causes unregister calls to silently fail (obstacle not found).
