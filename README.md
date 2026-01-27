@@ -6,7 +6,7 @@ A virtual office that visualizes your Claude Code sessions. Little agents spawn,
 
 ## What is this?
 
-Inference Inc. is a desktop companion app that connects to Claude Code via MCP and spawns animated office workers when agents start working. They:
+Inference Inc. is a desktop companion app that watches your Claude Code session files and spawns animated office workers when agents start working. They:
 
 - Walk to desks and type while working
 - Show what tool they're currently using
@@ -34,22 +34,13 @@ Download the latest release for your platform:
 - [itch.io](https://pknull.itch.io/inference-inc)
 - [GitHub Releases](https://github.com/pknull/ccworkspace/releases)
 
-### MCP Setup
+### How it works
 
-Add this to your Claude Code MCP configuration (`~/.claude/settings.json`):
+The app monitors your Claude Code session transcript files (in `~/.claude/projects/`) and detects when agents spawn, use tools, and complete work. No configuration needed - just run it alongside Claude Code.
 
-```json
-{
-  "mcpServers": {
-    "agent-office": {
-      "command": "nc",
-      "args": ["localhost", "9999"]
-    }
-  }
-}
-```
+### Optional: MCP Server
 
-Or configure the built-in MCP server (Settings menu in-app).
+The app includes an MCP server for external control of office features (spawn agents manually, move furniture, change settings). Enable it in the Settings menu if you want Claude to interact with the office.
 
 ## Requirements
 
