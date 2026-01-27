@@ -974,14 +974,23 @@ func _process_wandering(delta: float) -> void:
 func _start_leaving() -> void:
 	_log_debug_event("STATE", "Leaving office")
 
+	# Stop typing sounds
+	if audio_manager and audio_manager.has_method("stop_typing"):
+		audio_manager.stop_typing()
+
 	# Release any interaction point before leaving
 	_release_current_interaction_point()
 
 	state = State.LEAVING
 	# Release desk and turn off monitor before leaving
 	if is_instance_valid(assigned_desk):
+		# Explicitly turn off monitor (set_occupied may not trigger on_released if already cleared)
+		if assigned_desk.has_method("set_monitor_active"):
+			assigned_desk.set_monitor_active(false)
 		if assigned_desk.has_method("hide_tool"):
 			assigned_desk.hide_tool()
+		if assigned_desk.has_method("clear_personal_items"):
+			assigned_desk.clear_personal_items()
 		assigned_desk.set_occupied(false, agent_id)
 	assigned_desk = null
 	_build_path_to(door_position)
@@ -1319,10 +1328,16 @@ func complete_work() -> void:
 	_log_debug_event("STATE", "Work completed (%.1fs)" % work_elapsed)
 	# Record task duration for speed achievements
 	last_task_duration = work_elapsed
+	# Stop typing sounds immediately
+	if audio_manager and audio_manager.has_method("stop_typing"):
+		audio_manager.stop_typing()
 	_create_document()
-	# Clear personal items and tool display from desk
+	# Clear personal items and tool display from desk, turn off monitor
 	_clear_personal_items_from_desk()
 	if is_instance_valid(assigned_desk):
+		# Explicitly turn off monitor before releasing
+		if assigned_desk.has_method("set_monitor_active"):
+			assigned_desk.set_monitor_active(false)
 		if assigned_desk.has_method("hide_tool"):
 			assigned_desk.hide_tool()
 		assigned_desk.set_occupied(false, agent_id)
@@ -1571,11 +1586,34 @@ func force_complete(bypass_min_time: bool = false) -> void:
 				pending_completion = true
 				if visuals and visuals.status_label:
 					visuals.status_label.text = "Finishing up..."
-		State.IDLE:
+		State.IDLE, State.CHATTING, State.WANDERING, State.FURNITURE_TOUR:
+			# Release desk and turn off monitor before completing
+			if is_instance_valid(assigned_desk):
+				if assigned_desk.has_method("set_monitor_active"):
+					assigned_desk.set_monitor_active(false)
+				if assigned_desk.has_method("hide_tool"):
+					assigned_desk.hide_tool()
+				if assigned_desk.has_method("clear_personal_items"):
+					assigned_desk.clear_personal_items()
+				assigned_desk.set_occupied(false, agent_id)
+			assigned_desk = null
+			# End any chat in progress
+			if chatting_with:
+				chatting_with = null
+			furniture_tour_active = false
 			state = State.COMPLETING
 			spawn_timer = OfficeConstants.AGENT_SPAWN_FADE_TIME
 		State.DELIVERING, State.SOCIALIZING, State.LEAVING, State.COMPLETING:
-			pass  # Already on their way out
+			# Already on their way out, but ensure monitor is off
+			if is_instance_valid(assigned_desk):
+				if assigned_desk.has_method("set_monitor_active"):
+					assigned_desk.set_monitor_active(false)
+				if assigned_desk.has_method("hide_tool"):
+					assigned_desk.hide_tool()
+				if assigned_desk.has_method("clear_personal_items"):
+					assigned_desk.clear_personal_items()
+				assigned_desk.set_occupied(false, agent_id)
+				assigned_desk = null
 
 func show_tool(tool_name: String) -> void:
 	current_tool = tool_name

@@ -951,7 +951,6 @@ func _tool_get_agent_profile(args: Dictionary) -> Dictionary:
 		"level": profile.level,
 		"xp": profile.xp,
 		"tasks_completed": profile.tasks_completed,
-		"tasks_failed": profile.tasks_failed,
 		"total_work_time_hours": profile.get_work_time_hours(),
 		"badges": profile.badges,
 		"skills": profile.skills,

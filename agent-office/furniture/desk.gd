@@ -143,11 +143,33 @@ func _build_visuals() -> void:
 	tool_label.z_index = 1
 	add_child(tool_label)
 
-# Override drag to prevent when occupied
+# Override drag to prevent when occupied AND emit correct signal type
 func _input(event: InputEvent) -> void:
 	# Only allow dragging when desk is empty
 	if not is_empty():
 		return
+
+	# Handle drag end specially to emit (self, position) instead of (item_name, position)
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT and not event.pressed and is_dragging:
+			is_dragging = false
+			var snapped_pos = _snap_to_grid(position)
+			var original_snapped = snapped_pos
+
+			if navigation_grid:
+				var test_rect = _get_obstacle_rect(snapped_pos)
+				if not navigation_grid.can_place_obstacle(test_rect, item_name):
+					snapped_pos = navigation_grid.find_nearest_valid_position(test_rect, item_name)
+					if OfficeConstants.DEBUG_EVENTS:
+						print("[FurnitureDesk] %s: position adjusted from %s to %s (collision detected)" % [item_name, original_snapped, snapped_pos])
+
+			position = snapped_pos
+			_cleanup_drag_visuals()
+			# Emit with self (FurnitureDesk) instead of item_name (String)
+			# This matches what _on_desk_position_changed expects
+			position_changed.emit(self, position)
+			return
+
 	super._input(event)
 
 # Override obstacle rect calculation for desk+work area

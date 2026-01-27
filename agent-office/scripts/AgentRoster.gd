@@ -314,15 +314,6 @@ func record_task_completed(agent_id: int, skill_name: String, work_time: float) 
 	save_profile(profile)
 	roster_changed.emit()
 
-func record_task_failed(agent_id: int, skill_name: String, work_time: float) -> void:
-	if not agents.has(agent_id):
-		return
-
-	var profile = agents[agent_id]
-	profile.add_task_failed(skill_name, work_time)
-	save_profile(profile)
-	roster_changed.emit()
-
 func record_tool_use(agent_id: int, tool_name: String) -> void:
 	if not agents.has(agent_id):
 		print("[AgentRoster] WARNING: record_tool_use for unknown agent %d" % agent_id)

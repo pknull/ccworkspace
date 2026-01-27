@@ -184,6 +184,11 @@ func play_typing() -> void:
 	typing_player.pitch_scale = randf_range(0.9, 1.1)
 	typing_player.play()
 
+# Called when agent stops working to cut off typing sounds
+func stop_typing() -> void:
+	if typing_player:
+		typing_player.stop()
+
 # Called by cat to meow
 func play_meow() -> void:
 	if not sounds_enabled or not meow_player.stream:

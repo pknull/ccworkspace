@@ -56,7 +56,6 @@ var level: int = 1
 
 # Stats
 var tasks_completed: int = 0
-var tasks_failed: int = 0
 var total_work_time_seconds: float = 0.0
 var orchestrator_sessions: int = 0
 
@@ -156,18 +155,6 @@ func add_task_completed(skill_name: String, work_time: float) -> int:
 
 	return _recalculate_level()
 
-func add_task_failed(skill_name: String, work_time: float) -> void:
-	tasks_failed += 1
-	total_work_time_seconds += work_time
-	last_seen = _get_iso_timestamp()
-
-	# Update skill (still counts as experience)
-	if not skills.has(skill_name):
-		skills[skill_name] = {"tasks": 0, "time": 0.0}
-	skills[skill_name]["time"] += work_time
-
-	# No XP for failed tasks
-
 func add_tool_use(tool_name: String) -> int:
 	# Returns new level if leveled up, 0 otherwise
 	if not tools.has(tool_name):
@@ -202,12 +189,6 @@ func add_orchestrator_session() -> int:
 # =============================================================================
 # STATS QUERIES
 # =============================================================================
-
-func get_success_rate() -> float:
-	var total = tasks_completed + tasks_failed
-	if total == 0:
-		return 0.0
-	return float(tasks_completed) / float(total) * 100.0
 
 func get_total_tool_uses() -> int:
 	var total = 0
@@ -255,7 +236,6 @@ func to_dict() -> Dictionary:
 		},
 		"stats": {
 			"tasks_completed": tasks_completed,
-			"tasks_failed": tasks_failed,
 			"total_work_time_seconds": total_work_time_seconds,
 			"orchestrator_sessions": orchestrator_sessions,
 		},
@@ -296,7 +276,6 @@ static func from_dict(data: Dictionary) -> AgentProfile:
 
 	var stats = data.get("stats", {})
 	profile.tasks_completed = stats.get("tasks_completed", 0)
-	profile.tasks_failed = stats.get("tasks_failed", 0)
 	profile.total_work_time_seconds = stats.get("total_work_time_seconds", 0.0)
 	profile.orchestrator_sessions = stats.get("orchestrator_sessions", 0)
 

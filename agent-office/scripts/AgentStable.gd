@@ -25,7 +25,6 @@ class AgentRecord:
 	var agent_type: String = ""
 	var display_name: String = ""
 	var tasks_completed: int = 0
-	var tasks_failed: int = 0
 	var total_work_time_seconds: float = 0.0
 	var tools_used: Dictionary = {}  # tool_name -> count
 	var first_seen: String = ""  # ISO 8601 timestamp
@@ -68,7 +67,6 @@ class AgentRecord:
 			"agent_type": agent_type,
 			"display_name": display_name,
 			"tasks_completed": tasks_completed,
-			"tasks_failed": tasks_failed,
 			"total_work_time_seconds": total_work_time_seconds,
 			"tools_used": tools_used,
 			"first_seen": first_seen,
@@ -87,7 +85,6 @@ class AgentRecord:
 		var record = AgentRecord.new(data.get("agent_type", ""))
 		record.display_name = data.get("display_name", record.display_name)
 		record.tasks_completed = data.get("tasks_completed", 0)
-		record.tasks_failed = data.get("tasks_failed", 0)
 		record.total_work_time_seconds = data.get("total_work_time_seconds", 0.0)
 		record.tools_used = data.get("tools_used", {})
 		record.first_seen = data.get("first_seen", record.first_seen)
@@ -225,8 +222,7 @@ func record_completion(agent_type: String, work_time: float, success: bool = tru
 
 	if success:
 		record.tasks_completed += 1
-	else:
-		record.tasks_failed += 1
+	# Note: failed tasks not tracked
 
 	record.total_work_time_seconds += work_time
 	record.last_seen = AgentRecord._get_iso_timestamp()

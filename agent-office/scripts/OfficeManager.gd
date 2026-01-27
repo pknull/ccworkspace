@@ -2812,8 +2812,8 @@ func _remove_desk(desk_index: int) -> bool:
 	if not desk.is_empty():
 		return false
 
-	# Unregister from navigation grid
-	var desk_id = desk.furniture_id if desk.furniture_id != "" else "desk_%d" % desk.get_instance_id()
+	# Unregister from navigation grid - always use instance_id for consistency
+	var desk_id = "desk_%d" % desk.get_instance_id()
 	navigation_grid.unregister_obstacle(desk_id)
 
 	# Unregister from trait furniture system
@@ -2842,14 +2842,14 @@ func _add_desk(pos: Vector2) -> int:
 	desks.append(desk)
 	register_trait_furniture(desk)
 
-	# Register obstacle
+	# Register obstacle - use instance_id to match _on_desk_position_changed
 	var desk_rect = Rect2(
 		pos.x - OfficeConstants.DESK_WIDTH / 2,
 		pos.y,
 		OfficeConstants.DESK_WIDTH,
 		OfficeConstants.DESK_DEPTH
 	)
-	navigation_grid.register_obstacle(desk_rect, desk.furniture_id)
+	navigation_grid.register_obstacle(desk_rect, "desk_%d" % desk.get_instance_id())
 
 	_save_positions()
 	print("[OfficeManager] Added desk at %s (index %d)" % [pos, desk_index])

@@ -39,8 +39,6 @@ var last_seen_label: Label
 
 # Stats section
 var tasks_label: Label
-var failed_label: Label
-var success_label: Label
 var time_label: Label
 
 # Skills section
@@ -269,9 +267,7 @@ func _create_visuals() -> void:
 	var stats_y = section_y + 22
 
 	tasks_label = _create_stat_label(panel_x + 30, stats_y, "Tasks Done: 0")
-	failed_label = _create_stat_label(panel_x + 30, stats_y + 18, "Tasks Failed: 0")
-	success_label = _create_stat_label(panel_x + 30, stats_y + 36, "Success Rate: 0%")
-	time_label = _create_stat_label(panel_x + 30, stats_y + 54, "Work Time: 0.0 hr")
+	time_label = _create_stat_label(panel_x + 30, stats_y + 18, "Work Time: 0.0 hr")
 
 	# SKILLS section (middle column)
 	var skills_header = Label.new()
@@ -360,8 +356,6 @@ func _populate_profile(profile: AgentProfile) -> void:
 
 	# Stats
 	tasks_label.text = "Tasks Done: %d" % profile.tasks_completed
-	failed_label.text = "Tasks Failed: %d" % profile.tasks_failed
-	success_label.text = "Success Rate: %.0f%%" % profile.get_success_rate()
 	time_label.text = "Work Time: %.1f hr" % profile.get_work_time_hours()
 
 	# Skills
