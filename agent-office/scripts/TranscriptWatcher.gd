@@ -8,6 +8,8 @@ const CLAUDE_PROJECTS_DIR = "/.claude/projects"
 const ESTIMATED_MAX_CONTEXT_BYTES = 800000  # ~200K tokens * 4 chars/token
 const CODEX_SESSIONS_DIR = "/.codex/sessions"
 const CODEX_MAX_SCAN_DEPTH = 3  # root + YYYY/MM/DD
+const CLAWDBOT_SESSIONS_DIR = "/.clawdbot/agents"
+const CLAWDBOT_MAX_SCAN_DEPTH = 3  # agents/<agent>/sessions/*.jsonl
 const POLL_INTERVAL = OfficeConstants.TRANSCRIPT_POLL_INTERVAL
 const SCAN_INTERVAL = 1.0  # seconds - how often to scan for new sessions (fast to catch subagent sessions)
 const ACTIVE_THRESHOLD = 300  # seconds - consider sessions active if modified within this time (longer than SESSION_INACTIVE_TIMEOUT)
@@ -21,11 +23,13 @@ const CONTEXT_PRUNE_INTERVAL = 5.0  # seconds between prune checks
 # Harness enable/disable configuration
 var harness_enabled: Dictionary = {
 	"claude": true,
-	"codex": true
+	"codex": true,
+	"clawdbot": true
 }
 var harness_paths: Dictionary = {
 	"claude": "",
-	"codex": ""
+	"codex": "",
+	"clawdbot": ""
 }
 
 # Track multiple sessions
@@ -55,8 +59,10 @@ func _register_with_settings() -> void:
 	var schema: Array = [
 		{"key": "claude_enabled", "type": "bool", "default": true, "description": "Enable Claude transcript watcher"},
 		{"key": "codex_enabled", "type": "bool", "default": true, "description": "Enable Codex transcript watcher"},
+		{"key": "clawdbot_enabled", "type": "bool", "default": true, "description": "Enable Clawdbot session watcher"},
 		{"key": "claude_path", "type": "string", "default": "", "description": "Custom path for Claude projects"},
-		{"key": "codex_path", "type": "string", "default": "", "description": "Custom path for Codex sessions"}
+		{"key": "codex_path", "type": "string", "default": "", "description": "Custom path for Codex sessions"},
+		{"key": "clawdbot_path", "type": "string", "default": "", "description": "Custom path for Clawdbot sessions"}
 	]
 
 	registry.register_category("watchers", WATCHER_CONFIG_FILE, schema, _on_setting_changed)
@@ -66,10 +72,14 @@ func _register_with_settings() -> void:
 	harness_enabled["claude"] = v_claude_en if v_claude_en != null else true
 	var v_codex_en = registry.get_setting("watchers", "codex_enabled")
 	harness_enabled["codex"] = v_codex_en if v_codex_en != null else true
+	var v_clawdbot_en = registry.get_setting("watchers", "clawdbot_enabled")
+	harness_enabled["clawdbot"] = v_clawdbot_en if v_clawdbot_en != null else true
 	var v_claude_path = registry.get_setting("watchers", "claude_path")
 	harness_paths["claude"] = v_claude_path if v_claude_path != null else ""
 	var v_codex_path = registry.get_setting("watchers", "codex_path")
 	harness_paths["codex"] = v_codex_path if v_codex_path != null else ""
+	var v_clawdbot_path = registry.get_setting("watchers", "clawdbot_path")
+	harness_paths["clawdbot"] = v_clawdbot_path if v_clawdbot_path != null else ""
 
 func _on_setting_changed(key: String, value: Variant) -> void:
 	match key:
@@ -77,10 +87,14 @@ func _on_setting_changed(key: String, value: Variant) -> void:
 			harness_enabled["claude"] = bool(value)
 		"codex_enabled":
 			harness_enabled["codex"] = bool(value)
+		"clawdbot_enabled":
+			harness_enabled["clawdbot"] = bool(value)
 		"claude_path":
 			harness_paths["claude"] = str(value) if value != null else ""
 		"codex_path":
 			harness_paths["codex"] = str(value) if value != null else ""
+		"clawdbot_path":
+			harness_paths["clawdbot"] = str(value) if value != null else ""
 
 func _load_config() -> void:
 	if not FileAccess.file_exists(WATCHER_CONFIG_FILE):
@@ -230,6 +244,8 @@ func scan_for_sessions() -> void:
 		_scan_claude_sessions(current_time)
 	if harness_enabled.get("codex", true):
 		_scan_codex_sessions(current_time)
+	if harness_enabled.get("clawdbot", true):
+		_scan_clawdbot_sessions(current_time)
 	_remove_stale_sessions(current_time)
 
 func _scan_claude_sessions(current_time: float) -> void:
@@ -278,6 +294,14 @@ func _scan_codex_sessions(current_time: float) -> void:
 		return
 	_scan_jsonl_recursive(sessions_dir, current_time, CODEX_MAX_SCAN_DEPTH)
 
+func _scan_clawdbot_sessions(current_time: float) -> void:
+	var sessions_dir = _get_clawdbot_sessions_dir()
+	var dir = DirAccess.open(sessions_dir)
+	if not dir:
+		return
+	# We only want to scan agent session folders under ~/.clawdbot/agents
+	_scan_jsonl_recursive(sessions_dir, current_time, CLAWDBOT_MAX_SCAN_DEPTH)
+
 func _scan_jsonl_recursive(dir_path: String, current_time: float, depth: int) -> void:
 	if depth < 0:
 		return
@@ -310,6 +334,13 @@ func _get_codex_sessions_dir() -> String:
 		var home_dir = OS.get_environment("HOME")
 		codex_home = home_dir + "/.codex"
 	return codex_home + "/sessions"
+
+func _get_clawdbot_sessions_dir() -> String:
+	var custom_path = harness_paths.get("clawdbot", "")
+	if not custom_path.is_empty():
+		return custom_path
+	var home_dir = OS.get_environment("HOME")
+	return home_dir + CLAWDBOT_SESSIONS_DIR
 
 func _remove_stale_sessions(current_time: float) -> void:
 	# Remove stale sessions (not modified recently AND no pending agents)
@@ -438,6 +469,8 @@ func process_line(line: String, session_path: String = "") -> void:
 
 	if _process_codex_entry(entry, session_path):
 		return
+	if _process_clawdbot_entry(entry, session_path):
+		return
 
 	# Check for /exit, /quit, or /compact commands in user messages
 	var entry_type = entry.get("type", "")
@@ -501,6 +534,64 @@ func _process_codex_entry(entry: Dictionary, session_path: String) -> bool:
 	if entry_type == "session_meta" or entry_type == "event_msg" or entry_type == "turn_context":
 		return true
 	return false
+
+func _process_clawdbot_entry(entry: Dictionary, session_path: String) -> bool:
+	# Clawdbot sessions are JSONL with top-level entry types (session, model_change, message, ...).
+	# Tool calls are embedded INSIDE message.content as items with type="toolCall".
+	# There may not be explicit toolResult entries; we clear "waiting" state opportunistically.
+	var entry_type = entry.get("type", "")
+	if entry_type != "message":
+		return false
+	var msg = entry.get("message", {})
+	if not msg is Dictionary:
+		return true
+	var content = msg.get("content", [])
+	if not content is Array:
+		return true
+
+	var timestamp = entry.get("timestamp", "")
+	var saw_tool_call := false
+	var saw_text := false
+
+	for block in content:
+		if not block is Dictionary:
+			continue
+		var block_type = str(block.get("type", ""))
+		if block_type == "toolCall":
+			saw_tool_call = true
+			var tool_name = str(block.get("name", ""))
+			var tool_id = str(block.get("id", ""))
+			var tool_args = block.get("arguments", {})
+			if not tool_args is Dictionary:
+				tool_args = {}
+			var item = {"name": tool_name, "id": tool_id, "input": tool_args}
+			var normalized_entry = {"timestamp": timestamp}
+			process_tool_use(item, normalized_entry, session_path)
+		elif block_type == "text":
+			var t = str(block.get("text", "")).strip_edges()
+			if not t.is_empty():
+				saw_text = true
+
+	# If we previously emitted waiting_for_input, but Clawdbot doesn't emit tool results,
+	# clear the waiting state when we observe subsequent text content.
+	if (not saw_tool_call) and saw_text:
+		var to_clear: Array[String] = []
+		for tool_use_id in pending_tools.keys():
+			var info = pending_tools[tool_use_id]
+			if info.get("session_path", "") == session_path:
+				to_clear.append(tool_use_id)
+		for tool_use_id in to_clear:
+			var info = pending_tools.get(tool_use_id, {})
+			pending_tools.erase(tool_use_id)
+			event_received.emit({
+				"event": "input_received",
+				"agent_id": "main",
+				"tool": info.get("tool_name", ""),
+				"timestamp": timestamp,
+				"session_path": session_path
+			})
+
+	return true
 
 func _process_codex_tool_use(payload: Dictionary, entry: Dictionary, session_path: String) -> void:
 	var tool_name = payload.get("name", "")
@@ -710,6 +801,8 @@ func _derive_harness(session_path: String) -> String:
 		return "claude"
 	elif session_path.contains("/.codex/"):
 		return "codex"
+	elif session_path.contains("/.clawdbot/"):
+		return "clawdbot"
 	return ""
 
 func get_watched_count() -> int:

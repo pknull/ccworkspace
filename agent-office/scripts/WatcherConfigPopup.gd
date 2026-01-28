@@ -7,16 +7,18 @@ class_name WatcherConfigPopup
 
 signal close_requested()
 
-const HARNESS_ORDER = ["claude", "codex", "opencode", "gemini"]
+const HARNESS_ORDER = ["claude", "codex", "clawdbot", "opencode", "gemini"]
 const HARNESS_LABELS = {
 	"claude": "Claude Code",
 	"codex": "Codex",
+	"clawdbot": "Clawdbot",
 	"opencode": "OpenCode",
 	"gemini": "Gemini",
 }
 const HARNESS_PATH_HINTS = {
 	"claude": "Leave empty for auto-detect",
 	"codex": "Leave empty for auto-detect",
+	"clawdbot": "Leave empty for auto-detect",
 	"opencode": "JSONL folder (required)",
 	"gemini": "JSONL file or folder (required)",
 }
@@ -279,8 +281,8 @@ func show_config(watcher, mcp) -> void:
 		if row.has("path"):
 			var saved_path = str(entry.get("path", "")).strip_edges()
 			var default_path = _get_default_path_for_harness(harness_id)
-			# For claude/codex: show auto-detected path as placeholder, only fill if custom
-			if harness_id in ["claude", "codex"]:
+			# For claude/codex/clawdbot: show auto-detected path as placeholder, only fill if custom
+			if harness_id in ["claude", "codex", "clawdbot"]:
 				if not default_path.is_empty():
 					row["path"].placeholder_text = default_path
 				row["path"].text = saved_path  # Empty if no custom path
@@ -302,8 +304,8 @@ func _on_save_pressed() -> void:
 	if not transcript_watcher:
 		close_requested.emit()
 		return
-	# Only claude/codex are currently implemented in TranscriptWatcher
-	var supported_harnesses = ["claude", "codex"]
+	# Implemented harnesses in TranscriptWatcher
+	var supported_harnesses = ["claude", "codex", "clawdbot"]
 	for harness_id in HARNESS_ORDER:
 		var row = harness_rows.get(harness_id, {})
 		if harness_id in supported_harnesses:
@@ -354,6 +356,7 @@ func _update_help_text() -> void:
 		lines.append("Examples (Windows):")
 		lines.append("Claude: %s\\.claude\\projects\\<project>\\<session>.jsonl" % win_home)
 		lines.append("Codex: %s\\.codex\\sessions\\YYYY\\MM\\DD\\<session>.jsonl" % win_home)
+		lines.append("Clawdbot: %s\\.clawdbot\\agents\\<agent>\\sessions\\<session>.jsonl" % win_home)
 		lines.append("OpenCode: %s\\.local\\share\\opencode\\log" % win_home)
 		lines.append("Gemini: %s\\gemini-telemetry.jsonl" % win_home)
 		lines.append("Gemini CLI: --telemetry --telemetry-target local --telemetry-outfile <path>")
@@ -362,6 +365,7 @@ func _update_help_text() -> void:
 		lines.append("Examples (macOS/Linux):")
 		lines.append("Claude: %s/.claude/projects/<project>/<session>.jsonl" % unix_home)
 		lines.append("Codex: %s/.codex/sessions/YYYY/MM/DD/<session>.jsonl" % unix_home)
+		lines.append("Clawdbot: %s/.clawdbot/agents/<agent>/sessions/<session>.jsonl" % unix_home)
 		lines.append("OpenCode: %s/.local/share/opencode/log" % unix_home)
 		lines.append("Gemini: %s/gemini-telemetry.jsonl" % unix_home)
 		lines.append("Gemini CLI: --telemetry --telemetry-target local --telemetry-outfile <path>")
@@ -370,6 +374,7 @@ func _update_help_text() -> void:
 		lines.append("Examples (macOS/Linux):")
 		lines.append("Claude: %s/.claude/projects/<project>/<session>.jsonl" % unix_home)
 		lines.append("Codex: %s/.codex/sessions/YYYY/MM/DD/<session>.jsonl" % unix_home)
+		lines.append("Clawdbot: %s/.clawdbot/agents/<agent>/sessions/<session>.jsonl" % unix_home)
 		lines.append("OpenCode: %s/.local/share/opencode/log" % unix_home)
 		lines.append("Gemini: %s/gemini-telemetry.jsonl" % unix_home)
 		lines.append("Gemini CLI: --telemetry --telemetry-target local --telemetry-outfile <path>")
@@ -377,6 +382,7 @@ func _update_help_text() -> void:
 		lines.append("Examples (Windows):")
 		lines.append("Claude: %s\\.claude\\projects\\<project>\\<session>.jsonl" % win_home)
 		lines.append("Codex: %s\\.codex\\sessions\\YYYY\\MM\\DD\\<session>.jsonl" % win_home)
+		lines.append("Clawdbot: %s\\.clawdbot\\agents\\<agent>\\sessions\\<session>.jsonl" % win_home)
 		lines.append("OpenCode: %s\\.local\\share\\opencode\\log" % win_home)
 		lines.append("Gemini: %s\\gemini-telemetry.jsonl" % win_home)
 		lines.append("Gemini CLI: --telemetry --telemetry-target local --telemetry-outfile <path>")
@@ -428,6 +434,9 @@ func _get_default_path_for_harness(harness_id: String) -> String:
 		if not codex_home.is_empty():
 			return codex_home + "/sessions"
 		var path = _get_windows_home() + "\\.codex\\sessions" if is_windows else _get_unix_home() + "/.codex/sessions"
+		return path
+	if harness_id == "clawdbot":
+		var path = _get_windows_home() + "\\.clawdbot\\agents" if is_windows else _get_unix_home() + "/.clawdbot/agents"
 		return path
 	if harness_id == "opencode":
 		var path = _get_windows_home() + "\\.local\\share\\opencode\\log" if is_windows else _get_unix_home() + "/.local/share/opencode/log"
