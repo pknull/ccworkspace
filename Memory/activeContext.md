@@ -1,9 +1,9 @@
 ---
-version: "2.6"
-lastUpdated: "2026-01-27 UTC"
+version: "2.7"
+lastUpdated: "2026-01-28 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - v2.0.2 release: desk collision fix, monitor cleanup, typing sounds"
+changeTrigger: "Session save - v2.1.0 release: context stress visuals, custom session paths, Clawdbot harness"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -21,6 +21,29 @@ dependencies: ["communicationStyle.md"]
 - Agent mood system (tired/frustrated/irate)
 
 **Recent Activities** (last 7 days):
+- **2026-01-28 (Session 17-18)**: v2.1.0 release - context stress visuals, custom session paths, Clawdbot:
+  - **Reddit request**: Personal-Dev-Kit requested configurable session paths for WSL users
+  - **Custom session paths (WatcherConfigPopup.gd)**:
+    - All harnesses now have editable path fields (removed HARNESS_PATH_REQUIRED restriction)
+    - Claude/Codex show auto-detected path as placeholder, field empty unless custom
+    - WSL users can enter paths like `\\wsl$\Ubuntu\home\user\.claude\projects`
+  - **Context stress visuals (Agent.gd, AgentVisuals.gd)**:
+    - Orchestrators display sweat drops (1-4) based on context usage percentage
+    - Thresholds: 50% (1 drop), 70% (2), 85% (3), 95% (4 + face flush)
+    - Context % shown in agent tooltip
+  - **Sliding window tracking (TranscriptWatcher.gd)**:
+    - Context measured over 10-minute window with 800KB cap
+    - Old entries pruned every 5 seconds for natural decay
+    - `/compact` command detection resets context to 0%
+  - **Clawdbot harness support** (user added):
+    - New harness for Clawdbot agent sessions (~/.clawdbot/agents)
+    - Parses embedded toolCall events in message content
+    - Clears waiting state on subsequent text (no explicit toolResult)
+  - **Code cleanup**: Extracted magic numbers to constants (SWEAT_DROP_COLOR, etc.)
+  - **Reddit engagement**: 85 upvotes, 22K views; Personal-Dev-Kit confirmed v2.1.0 fixed their issue
+  - **GitHub stats**: 6 stars, 1 fork, 7 downloads on v2.1.0 release
+  - **Schedule plugin tested**: Created/removed monitoring cron job via `/schedule`
+
 - **2026-01-27 (Session 16)**: v2.0.2 release - desk collision fix, monitor cleanup, typing sounds:
   - **Bug report 1**: Typing sounds continue after agent leaves desk
   - **Fix**: Added `stop_typing()` method to AudioManager, called in `complete_work()` and `_start_leaving()`
@@ -300,6 +323,7 @@ Port 9999, JSON messages with `"event"` field:
 - [x] Comprehensive smoke test suite (22 tests, 5 modes)
 - [x] Set up itch.io publishing workflow (GitHub Actions with Butler)
 - [x] v2.0.2 released - desk collision fix, monitor cleanup, typing sounds
+- [x] v2.1.0 released - context stress visuals, custom session paths, Clawdbot harness
 
 **Blocked**:
 - None
@@ -478,3 +502,21 @@ When registering/unregistering obstacles in NavigationGrid, use the SAME ID sche
 - `_add_desk()` must use same format, NOT `desk.furniture_id`
 - `_remove_desk()` and `_on_desk_position_changed()` must use same format
 Using different ID schemes causes unregister calls to silently fail (obstacle not found).
+
+### UI Must Expose Backend Settings
+When backend supports a feature (like custom paths in TranscriptWatcher), the UI must expose it. In WatcherConfigPopup, `HARNESS_PATH_REQUIRED` gated which harnesses got editable fields - but the backend already supported paths for all harnesses. Always check if config UI matches backend capabilities.
+
+### Sliding Window for Decay Metrics
+Instead of cumulative counters with artificial decay timers, use sliding windows: store timestamped entries, prune entries older than the window, sum remaining. Benefits: natural decay, no magic decay rates, reflects actual recent activity. Pattern:
+```gdscript
+var entries: Array = []  # [{time: float, size: int}, ...]
+const WINDOW_SECONDS = 600.0
+func add_entry(size: int) -> void:
+    entries.append({"time": Time.get_unix_time_from_system(), "size": size})
+func prune() -> void:
+    var cutoff = Time.get_unix_time_from_system() - WINDOW_SECONDS
+    entries = entries.filter(func(e): return e.time >= cutoff)
+```
+
+### Cron vs Systemd Timer Formats
+Cron expressions like `*/10 * * * *` don't directly translate to systemd calendar specs. The sync script may generate invalid timer files. Use `--force-cron` flag when systemd timers fail with "bad unit file setting".
