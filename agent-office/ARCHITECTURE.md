@@ -80,11 +80,12 @@ SPAWNING → WALKING_TO_DESK → WORKING → DELIVERING → SOCIALIZING → LEAV
 - `assigned_desk: Desk` - current workstation
 
 ### TranscriptWatcher.gd (636 lines) - Session Monitor
-Watches Claude Code and Codex CLI session files for activity.
+Watches Claude Code, Codex CLI, and Clawdbot session files for activity.
 
 **Monitored Paths:**
 - Claude: `~/.claude/projects/*/*.jsonl`
 - Codex: `~/.codex/sessions/**/*.jsonl`
+- Clawdbot: `~/.clawdbot/agents/<agent>/sessions/*.jsonl`
 
 **Events Emitted:**
 - `session_start` - new session detected
@@ -93,6 +94,8 @@ Watches Claude Code and Codex CLI session files for activity.
 - `agent_complete` - Task result received
 - `waiting_for_input` - tool awaiting permission
 - `input_received` - tool completed
+
+**TODO (architecture):** Refactor TranscriptWatcher into per-harness adapters that implement a common interface (scan + parse → normalized events), instead of format-specific logic living in one file.
 
 ### McpServer.gd (1756 lines) - HTTP API
 JSON-RPC server for external control.
