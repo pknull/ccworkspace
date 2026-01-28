@@ -241,6 +241,7 @@ func _ready() -> void:
 	transcript_watcher = TranscriptWatcherScript.new()
 	add_child(transcript_watcher)
 	transcript_watcher.event_received.connect(_on_event_received)
+	transcript_watcher.context_updated.connect(_on_context_updated)
 	if mcp_server:
 		mcp_server.set_office_manager(self)
 		mcp_server.event_received.connect(_on_event_received)
@@ -1350,6 +1351,24 @@ func _on_event_received(event_data: Dictionary) -> void:
 			_handle_waiting_for_input(event_data)
 		"input_received":
 			_handle_input_received(event_data)
+		"set_context_stress":
+			_handle_set_context_stress(event_data)
+
+func _handle_set_context_stress(data: Dictionary) -> void:
+	# Test event: manually set context stress for an agent
+	var agent_id = data.get("agent_id", "")
+	var stress = float(data.get("stress", 0.0))
+	if agent_id.is_empty():
+		# Apply to all orchestrators
+		for id in active_agents.keys():
+			if id.begins_with("orch_"):
+				var agent = active_agents[id] as Agent
+				if agent and is_instance_valid(agent):
+					agent.set_context_stress(stress)
+	elif active_agents.has(agent_id):
+		var agent = active_agents[agent_id] as Agent
+		if agent and is_instance_valid(agent):
+			agent.set_context_stress(stress)
 
 func _handle_session_start(data: Dictionary) -> void:
 	var session_id = data.get("session_id", "")
@@ -1432,6 +1451,17 @@ func _handle_session_activity(data: Dictionary) -> void:
 		}
 		_handle_agent_spawn(orch_data)
 		_update_taskboard()
+
+func _on_context_updated(session_path: String, context_percent: float) -> void:
+	# Route context updates to the orchestrator for this session
+	var session_id = session_path.get_file().get_basename() if session_path else ""
+	if session_id.is_empty():
+		return
+	var orch_id = "orch_" + _get_session_short_id(session_id)
+	if active_agents.has(orch_id):
+		var orchestrator = active_agents[orch_id] as Agent
+		if orchestrator and is_instance_valid(orchestrator):
+			orchestrator.set_context_stress(context_percent)
 
 func _on_weather_updated(temperature: float, condition: String, location: String) -> void:
 	# Weather service fetched new data - update display if not overridden

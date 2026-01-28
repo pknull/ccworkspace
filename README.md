@@ -60,6 +60,10 @@ godot --export-release "Linux" builds/inference-inc.x86_64
 
 This is still alpha software. Bugs expected. If you find issues or have suggestions, please report them on [GitHub Issues](https://github.com/pknull/ccworkspace/issues).
 
+## Acknowledgments
+
+Inspired by [claude-office](https://github.com/paulrobello/claude-office) by Paul Robello.
+
 ## License
 
 MIT

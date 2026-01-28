@@ -15,12 +15,10 @@ const HARNESS_LABELS = {
 	"gemini": "Gemini",
 }
 const HARNESS_PATH_HINTS = {
-	"opencode": "JSONL folder",
-	"gemini": "JSONL file or folder",
-}
-const HARNESS_PATH_REQUIRED = {
-	"opencode": true,
-	"gemini": true,
+	"claude": "Leave empty for auto-detect",
+	"codex": "Leave empty for auto-detect",
+	"opencode": "JSONL folder (required)",
+	"gemini": "JSONL file or folder (required)",
 }
 
 # Layout constants
@@ -98,7 +96,7 @@ func _create_visuals() -> void:
 	container.add_child(title_label)
 
 	subtitle_label = Label.new()
-	subtitle_label.text = "Set JSONL paths (OpenCode/Gemini)."
+	subtitle_label.text = "Configure session paths. Empty = auto-detect (Claude/Codex)."
 	subtitle_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	subtitle_label.position = Vector2(panel_x, panel_y + 36)
 	subtitle_label.size = Vector2(PANEL_WIDTH, 20)
@@ -155,7 +153,7 @@ func _build_rows() -> void:
 	header.add_child(header_harness)
 
 	var header_path = Label.new()
-	header_path.text = "Path (if required)"
+	header_path.text = "Path (empty = auto-detect)"
 	header_path.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header_path.add_theme_font_size_override("font_size", 11)
 	header_path.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT3)
@@ -177,21 +175,13 @@ func _build_rows() -> void:
 
 		var row_entry = {"enabled": checkbox}
 
-		if HARNESS_PATH_REQUIRED.has(harness_id):
-			var path_input = LineEdit.new()
-			path_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			path_input.placeholder_text = HARNESS_PATH_HINTS.get(harness_id, "JSONL file or folder")
-			path_input.add_theme_font_size_override("font_size", 12)
-			path_input.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT1)
-			row.add_child(path_input)
-			row_entry["path"] = path_input
-		else:
-			var auto_label = Label.new()
-			auto_label.text = "(auto-detected)"
-			auto_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			auto_label.add_theme_font_size_override("font_size", 11)
-			auto_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
-			row.add_child(auto_label)
+		var path_input = LineEdit.new()
+		path_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		path_input.placeholder_text = HARNESS_PATH_HINTS.get(harness_id, "JSONL file or folder")
+		path_input.add_theme_font_size_override("font_size", 12)
+		path_input.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT1)
+		row.add_child(path_input)
+		row_entry["path"] = path_input
 
 		harness_rows[harness_id] = row_entry
 
@@ -288,10 +278,18 @@ func show_config(watcher, mcp) -> void:
 			row["enabled"].button_pressed = enabled
 		if row.has("path"):
 			var saved_path = str(entry.get("path", "")).strip_edges()
-			if saved_path.is_empty():
-				row["path"].text = _get_default_path_for_harness(harness_id)
+			var default_path = _get_default_path_for_harness(harness_id)
+			# For claude/codex: show auto-detected path as placeholder, only fill if custom
+			if harness_id in ["claude", "codex"]:
+				if not default_path.is_empty():
+					row["path"].placeholder_text = default_path
+				row["path"].text = saved_path  # Empty if no custom path
 			else:
-				row["path"].text = saved_path
+				# For opencode/gemini: fill with default if no saved path
+				if saved_path.is_empty():
+					row["path"].text = default_path
+				else:
+					row["path"].text = saved_path
 	if mcp_server and mcp_server.has_method("get_mcp_config"):
 		var mcp_config = mcp_server.get_mcp_config()
 		if mcp_enabled:
@@ -304,17 +302,16 @@ func _on_save_pressed() -> void:
 	if not transcript_watcher:
 		close_requested.emit()
 		return
-	var config = transcript_watcher.get_harness_config()
+	# Only claude/codex are currently implemented in TranscriptWatcher
+	var supported_harnesses = ["claude", "codex"]
 	for harness_id in HARNESS_ORDER:
 		var row = harness_rows.get(harness_id, {})
-		if not config.has(harness_id):
-			config[harness_id] = {}
-		var enabled_box = row.get("enabled", null)
-		if enabled_box:
-			config[harness_id]["enabled"] = bool(enabled_box.button_pressed)
-		if row.has("path"):
-			config[harness_id]["path"] = row.get("path").text.strip_edges()
-	transcript_watcher.set_harness_config(config)
+		if harness_id in supported_harnesses:
+			var enabled_box = row.get("enabled", null)
+			if enabled_box:
+				transcript_watcher.set_harness_enabled(harness_id, bool(enabled_box.button_pressed))
+			if row.has("path"):
+				transcript_watcher.set_harness_path(harness_id, row.get("path").text.strip_edges())
 	_apply_external_config()
 	close_requested.emit()
 
@@ -423,6 +420,15 @@ func _get_windows_home() -> String:
 func _get_default_path_for_harness(harness_id: String) -> String:
 	var os_name = OS.get_name().to_lower()
 	var is_windows = os_name == "windows"
+	if harness_id == "claude":
+		var path = _get_windows_home() + "\\.claude\\projects" if is_windows else _get_unix_home() + "/.claude/projects"
+		return path
+	if harness_id == "codex":
+		var codex_home = OS.get_environment("CODEX_HOME")
+		if not codex_home.is_empty():
+			return codex_home + "/sessions"
+		var path = _get_windows_home() + "\\.codex\\sessions" if is_windows else _get_unix_home() + "/.codex/sessions"
+		return path
 	if harness_id == "opencode":
 		var path = _get_windows_home() + "\\.local\\share\\opencode\\log" if is_windows else _get_unix_home() + "/.local/share/opencode/log"
 		return _path_if_exists(path)

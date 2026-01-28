@@ -40,6 +40,18 @@ var _visuals_created: bool = false
 # Hover state
 var is_hovered: bool = false
 
+# Context stress visuals (sweat drops)
+const SWEAT_DROP_COLOR = Color(0.6, 0.8, 1.0, 0.9)  # Light blue
+const STRESS_FLUSH_COLOR = Color(1.0, 0.8, 0.8)  # Pinkish flush
+const SWEAT_DROP_SIZE = Vector2(3, 5)
+const SWEAT_DROP_START_X = -12
+const SWEAT_DROP_SPACING = 8
+const SWEAT_DROP_BASE_Y = -8
+const STRESS_FLUSH_THRESHOLD = 3  # Level at which face flushes
+
+var sweat_drops: Array[ColorRect] = []
+var current_stress_level: int = 0  # 0-4 based on context_stress thresholds
+
 # Palettes
 const HAIR_COLORS: Array[Color] = [
 	OfficePalette.HAIR_BROWN,
@@ -750,3 +762,53 @@ func set_facing_direction(face_left: bool) -> void:
 			head.position.x = -4
 		else:
 			head.position.x = 4
+
+# =============================================================================
+# CONTEXT STRESS VISUALS
+# =============================================================================
+
+func update_context_stress(stress: float) -> void:
+	# Determine stress level: 0=none, 1=light, 2=moderate, 3=high, 4=critical
+	var new_level: int = 0
+	if stress >= 0.95:
+		new_level = 4  # Critical - panic mode
+	elif stress >= 0.85:
+		new_level = 3  # High stress
+	elif stress >= 0.70:
+		new_level = 2  # Moderate stress
+	elif stress >= 0.50:
+		new_level = 1  # Light stress
+
+	if new_level != current_stress_level:
+		current_stress_level = new_level
+		_update_sweat_drops()
+
+func _update_sweat_drops() -> void:
+	# Clear existing drops
+	for drop in sweat_drops:
+		if is_instance_valid(drop):
+			drop.queue_free()
+	sweat_drops.clear()
+
+	if current_stress_level == 0 or not head:
+		return
+
+	# Create sweat drops based on stress level
+	var drop_count = current_stress_level
+	for i in range(drop_count):
+		var drop = ColorRect.new()
+		drop.size = SWEAT_DROP_SIZE
+		drop.color = SWEAT_DROP_COLOR
+
+		# Position drops around the head
+		var offset_x = SWEAT_DROP_START_X + (i * SWEAT_DROP_SPACING)
+		var offset_y = SWEAT_DROP_BASE_Y + (i % 2) * 4  # Slight vertical variation
+		drop.position = Vector2(head.position.x + offset_x, head.position.y + offset_y)
+		drop.z_index = 10
+
+		agent.add_child(drop)
+		sweat_drops.append(drop)
+
+	# At high stress, tint the face slightly red
+	if current_stress_level >= STRESS_FLUSH_THRESHOLD and head:
+		head.color = head.color.lerp(STRESS_FLUSH_COLOR, 0.3)

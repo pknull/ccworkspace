@@ -191,6 +191,9 @@ var time_on_floor: float = 0.0
 var current_mood: Mood = Mood.CONTENT
 var mood_indicator: Label = null  # Shows mood emoji above head
 
+# Context stress - orchestrators show stress as context fills up
+var context_stress: float = 0.0  # 0.0 to 1.0 (percent of context used)
+
 # Audio
 var audio_manager = null  # AudioManager instance
 var typing_timer: float = 0.0
@@ -385,6 +388,10 @@ func _build_tooltip_data() -> Dictionary:
 	if not harness_label.is_empty() or not harness_id.is_empty():
 		var label = harness_label if not harness_label.is_empty() else harness_id
 		lines.append("Harness: " + label)
+
+	# Show context usage for orchestrators
+	if agent_type == "orchestrator" and context_stress > 0:
+		lines.append("Context: %d%%" % int(context_stress * 100))
 
 	if state == State.WORKING and current_tool:
 		lines.append("Using: " + current_tool)
@@ -1539,6 +1546,11 @@ func set_result(res: String) -> void:
 	# Show a brief summary as a speech bubble when result is set
 	if result:
 		bubbles.show_result_bubble(agent_id)
+
+func set_context_stress(stress: float) -> void:
+	context_stress = clampf(stress, 0.0, 1.0)
+	if visuals:
+		visuals.update_context_stress(context_stress)
 
 func apply_profile_appearance(profile) -> void:
 	if visuals:

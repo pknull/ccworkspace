@@ -2,8 +2,10 @@ extends Node
 class_name TranscriptWatcher
 
 signal event_received(event_data: Dictionary)
+signal context_updated(session_path: String, context_percent: float)
 
 const CLAUDE_PROJECTS_DIR = "/.claude/projects"
+const ESTIMATED_MAX_CONTEXT_BYTES = 800000  # ~200K tokens * 4 chars/token
 const CODEX_SESSIONS_DIR = "/.codex/sessions"
 const CODEX_MAX_SCAN_DEPTH = 3  # root + YYYY/MM/DD
 const POLL_INTERVAL = OfficeConstants.TRANSCRIPT_POLL_INTERVAL
@@ -11,6 +13,10 @@ const SCAN_INTERVAL = 1.0  # seconds - how often to scan for new sessions (fast 
 const ACTIVE_THRESHOLD = 300  # seconds - consider sessions active if modified within this time (longer than SESSION_INACTIVE_TIMEOUT)
 const PENDING_AGENT_TIMEOUT = 1800  # seconds - consider pending agents stale after this long without updates
 const WATCHER_CONFIG_FILE = "user://watchers.json"
+
+# Context window settings
+const CONTEXT_WINDOW_SECONDS = 600.0  # 10 minutes - entries older than this are pruned
+const CONTEXT_PRUNE_INTERVAL = 5.0  # seconds between prune checks
 
 # Harness enable/disable configuration
 var harness_enabled: Dictionary = {
@@ -24,6 +30,8 @@ var harness_paths: Dictionary = {
 
 # Track multiple sessions
 var watched_sessions: Dictionary = {}  # file_path -> {position: int, last_modified: int}
+var session_context_entries: Dictionary = {}  # file_path -> Array of {time: float, size: int}
+var context_prune_timer: float = 0.0
 var poll_timer: float = 0.0
 var scan_timer: float = 0.0
 
@@ -163,6 +171,13 @@ func get_harness_summary() -> Dictionary:
 		}
 	return summary
 
+func get_context_percent(session_path: String) -> float:
+	var bytes = _sum_context_bytes(session_path)
+	return clampf(float(bytes) / ESTIMATED_MAX_CONTEXT_BYTES, 0.0, 1.0)
+
+func reset_context_tracking(session_path: String) -> void:
+	session_context_entries.erase(session_path)
+
 func _process(delta: float) -> void:
 	# Poll existing sessions for new entries
 	poll_timer += delta
@@ -175,6 +190,38 @@ func _process(delta: float) -> void:
 	if scan_timer >= SCAN_INTERVAL:
 		scan_timer = 0.0
 		scan_for_sessions()
+
+	# Prune old context entries and update percentages
+	context_prune_timer += delta
+	if context_prune_timer >= CONTEXT_PRUNE_INTERVAL:
+		context_prune_timer = 0.0
+		_prune_context_entries()
+
+func _prune_context_entries() -> void:
+	var current_time = Time.get_unix_time_from_system()
+	var cutoff_time = current_time - CONTEXT_WINDOW_SECONDS
+
+	for session_path in session_context_entries.keys():
+		var entries: Array = session_context_entries[session_path]
+		var original_size = entries.size()
+
+		# Remove entries older than the window
+		var new_entries: Array = []
+		for entry in entries:
+			if entry.time >= cutoff_time:
+				new_entries.append(entry)
+		session_context_entries[session_path] = new_entries
+
+		# If entries were pruned, emit updated percentage
+		if new_entries.size() != original_size:
+			context_updated.emit(session_path, get_context_percent(session_path))
+
+func _sum_context_bytes(session_path: String) -> int:
+	var entries: Array = session_context_entries.get(session_path, [])
+	var total: int = 0
+	for entry in entries:
+		total += entry.size
+	return mini(total, ESTIMATED_MAX_CONTEXT_BYTES)  # Cap at max
 
 func scan_for_sessions() -> void:
 	var current_time = Time.get_unix_time_from_system()
@@ -377,16 +424,29 @@ func process_line(line: String, session_path: String = "") -> void:
 	var entry = json.data
 	if not entry is Dictionary:
 		return
+
+	# Track context usage with sliding window (approximate bytes for context meter)
+	if not session_path.is_empty():
+		var line_bytes = line.length()
+		if not session_context_entries.has(session_path):
+			session_context_entries[session_path] = []
+		session_context_entries[session_path].append({
+			"time": Time.get_unix_time_from_system(),
+			"size": line_bytes
+		})
+		context_updated.emit(session_path, get_context_percent(session_path))
+
 	if _process_codex_entry(entry, session_path):
 		return
 
-	# Check for /exit or /quit commands in user messages
+	# Check for /exit, /quit, or /compact commands in user messages
 	var entry_type = entry.get("type", "")
 	if entry_type == "user":
 		var user_message = entry.get("message", {})
 		if user_message is Dictionary:
 			var user_content = user_message.get("content", "")
 			if user_content is String:
+				# Check for exit/quit
 				if user_content.contains("<command-name>/exit</command-name>") or \
 				   user_content.contains("<command-name>/quit</command-name>"):
 					var session_id = _derive_session_id(session_path)
@@ -401,6 +461,11 @@ func process_line(line: String, session_path: String = "") -> void:
 						"timestamp": entry.get("timestamp", Time.get_datetime_string_from_system())
 					})
 					return  # Don't process further for exit commands
+				# Check for /compact - reset context tracking
+				if user_content.contains("<command-name>/compact</command-name>"):
+					print("[TranscriptWatcher] COMPACT detected for session: %s" % _derive_session_id(session_path))
+					session_context_entries[session_path] = []
+					context_updated.emit(session_path, 0.0)
 
 	var message = entry.get("message", {})
 	if not message is Dictionary:
