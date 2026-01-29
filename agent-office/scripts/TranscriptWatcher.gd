@@ -358,15 +358,8 @@ func _remove_stale_sessions(current_time: float) -> void:
 		var harness = _derive_harness(path)
 		_cleanup_pending_for_session(path)
 		watched_sessions.erase(path)
-		# Emit session_end so orchestrator can take a break
-		event_received.emit({
-			"event": "session_end",
-			"session_id": session_id,
-			"session_path": path,
-			"harness_id": harness,
-			"harness_label": harness.capitalize() if harness else "",
-			"timestamp": Time.get_datetime_string_from_system()
-		})
+		# Defer session_end emit to avoid synchronous cascade that can cause X11 threading issues
+		call_deferred("_emit_session_end", session_id, path, harness)
 
 func start_watching_session(file_path: String) -> void:
 	# Open file and seek to end
@@ -390,6 +383,16 @@ func _emit_session_start(session_id: String, session_path: String) -> void:
 	var harness = _derive_harness(session_path)
 	event_received.emit({
 		"event": "session_start",
+		"session_id": session_id,
+		"session_path": session_path,
+		"harness_id": harness,
+		"harness_label": harness.capitalize() if harness else "",
+		"timestamp": Time.get_datetime_string_from_system()
+	})
+
+func _emit_session_end(session_id: String, session_path: String, harness: String) -> void:
+	event_received.emit({
+		"event": "session_end",
 		"session_id": session_id,
 		"session_path": session_path,
 		"harness_id": harness,

@@ -1,9 +1,9 @@
 ---
-version: "2.7"
-lastUpdated: "2026-01-28 UTC"
+version: "2.8"
+lastUpdated: "2026-01-29 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - v2.1.0 release: context stress visuals, custom session paths, Clawdbot harness"
+changeTrigger: "Session save - XCB crash fix via deferred session_end emission"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -15,12 +15,16 @@ dependencies: ["communicationStyle.md"]
 **Primary Focus**: Feature-complete office simulation - published on itch.io
 
 **Active Work**:
-- Weather system with rain/snow particles
-- Audio system with typing, meow, achievement, shredder, and filing sounds
-- Day/night cycle with real-time sky colors
-- Agent mood system (tired/frustrated/irate)
+- Stability fixes and crash prevention
 
 **Recent Activities** (last 7 days):
+- **2026-01-29 (Session 19)**: Fixed XCB threading crash on session cleanup:
+  - **Bug**: Godot crashed with XCB assertion failure when TranscriptWatcher sessions became inactive
+  - **Root cause**: Synchronous event cascade during `_process` - `_remove_stale_sessions` emitted `session_end` synchronously, triggering `record_orchestrator_session` → `roster_changed.emit()` → UI updates, all racing with X11
+  - **Fix**: Added `call_deferred("_emit_session_end", ...)` in TranscriptWatcher.gd to defer signal emission to next frame
+  - Added new `_emit_session_end` helper function following existing `_emit_session_start` pattern
+  - **Learning**: Deferred signal emission breaks synchronous cascades that can cause X11 threading races
+
 - **2026-01-28 (Session 17-18)**: v2.1.0 release - context stress visuals, custom session paths, Clawdbot:
   - **Reddit request**: Personal-Dev-Kit requested configurable session paths for WSL users
   - **Custom session paths (WatcherConfigPopup.gd)**:
@@ -112,183 +116,21 @@ dependencies: ["communicationStyle.md"]
     - Added TASKBOARD_OBSTACLE_OFFSET (85, 180) for proper collision registration
     - Legs now block pathfinding like desk monitors
 
-- **2026-01-20 (Session 12)**: Desk drag bug during pause menu:
-  - **Bug**: Adjusting volume sliders in pause menu caused desks to move
-  - **Root cause**: `Desk.gd` used `_input()` for drag handling without popup check
-    - `DraggableItem.gd` already had `is_any_popup_open()` guard
-    - `Desk.gd` was missing this check (only checked `is_occupied`)
-    - Control's `mouse_filter = MOUSE_FILTER_STOP` only blocks GUI event propagation
-    - `_input()` receives events from main input pipeline before GUI processing
-  - **Fix**:
-    - Added `office_manager` reference to `Desk.gd`
-    - Added popup check in `Desk._input()` before starting drag
-    - Set reference in `OfficeManager._create_desks()`
+- **2026-01-20 (Sessions 8-12)**: Weather system, smoke tests, floor boundaries, desk drag fixes
+  - WeatherSystem with rain/snow particles clipped to sky region
+  - Extended smoke_test.py to 832 lines with 22 tests (refactor, interactions, stress, edge cases)
+  - Fixed floor boundaries (FLOOR_MAX_Y=630, DOOR_POSITION Y=615)
+  - Fixed cat stuck detection with long-range timeout
+  - Fixed desk drag during popups (added popup check to Desk._input)
 
-- **2026-01-20 (Session 11)**: Distribution workflow planning:
-  - User considers project ready for first release ("ask for coffee")
-  - Discussed GitHub release access without repo access
-  - Planned itch.io distribution workflow: code → GitHub Actions → Butler → itch.io
-  - Workflow cost: $0 (free tiers cover indie use)
-  - Added itch.io setup task to user's Todoist with full workflow steps
-  - User will set up itch.io account and publishing workflow tonight
+- **2026-01-19 (Sessions 6-7)**: Agent.gd refactor - 51% reduction:
+  - Extracted: AgentVisuals (691), AgentBubbles (395), AgentMood (173), AgentSocial (58), PersonalItemFactory (169)
+  - Agent.gd: ~2880 → 1419 lines
+  - Fixed profile appearance deferred initialization pattern
 
-- **2026-01-20 (Session 10)**: Weather system, delivery sounds, bug fixes:
-  - **WeatherSystem.gd**: Random weather (clear 50%, rain 35%, snow 15%)
-    - CPUParticles2D for rain/snow effects
-    - SubViewport clips particles to 76px sky region (doesn't fall on floor)
-    - 5-15 minute random transitions with 3s fade
-  - **Shredder/filing sounds**: Downloaded CC0 sounds from BigSoundBank
-    - `shredder.wav` (torn paper), `filing.wav` (metal drawer)
-    - Agent tracks `delivery_target` and plays appropriate sound
-    - Added `play_shredder()` and `play_filing()` to AudioManager
-  - **Fixed furniture drag through popups**:
-    - Added `is_any_popup_open()` to OfficeManager
-    - DraggableItem checks popup state before starting drag
-  - **Fixed white tie bug**: Male agents had white ties after profile appearance applied
-    - Cause: tie created as ColorRect without setting .color (defaults to white)
-    - Fix: Set `tie.color = Agent.get_agent_color(agent.agent_type)` in both `_create_male_visuals` and `_create_male_visuals_persistent`
-  - Stress tests passing (20 agents, 100 tool cycles)
-  - User considers project feature-complete
+- **2026-01-18 (Session 5)**: Major features - wall clock, mood system, audio, day/night cycle
 
-- **2026-01-20 (Session 9)**: Floor boundary fix and cat stuck detection:
-  - **xdotool screenshot capability**: Demonstrated ability to capture game window screenshots for visual verification during development
-  - **Fixed agents walking on bottom wall**:
-    - Reduced FLOOR_MAX_Y from 670 to 630 (agents stop at wall edge)
-    - Moved DOOR_POSITION from Y=665 to Y=615 (exit point on floor in front of visual door)
-    - Moved SPAWN_POINT from Y=620 to Y=615 (spawn at same location as exit)
-  - **Fixed cat getting stuck** (long-range stuck detection):
-    - Added LONG_STUCK_TIMEOUT (5s) and LONG_STUCK_DISTANCE (30px)
-    - Cat now turns around and walks opposite direction instead of teleporting
-    - Added `_find_opposite_direction_position()` helper function
-  - **Stress tests passing**: All 3 stress tests pass with floor boundary fix
-  - Verified agents properly exit without getting stuck on wall
-
-- **2026-01-20 (Session 8)**: Smoke test enhancements and force completion fix:
-  - **Extended smoke_test.py** from 243 to 832 lines with new test suites:
-    - `--refactor` - Tests component extraction (AgentVisuals, AgentBubbles, AgentMood, AgentSocial)
-    - `--interactions` - Multi-agent interaction tests (rapid spawns, social spots, reactions)
-    - `--stress` - Rapid event stress testing (20 agents, 10 cycles)
-    - `--edge` - Edge case handling (duplicate IDs, empty events, non-existent agents)
-    - `--all` - Run complete test suite (22 tests total)
-  - **Fixed multiple bugs discovered during testing**:
-    - `reaction_timer` access error in OfficeManager.gd:916 (moved to bubbles component)
-    - `pop_back()` not found on PackedStringArray in TCPServer.gd:80 (convert to Array)
-    - Tour agent stuck at door - `door_position` defaulted to SPAWN_POINT instead of DOOR_POSITION
-    - Door outside walkable area - increased FLOOR_MAX_Y from 625 to 670
-    - `_pick_tour_target()` type mismatch - changed `Array[Vector2]` to plain `Array`
-    - `furniture_tour_targets` type mismatch - changed `Array[Dictionary]` to plain `Array`
-  - **Fixed stress test cleanup issue** - agents stuck with monitors off:
-    - Added `pending_completion` indicator to agent tooltips for debugging
-    - Added `bypass_min_time` parameter to `force_complete()` in Agent.gd
-    - Added `force` flag support to `agent_complete` event in OfficeManager.gd
-    - Updated all smoke_test.py cleanup completions to use `"force": True`
-  - Replaced non-functional `tool_use` event with working `waiting_for_input` event
-
-- **2026-01-19 (Session 7)**: Agent.gd refactor completed - 51% reduction:
-  - **Extracted components**:
-    - AgentVisuals.gd (691 lines) - visual node creation, appearance, tooltips
-    - AgentBubbles.gd (395 lines) - speech bubbles, reactions, phrases
-    - AgentMood.gd (173 lines) - mood tracking, fidget animations
-    - AgentSocial.gd (58 lines) - social spot selection, cooldowns
-    - PersonalItemFactory.gd (169 lines) - from previous session
-  - **Result**: Agent.gd reduced from ~2880 to 1419 lines (51% reduction)
-  - **Fixed CRITICAL bug**: Profile appearance not applying
-    - Cause: `apply_profile_appearance()` called before `_ready()` when `visuals` was null
-    - Fix: Added `_pending_profile` variable to defer application until visuals ready
-  - **Fixed compilation errors during refactor**:
-    - `tool_bg` not declared (missed changing to `visuals.tool_bg`)
-    - `visuals.visuals.status_label` typos (18 occurrences from bad sed)
-    - Class not found errors (Godot needed `--editor --headless` to rescan scripts)
-  - **Cleaned dead code**: Removed unused `get_social_spots()` and `agent` var from AgentSocial.gd
-  - **Smoke test passed**: 4/4 tests passing
-  - Updated REFACTOR_PLAN.md with final status and lessons learned
-
-- **2026-01-19 (Session 6)**: Comprehensive code review and refactor start:
-  - Full code review of Agent.gd (2880 lines) and ProfilePopup.gd (660 lines)
-  - **Fixed CRITICAL issues**:
-    - Added `_exit_tree()` to Agent.gd for proper cleanup (interaction points, desk, chat references)
-    - Fixed post-await validity checks with `is_instance_valid(status_label)`
-  - **Fixed HIGH issues**:
-    - Added `is_instance_valid(office_manager)` in 2 locations
-    - Removed 8 debug print statements (replaced with `_log_debug_event()`)
-    - Added null profile guard in ProfilePopup.gd `show_profile()`
-    - Fixed division by zero in ProfilePopup.gd `_create_bar()`
-    - Added `is_instance_valid()` for roster and badge_system
-    - Added `get_viewport().set_input_as_handled()` for ESC key
-  - **Fixed MEDIUM/LOW issues**:
-    - Added bounds check in `_furniture_tour_arrived()`
-    - Removed unused `shirt` variable and `stats_container`
-  - **Refactor started**:
-    - Created REFACTOR_PLAN.md documenting extraction strategy
-    - Extracted PersonalItemFactory.gd (169 lines) - static utility for desk items
-    - Agent.gd reduced from ~2880 to 2776 lines (~100 line reduction)
-  - Remaining refactor: AgentVisuals (~400 lines), AgentBubbles (~350), AgentSocial (~200), AgentNavigation (~150), AgentMood (~80)
-
-- **2026-01-18 (Session 5)**: Major feature additions and bug fixes:
-  - Code review via `/local-review` identified issues across 19 files
-  - Fixed bugs:
-    - Unreachable hair rendering in ProfilePopup (moved from after return)
-    - DraggableItem input handling (reverted `_unhandled_input` to `_input`)
-    - Monitor staying on when agents leave (added desk release in `_start_leaving()`)
-    - Added `is_instance_valid()` checks in Agent.gd
-    - Centralized UI_POPUP_LAYER constant (replaced magic number 200)
-  - New features implemented:
-    - **Skill tooltips** in ProfilePopup badges
-    - **Wall clock** with real-time hour/minute/second hands (WallClock.gd)
-    - **Agent mood system**: Tired (30min), Frustrated (1hr), Irate (2hr) with mood-specific phrases
-    - **AudioManager**: Typing sounds, meow sounds, achievement stapler sound
-    - **Day/night cycle**: Real-time sky color transitions (dawn→day→dusk→night)
-    - **New achievements**: Cat Petter/Cat Friend/Crazy Cat Office, Quick Task/Lightning Fast/Speed Demon
-  - Downloaded CC0 audio files from BigSoundBank (typing.wav, meow.wav, stapler.wav)
-  - Fixed Godot class_name loading issues (preload instead of global class_name for AudioManager/WallClock)
-  - Modified agent "Quinn" appearance (female, light skin, brown hair)
-  - Repositioned wall clock to x=1020 (between windows, above window masks)
-
-- **2026-01-17 (Session 4)**: Gamification verification, codebase review:
-  - Verified lifetime stats ARE persisting (AgentProfile JSON in user://stable/)
-  - Diagnosed tool tracking delay - reduced SCAN_INTERVAL from 5s to 1s
-  - Added debug flags to OfficeConstants (DEBUG_EVENTS, DEBUG_TOOL_TRACKING, DEBUG_AGENT_LOOKUP)
-  - Centralized TOOL_ICONS and TOOL_COLORS in OfficePalette.gd (removed from Agent.gd)
-  - Comprehensive codebase exploration identifying refactoring opportunities:
-    - God Object issue: OfficeManager (1,226 lines), Agent (1,500+ lines)
-    - String-based method dispatch should use signals
-    - A* pathfinding could use priority queue
-  - Health Score: 6.1/10 - functional but monolithic classes limit maintainability
-
-- **2026-01-16 (Session 3)**: Z-index fix, smoke test, pathfinding improvements:
-  - Fixed z-index for DraggableItem (water cooler, plant, cabinet, shredder, table)
-    - Added `z_index = int(position.y)` in _ready() and _process()
-  - Created `smoke_test.py`:
-    - Basic tests: connection, agent_spawn, tool_use, agent_complete
-    - `--tour` flag: furniture tour visiting all items from multiple sides
-  - Added `furniture_tour` event and FURNITURE_TOUR state
-  - Fixed orchestrator teleporting to water cooler (now walks with pathfinding)
-  - Added path recalculation when target furniture moves mid-walk:
-    - New `destination_furniture` tracking in Agent
-    - `on_furniture_moved()` method recalculates path
-  - Added graceful unreachable path handling:
-    - NavigationGrid returns empty array (no direct-path fallback)
-    - Agent `_handle_unreachable_destination()` - skips/leaves/idles
-
-- **2026-01-16 (Session 2)**: Bug fixes and orchestrator lifecycle:
-  - Fixed 6 visual/behavioral bugs:
-    - Desk items accumulating (defensive clear_personal_items)
-    - Head z-ordering (body=0, tie=1, head=2)
-    - Cat/whiteboard drag limits expanded
-    - Whiteboard legs added (metal easel)
-    - Monitor timing (separated reservation from set_monitor_active)
-  - Added /exit detection in TranscriptWatcher → orchestrators leave office
-  - Added 10-minute idle timeout → orchestrators at water cooler leave
-  - Removed female necklace/scarf (translated poorly)
-
-- **2026-01-16 (Session 1)**: Added cute features via panel-driven development:
-  - Tuned spontaneous bubble timing (12s interval, 25% chance)
-  - Cat meow speech bubbles with 11 phrases
-  - Compact tooltips fixing overflow
-  - Random post-work socializing (cooler/plant/cabinet/exit)
-  - Meeting table overflow for 8+ agents
-  - Draggable meeting table
-  - Tool-aware phrases for desk and meeting agents
+- **2026-01-16-17 (Sessions 1-4)**: Initial features and gamification verification
 
 ## Critical Reference Information
 
@@ -520,3 +362,17 @@ func prune() -> void:
 
 ### Cron vs Systemd Timer Formats
 Cron expressions like `*/10 * * * *` don't directly translate to systemd calendar specs. The sync script may generate invalid timer files. Use `--force-cron` flag when systemd timers fail with "bad unit file setting".
+
+### Deferred Signal Emission for X11 Threading
+Synchronous signal cascades during `_process` can cause XCB assertion failures when X11 requests race between threads. When emitting signals that trigger UI updates (especially during session/resource cleanup), use `call_deferred` to defer emission to the next frame:
+```gdscript
+# Instead of:
+event_received.emit({"event": "session_end", ...})
+
+# Use:
+call_deferred("_emit_session_end", session_id, path, harness)
+
+func _emit_session_end(session_id: String, session_path: String, harness: String) -> void:
+    event_received.emit({...})
+```
+This breaks the synchronous cascade and gives X11 time to complete pending operations.
