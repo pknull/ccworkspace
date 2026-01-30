@@ -161,6 +161,10 @@ const CAT_INTERACTION_PROXIMITY: float = 40.0  # How close to cat to trigger rea
 const PROFILER_UPDATE_INTERVAL: float = 0.5  # Update profiler every 0.5s
 const AUTO_SAVE_INTERVAL: float = 60.0  # Periodic safety save
 
+# Roster reconciliation (catch orphaned working_agents entries)
+var roster_reconcile_timer: float = 0.0
+const ROSTER_RECONCILE_INTERVAL: float = 5.0  # Check every 5 seconds
+
 # Obstacles for agent pathfinding (legacy - kept for cat)
 var office_obstacles: Array[Rect2] = []
 
@@ -304,11 +308,17 @@ func _process(delta: float) -> void:
 		interaction_check_timer = 0.0
 		_check_agent_interactions()
 
-	# Auto-save safety
+	# Auto-save safety (deferred to avoid X11 threading issues)
 	autosave_timer += delta
 	if autosave_timer >= AUTO_SAVE_INTERVAL:
 		autosave_timer = 0.0
-		_perform_autosave()
+		call_deferred("_perform_autosave")
+
+	# Roster reconciliation - release orphaned working_agents entries
+	roster_reconcile_timer += delta
+	if roster_reconcile_timer >= ROSTER_RECONCILE_INTERVAL:
+		roster_reconcile_timer = 0.0
+		_reconcile_roster()
 
 	# Check if MCP manager should leave due to inactivity
 	_check_mcp_manager_timeout(delta)
@@ -2027,6 +2037,23 @@ func _on_agent_completed(agent: Agent) -> void:
 		agent.work_completed.disconnect(_on_agent_completed)
 
 	agent.queue_free()
+
+func _reconcile_roster() -> void:
+	## Sync roster working_agents with actual active agents to catch orphaned entries.
+	if not agent_roster:
+		return
+
+	# Collect profile IDs of all currently active agents
+	var active_profile_ids: Array[int] = []
+	for agent_id in active_agents:
+		var agent = active_agents[agent_id] as Agent
+		if agent and is_instance_valid(agent) and agent.profile_id >= 0:
+			active_profile_ids.append(agent.profile_id)
+
+	# Let roster release any working entries not in active set
+	var cleared = agent_roster.reconcile_working_agents(active_profile_ids)
+	if cleared > 0:
+		print("[OfficeManager] Reconciled roster: released %d orphaned working entries" % cleared)
 
 func _prune_session_agent_ids(session_id: String) -> void:
 	if session_id.is_empty():

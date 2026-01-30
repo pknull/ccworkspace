@@ -1,9 +1,9 @@
 ---
-version: "2.8"
-lastUpdated: "2026-01-29 UTC"
+version: "2.9"
+lastUpdated: "2026-01-30 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - XCB crash fix via deferred session_end emission"
+changeTrigger: "Session save - roster reconciliation fix for orphaned working_agents"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -18,6 +18,20 @@ dependencies: ["communicationStyle.md"]
 - Stability fixes and crash prevention
 
 **Recent Activities** (last 7 days):
+- **2026-01-30 (Session 20)**: Fixed roster working_agents desync (orphaned agents):
+  - **Bug**: User reported agents "stuck at the door"; roster showed Quinn/Casey as `[working]` but they weren't in office
+  - **Root cause**: Two separate tracking systems can desync:
+    - `OfficeManager.active_agents` tracks actual Agent nodes in scene
+    - `AgentRoster.working_agents` tracks profile IDs marked as busy
+  - When agents complete abnormally (app quit, scene tree manipulation), `work_completed` signal never fires, `release_agent()` never runs
+  - **Not a state engine problem**: Agent state machine is correct; issue is architectural coupling between tracking systems
+  - **Fix implemented**:
+    - `AgentRoster.gd`: Added `reconcile_working_agents(active_profile_ids)` - compares working dict with actual agents, releases orphans
+    - `OfficeManager.gd`: Added `_reconcile_roster()` called every 5 seconds via timer
+    - Collects profile IDs from all active agents, passes to roster for sync
+  - **Result**: Orphaned working entries (Quinn, Casey) will be auto-released within 5 seconds of app restart
+  - **Learning**: When two systems track related state independently, add periodic reconciliation as safety net
+
 - **2026-01-29 (Session 19)**: Fixed XCB threading crash on session cleanup:
   - **Bug**: Godot crashed with XCB assertion failure when TranscriptWatcher sessions became inactive
   - **Root cause**: Synchronous event cascade during `_process` - `_remove_stale_sessions` emitted `session_end` synchronously, triggering `record_orchestrator_session` → `roster_changed.emit()` → UI updates, all racing with X11
@@ -376,3 +390,20 @@ func _emit_session_end(session_id: String, session_path: String, harness: String
     event_received.emit({...})
 ```
 This breaks the synchronous cascade and gives X11 time to complete pending operations.
+
+### Parallel State Tracking Desync
+When two systems track related state independently (e.g., `active_agents` dict vs `working_agents` dict), they can desync if one system's cleanup path fails. Solutions:
+1. **Tight coupling**: Make one system authoritative, other derives state
+2. **Reconciliation**: Periodically sync systems to catch drift
+3. **Event-driven**: Both systems listen to same lifecycle events
+Pattern for reconciliation:
+```gdscript
+func reconcile_working_agents(active_profile_ids: Array[int]) -> int:
+    var orphaned: Array[int] = []
+    for profile_id in working_agents.keys():
+        if profile_id not in active_profile_ids:
+            orphaned.append(profile_id)
+    for profile_id in orphaned:
+        working_agents.erase(profile_id)
+    return orphaned.size()
+```

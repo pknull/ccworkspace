@@ -269,6 +269,21 @@ func release_agent(agent_id: int) -> void:
 func is_working(agent_id: int) -> bool:
 	return working_agents.has(agent_id)
 
+func reconcile_working_agents(active_profile_ids: Array[int]) -> int:
+	## Sync working_agents with actual active agents. Returns count of orphaned entries cleared.
+	## Call periodically from OfficeManager to handle agents that left without proper cleanup.
+	var orphaned: Array[int] = []
+	for profile_id in working_agents.keys():
+		if profile_id not in active_profile_ids:
+			orphaned.append(profile_id)
+
+	for profile_id in orphaned:
+		var profile_name = agents[profile_id].agent_name if agents.has(profile_id) else "unknown"
+		print("[AgentRoster] Reconcile: releasing orphaned working status for %s (id=%d)" % [profile_name, profile_id])
+		working_agents.erase(profile_id)
+
+	return orphaned.size()
+
 func fire_agent(agent_id: int) -> bool:
 	if not agents.has(agent_id):
 		return false
