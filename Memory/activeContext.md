@@ -1,9 +1,9 @@
 ---
-version: "2.9"
-lastUpdated: "2026-01-30 UTC"
+version: "3.0"
+lastUpdated: "2026-01-31 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - roster reconciliation fix for orphaned working_agents"
+changeTrigger: "Session save - v2.1.1 release, X11 crash prevention via deferred roster signals"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -18,6 +18,20 @@ dependencies: ["communicationStyle.md"]
 - Stability fixes and crash prevention
 
 **Recent Activities** (last 7 days):
+- **2026-01-31 (Session 21)**: v2.1.1 release - X11 crash cascade prevention:
+  - **Bug**: XCB crash during session cleanup, triggered by roster_changed signal cascade
+  - **Root cause**: Session 19's fix deferred `session_end` emission, but subsequent `roster_changed.emit()` in `record_orchestrator_session()` still triggered synchronous UI updates that raced with X11
+  - **Cascade path**: `session_end` → `_handle_session_end` → `record_orchestrator_session` → `roster_changed.emit()` → 4 handlers doing UI updates
+  - **Fix implemented (defense in depth)**:
+    - `AgentRoster._emit_roster_changed()` helper with guards: `is_inside_tree()`, `is_queued_for_deletion()`, tree validity
+    - All 7 `roster_changed.emit()` calls replaced with `call_deferred("_emit_roster_changed")`
+    - All 4 `_on_roster_changed()` handlers guard with `is_inside_tree()`
+    - `OfficeManager._request_quit()` disconnects transcript_watcher and roster signals before cleanup
+    - `OfficeManager._on_event_received()` skips processing when `is_quitting`
+  - **Known limitation**: This is application-level mitigation for a Godot engine bug ([#102633](https://github.com/godotengine/godot/issues/102633)). True graceful X11 recovery would require engine changes.
+  - **Learning**: When signals trigger UI operations, both emitter AND receivers need shutdown guards. Defense in depth - fail gracefully at multiple points.
+  - **Release**: Tagged v2.1.1, pushed to GitHub, CI building exports
+
 - **2026-01-30 (Session 20)**: Fixed roster working_agents desync (orphaned agents):
   - **Bug**: User reported agents "stuck at the door"; roster showed Quinn/Casey as `[working]` but they weren't in office
   - **Root cause**: Two separate tracking systems can desync:
@@ -180,6 +194,7 @@ Port 9999, JSON messages with `"event"` field:
 - [x] Set up itch.io publishing workflow (GitHub Actions with Butler)
 - [x] v2.0.2 released - desk collision fix, monitor cleanup, typing sounds
 - [x] v2.1.0 released - context stress visuals, custom session paths, Clawdbot harness
+- [x] v2.1.1 released - X11 crash cascade prevention via deferred roster signals
 
 **Blocked**:
 - None
@@ -406,4 +421,36 @@ func reconcile_working_agents(active_profile_ids: Array[int]) -> int:
     for profile_id in orphaned:
         working_agents.erase(profile_id)
     return orphaned.size()
+```
+
+### Defense in Depth for Signal-Triggered UI
+When signals trigger UI operations that can race with system cleanup (X11, etc.), guard at BOTH emitter and receiver:
+1. **Emitter helper**: Create deferred emission helper with validity checks
+2. **Receiver guards**: Check `is_inside_tree()` and shutdown flags before processing
+3. **Shutdown disconnect**: Explicitly disconnect signal handlers in `_request_quit()` before any cleanup
+4. **Entry point guard**: Skip event processing entirely when `is_quitting`
+Pattern:
+```gdscript
+# Emitter - deferred with guards
+func _emit_roster_changed() -> void:
+    if not is_inside_tree() or is_queued_for_deletion():
+        return
+    if get_tree() == null:
+        return
+    roster_changed.emit()
+
+# Replace all direct emissions
+call_deferred("_emit_roster_changed")
+
+# Receiver - shutdown guard
+func _on_roster_changed() -> void:
+    if is_quitting or not is_inside_tree():
+        return
+    _update_ui()
+
+# Shutdown - disconnect first
+func _request_quit() -> void:
+    is_quitting = true
+    signal_source.my_signal.disconnect(_my_handler)
+    # ... then save/cleanup
 ```
