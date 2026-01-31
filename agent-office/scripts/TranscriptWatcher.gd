@@ -379,9 +379,21 @@ func start_watching_session(file_path: String) -> void:
 	else:
 		push_warning("[TranscriptWatcher] Cannot open: %s" % file_path)
 
+func _emit_event(data: Dictionary) -> void:
+	## Helper for deferred emission - breaks synchronous cascades that can cause X11 threading issues.
+	## Guards against emission during shutdown to prevent X11 fatal errors.
+	if not is_inside_tree():
+		return
+	if is_queued_for_deletion():
+		return
+	var tree = get_tree()
+	if tree == null:
+		return
+	event_received.emit(data)
+
 func _emit_session_start(session_id: String, session_path: String) -> void:
 	var harness = _derive_harness(session_path)
-	event_received.emit({
+	call_deferred("_emit_event", {
 		"event": "session_start",
 		"session_id": session_id,
 		"session_path": session_path,
@@ -391,7 +403,7 @@ func _emit_session_start(session_id: String, session_path: String) -> void:
 	})
 
 func _emit_session_end(session_id: String, session_path: String, harness: String) -> void:
-	event_received.emit({
+	call_deferred("_emit_event", {
 		"event": "session_end",
 		"session_id": session_id,
 		"session_path": session_path,
@@ -439,7 +451,7 @@ func check_session_for_entries(file_path: String) -> void:
 	if had_content:
 		var session_id = _derive_session_id(file_path)
 		var harness = _derive_harness(file_path)
-		event_received.emit({
+		call_deferred("_emit_event", {
 			"event": "session_activity",
 			"session_id": session_id,
 			"session_path": file_path,
@@ -488,7 +500,7 @@ func process_line(line: String, session_path: String = "") -> void:
 					var session_id = _derive_session_id(session_path)
 					var harness = _derive_harness(session_path)
 					print("[TranscriptWatcher] EXIT detected for session: %s" % session_id)
-					event_received.emit({
+					call_deferred("_emit_event", {
 						"event": "session_exit",
 						"session_id": session_id,
 						"session_path": session_path,
@@ -586,7 +598,7 @@ func _process_clawdbot_entry(entry: Dictionary, session_path: String) -> bool:
 		for tool_use_id in to_clear:
 			var info = pending_tools.get(tool_use_id, {})
 			pending_tools.erase(tool_use_id)
-			event_received.emit({
+			call_deferred("_emit_event", {
 				"event": "input_received",
 				"agent_id": "main",
 				"tool": info.get("tool_name", ""),
@@ -655,7 +667,7 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 		print("[TranscriptWatcher] SPAWN: %s - %s (id: %s)" % [agent_type, description, tool_id.substr(0, 12)])
 
 		var harness = _derive_harness(session_path)
-		event_received.emit({
+		call_deferred("_emit_event", {
 			"event": "agent_spawn",
 			"agent_id": tool_id.substr(0, 12),  # Use 12 chars to reduce collision risk
 			"agent_type": agent_type,
@@ -690,7 +702,7 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 
 		var harness = _derive_harness(session_path)
 		# Emit waiting_for_input - monitor turns red until result comes back
-		event_received.emit({
+		call_deferred("_emit_event", {
 			"event": "waiting_for_input",
 			"agent_id": "main",
 			"tool": tool_name,
@@ -738,7 +750,7 @@ func process_tool_result(item: Dictionary, entry: Dictionary) -> void:
 
 		print("[TranscriptWatcher] COMPLETE: %s - %s (id: %s) result=%s" % [agent_info.agent_type, agent_info.description, tool_use_id.substr(0, 12), display_result.substr(0, 50)])
 
-		event_received.emit({
+		call_deferred("_emit_event", {
 			"event": "agent_complete",
 			"agent_id": tool_use_id.substr(0, 12),  # Match spawn ID length
 			"success": str(not is_error),
@@ -753,7 +765,7 @@ func process_tool_result(item: Dictionary, entry: Dictionary) -> void:
 
 		print("[TranscriptWatcher] TOOL DONE: %s (id: %s)" % [tool_info.tool_name, tool_use_id.substr(0, 12)])
 
-		event_received.emit({
+		call_deferred("_emit_event", {
 			"event": "input_received",
 			"agent_id": "main",
 			"tool": tool_info.tool_name,

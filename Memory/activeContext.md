@@ -1,9 +1,9 @@
 ---
-version: "3.0"
+version: "3.1"
 lastUpdated: "2026-01-31 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - v2.1.1 release, X11 crash prevention via deferred roster signals"
+changeTrigger: "Session save - v2.1.2 fix: deferred event emissions in TranscriptWatcher"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -18,6 +18,19 @@ dependencies: ["communicationStyle.md"]
 - Stability fixes and crash prevention
 
 **Recent Activities** (last 7 days):
+- **2026-01-31 (Session 22)**: Extended X11 crash mitigation to TranscriptWatcher:
+  - **Trigger**: XCB sequence number crash after 13 hours runtime (v2.1.1 improved from immediate crashes)
+  - **Observation**: v2.1.1 deferred `roster_changed` signals; crash still occurred after extended runtime
+  - **Analysis**: TranscriptWatcher has 9 `event_received.emit()` calls still synchronous
+  - **Panel decision**: 100% consensus to apply same deferred emission pattern
+  - **Fix implemented**:
+    - Added `TranscriptWatcher._emit_event()` helper with guards: `is_inside_tree()`, `is_queued_for_deletion()`, tree validity
+    - All 9 `event_received.emit()` calls converted to `call_deferred("_emit_event", {...})`
+    - Events affected: `session_start`, `session_end`, `session_activity`, `session_exit`, `agent_spawn`, `waiting_for_input`, `agent_complete`, `input_received` (2 locations)
+  - **Pattern**: Same mechanism as AgentRoster fix - deferred emission breaks synchronous cascades that race with X11
+  - **Known limitation**: Still application-level mitigation for Godot engine bug (#102633)
+  - **Learning**: When one signal path is deferred, check ALL signal paths that trigger UI updates
+
 - **2026-01-31 (Session 21)**: v2.1.1 release - X11 crash cascade prevention:
   - **Bug**: XCB crash during session cleanup, triggered by roster_changed signal cascade
   - **Root cause**: Session 19's fix deferred `session_end` emission, but subsequent `roster_changed.emit()` in `record_orchestrator_session()` still triggered synchronous UI updates that raced with X11

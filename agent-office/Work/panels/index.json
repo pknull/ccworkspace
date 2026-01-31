@@ -1,0 +1,14 @@
+{
+  "panels": [
+    {
+      "id": "2026-01-31--x11-deferred-events-fix",
+      "topic": "Should we apply deferred event emission fix to TranscriptWatcher to further mitigate X11 XCB crash?",
+      "status": "completed",
+      "created": "2026-01-31T21:00:00+10:00",
+      "updated": "2026-01-31T21:15:00+10:00",
+      "current_phase": 8,
+      "decision": "Apply deferred event emission pattern to TranscriptWatcher",
+      "consensus": 100
+    }
+  ]
+}
