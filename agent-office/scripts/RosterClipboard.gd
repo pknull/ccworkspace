@@ -104,6 +104,9 @@ func setup(agent_roster: AgentRoster) -> void:
 	refresh_display()
 
 func _on_roster_changed() -> void:
+	# Guard against updates during shutdown
+	if not is_inside_tree():
+		return
 	refresh_display()
 
 func refresh_display() -> void:

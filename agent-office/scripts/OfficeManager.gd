@@ -269,7 +269,21 @@ func _request_quit() -> void:
 	if is_quitting:
 		return
 	is_quitting = true
-	print("[OfficeManager] Window close requested - saving data")
+	print("[OfficeManager] Window close requested - disconnecting watchers, saving data")
+
+	# Disconnect transcript watcher first to prevent event cascades during shutdown
+	# This stops session_end events from triggering UI updates that race with X11 cleanup
+	if transcript_watcher:
+		if transcript_watcher.event_received.is_connected(_on_event_received):
+			transcript_watcher.event_received.disconnect(_on_event_received)
+		if transcript_watcher.context_updated.is_connected(_on_context_updated):
+			transcript_watcher.context_updated.disconnect(_on_context_updated)
+
+	# Disconnect roster signals to prevent UI updates during shutdown
+	if agent_roster:
+		if agent_roster.roster_changed.is_connected(_on_roster_changed):
+			agent_roster.roster_changed.disconnect(_on_roster_changed)
+
 	_save_positions()
 	if agent_roster:
 		agent_roster.save_roster()
@@ -1316,6 +1330,10 @@ func register_spontaneous_bubble(agent: Agent) -> void:
 # =============================================================================
 
 func _on_event_received(event_data: Dictionary) -> void:
+	# Skip all event processing during shutdown to prevent X11 cascades
+	if is_quitting:
+		return
+
 	var event_type = event_data.get("event", "")
 	if mcp_server and mcp_server.has_method("record_event"):
 		mcp_server.record_event(event_data)
@@ -2511,6 +2529,11 @@ func _on_reset_button_pressed() -> void:
 # =============================================================================
 
 func _on_roster_changed() -> void:
+	# Guard against updates during shutdown - multiple checks for safety
+	if is_quitting:
+		return
+	if not is_inside_tree():
+		return
 	# Update VIP photo when roster changes (agent hired, stats updated, etc.)
 	_update_vip_photo()
 

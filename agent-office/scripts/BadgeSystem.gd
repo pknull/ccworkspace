@@ -80,6 +80,9 @@ func setup(agent_roster: AgentRoster) -> void:
 	recalculate_all_badges()
 
 func _on_roster_changed() -> void:
+	# Guard against updates during shutdown
+	if not is_inside_tree():
+		return
 	recalculate_all_badges()
 
 # =============================================================================

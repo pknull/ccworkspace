@@ -74,6 +74,9 @@ func set_agent_roster(roster: AgentRoster) -> void:
 		agent_roster.agent_level_up.connect(_on_agent_level_up)
 
 func _on_roster_changed() -> void:
+	# Guard against updates during shutdown
+	if not is_inside_tree():
+		return
 	# Check achievements when roster data changes
 	_check_achievements()
 

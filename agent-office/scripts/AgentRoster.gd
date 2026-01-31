@@ -28,6 +28,18 @@ signal roster_changed()
 # INITIALIZATION
 # =============================================================================
 
+func _emit_roster_changed() -> void:
+	## Helper for deferred emission - breaks synchronous cascades that can cause X11 threading issues.
+	## Guards against emission during shutdown to prevent X11 fatal errors.
+	if not is_inside_tree():
+		return
+	if is_queued_for_deletion():
+		return
+	var tree = get_tree()
+	if tree == null:
+		return
+	roster_changed.emit()
+
 func _ready() -> void:
 	_ensure_stable_dir()
 	load_roster()
@@ -88,7 +100,7 @@ func load_roster() -> void:
 
 	print("[AgentRoster] Loaded %d agents" % agents.size())
 	_cleanup_orphaned_relationships()
-	roster_changed.emit()
+	call_deferred("_emit_roster_changed")
 
 func _load_agent_profile(agent_id: int) -> AgentProfile:
 	var path = "%s/agent_%03d.json" % [STABLE_DIR, agent_id]
@@ -195,7 +207,7 @@ func hire_agent() -> AgentProfile:
 
 	print("[AgentRoster] Hired new agent: %s (#%d)" % [profile.agent_name, profile.id])
 	agent_hired.emit(profile)
-	roster_changed.emit()
+	call_deferred("_emit_roster_changed")
 
 	# Save immediately
 	save_profile(profile)
@@ -305,7 +317,7 @@ func fire_agent(agent_id: int) -> bool:
 		DirAccess.remove_absolute(path)
 
 	save_roster()
-	roster_changed.emit()
+	call_deferred("_emit_roster_changed")
 	print("[AgentRoster] Fired agent: %s (#%d)" % [profile.agent_name, profile.id])
 	return true
 
@@ -327,7 +339,7 @@ func record_task_completed(agent_id: int, skill_name: String, work_time: float) 
 		agent_level_up.emit(profile, new_level)
 
 	save_profile(profile)
-	roster_changed.emit()
+	call_deferred("_emit_roster_changed")
 
 func record_tool_use(agent_id: int, tool_name: String) -> void:
 	if not agents.has(agent_id):
@@ -342,7 +354,7 @@ func record_tool_use(agent_id: int, tool_name: String) -> void:
 		agent_level_up.emit(profile, new_level)
 
 	# Don't save on every tool use - too frequent
-	roster_changed.emit()
+	call_deferred("_emit_roster_changed")
 
 func record_chat(agent_a_id: int, agent_b_id: int) -> void:
 	if not agents.has(agent_a_id) or not agents.has(agent_b_id):
@@ -359,7 +371,7 @@ func record_chat(agent_a_id: int, agent_b_id: int) -> void:
 	if new_level_b > 0:
 		agent_level_up.emit(profile_b, new_level_b)
 
-	roster_changed.emit()
+	call_deferred("_emit_roster_changed")
 
 func record_worked_with(agent_id: int, other_agent_id: int) -> void:
 	if not agents.has(agent_id) or not agents.has(other_agent_id):
@@ -381,7 +393,7 @@ func record_orchestrator_session(agent_id: int) -> void:
 		agent_level_up.emit(profile, new_level)
 
 	save_profile(profile)
-	roster_changed.emit()
+	call_deferred("_emit_roster_changed")
 
 # =============================================================================
 # QUERIES
