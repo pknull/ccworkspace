@@ -1,9 +1,9 @@
 ---
-version: "3.1"
-lastUpdated: "2026-01-31 UTC"
+version: "3.2"
+lastUpdated: "2026-02-01 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - v2.1.2 fix: deferred event emissions in TranscriptWatcher"
+changeTrigger: "Session save - terminal furniture fixes (shell restart, font config)"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -15,9 +15,24 @@ dependencies: ["communicationStyle.md"]
 **Primary Focus**: Feature-complete office simulation - published on itch.io
 
 **Active Work**:
+- Terminal furniture integration (branch: `terminal-furniture`, not merged)
 - Stability fixes and crash prevention
 
 **Recent Activities** (last 7 days):
+- **2026-02-01 (Session 23)**: Terminal furniture bug fixes:
+  - **Goal**: Investigate new terminal furniture, improve font rendering, fix bugs
+  - **Font investigation**: Explored bitmap fonts (lime, nu, limey, cozette) for crisp rendering
+    - **Discovery**: Godot doesn't support OTB (OpenType Bitmap) format - only TTF/OTF
+    - Configured gohufont-11 with correct 6×11 pixel dimensions
+    - Updated GodotXterm theme to use gohufont
+  - **Bug fix - Shell restart**: Terminal got stuck after typing `exit`
+    - **Root cause**: PTY node can't be reused after child process exits - `fork()` silently fails
+    - **Fix**: Recreate entire PTY node in `_restart_shell()` instead of reusing
+  - **Bug fix - Taskboard removal**: Verified working (debug prints confirmed signal flow)
+  - **Cleanup**: Removed unused `third_party/limey/` folder
+  - **Status**: Branch `terminal-furniture` - more issues to address before merge
+  - **Learning**: PTY nodes must be recreated after process exit, not reused
+
 - **2026-01-31 (Session 22)**: Extended X11 crash mitigation to TranscriptWatcher:
   - **Trigger**: XCB sequence number crash after 13 hours runtime (v2.1.1 improved from immediate crashes)
   - **Observation**: v2.1.1 deferred `roster_changed` signals; crash still occurred after extended runtime
