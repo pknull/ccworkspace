@@ -29,6 +29,8 @@ var _bezel_rect: ColorRect = null
 var _status_indicator: ColorRect = null
 var _restart_pending := false
 var _last_focus_state := false
+var _restart_count := 0
+var _last_restart_time := 0
 
 func _init() -> void:
 	furniture_type = "terminal_furniture"
@@ -43,9 +45,16 @@ func _ready() -> void:
 	super._ready()
 	call_deferred("_sync_terminal_metrics")
 
+func _exit_tree() -> void:
+	# Clean up PTY process to prevent orphaned shells
+	if _pty and is_instance_valid(_pty):
+		if _pty.has_method("kill"):
+			_pty.call("kill", 15)  # SIGTERM
+		_pty = null
+
 func _process(_delta: float) -> void:
 	# Update status indicator based on terminal focus
-	var is_focused = _terminal != null and _terminal.has_focus()
+	var is_focused = is_instance_valid(_terminal) and _terminal.has_focus()
 	if is_focused != _last_focus_state:
 		_last_focus_state = is_focused
 		if _status_indicator:
@@ -63,21 +72,21 @@ func _input(event: InputEvent) -> void:
 			var local_pos = get_local_mouse_position()
 			if _is_inside_terminal(local_pos):
 				# Click on terminal - focus it, let terminal handle mouse for selection
-				if _terminal:
+				if is_instance_valid(_terminal):
 					_terminal.grab_focus()
 				# Don't call super - prevents DraggableItem from starting drag
 				# Don't mark as handled - lets terminal receive mouse for text selection
 				return
 			elif click_area.has_point(local_pos):
 				# Click on frame border - release terminal focus, let parent handle drag
-				if _terminal and _terminal.has_focus():
+				if is_instance_valid(_terminal) and _terminal.has_focus():
 					_terminal.release_focus()
 				# Don't mark as handled - let DraggableItem start drag
 				super._input(event)
 				return
 			else:
 				# Click outside furniture - release focus
-				if _terminal and _terminal.has_focus():
+				if is_instance_valid(_terminal) and _terminal.has_focus():
 					_terminal.release_focus()
 
 	super._input(event)
@@ -119,9 +128,13 @@ func _build_visuals() -> void:
 	_terminal.size = _rounded_vec2(_terminal_size)
 	_terminal.custom_minimum_size = _terminal.size
 	# Defer size adjustment to after terminal calculates its cell_size
-	# Use a timer to ensure terminal is fully initialized
-	var timer = get_tree().create_timer(0.1)
+	# Use child Timer (freed with parent) to avoid callback on freed object
+	var timer = Timer.new()
+	timer.wait_time = 0.1
+	timer.one_shot = true
 	timer.timeout.connect(_adjust_terminal_size)
+	add_child(timer)
+	timer.start()
 
 	# PTY node wired to the terminal
 	_pty = _create_pty()
@@ -159,7 +172,8 @@ func _apply_terminal_theme(terminal: Control) -> void:
 	# Gohufont 11px - crisp bitmap font, retro aesthetic
 	var font_path = "res://third_party/gohufont/gohufont-11.ttf"
 	if ResourceLoader.exists(font_path):
-		var font_file = load(font_path) as FontFile
+		# Duplicate to avoid mutating shared resource
+		var font_file = load(font_path).duplicate() as FontFile
 		if font_file:
 			font_file.antialiasing = TextServer.FONT_ANTIALIASING_NONE
 			font_file.hinting = TextServer.HINTING_NONE
@@ -188,7 +202,7 @@ func _calc_terminal_size_fallback() -> Vector2:
 	return Vector2(width, height)
 
 func _sync_terminal_metrics() -> void:
-	if not _terminal:
+	if not is_instance_valid(_terminal):
 		return
 	# Use fixed cell dimensions for bitmap font - don't query terminal
 	# as it may report wrong sizes for bitmap fonts
@@ -201,7 +215,7 @@ func _sync_terminal_metrics() -> void:
 
 func _adjust_terminal_size() -> void:
 	# Query terminal's actual cell_size and resize to get correct cols/rows
-	if not _terminal:
+	if not is_instance_valid(_terminal):
 		return
 	if _terminal.has_method("get_cell_size"):
 		var actual_cell_size: Vector2 = _terminal.call("get_cell_size")
@@ -262,7 +276,7 @@ func _apply_frame_layout(terminal_size: Vector2) -> void:
 	)
 
 func _is_inside_terminal(local_pos: Vector2) -> bool:
-	if _terminal == null:
+	if not is_instance_valid(_terminal):
 		return false
 	return Rect2(_terminal.position, _terminal.size).has_point(local_pos)
 
@@ -288,23 +302,37 @@ func _start_shell() -> void:
 func _on_pty_exited(_exit_code: int, _signum: int) -> void:
 	if _restart_pending:
 		return
+	# Throttle restarts to prevent infinite loop on immediate crash
+	var now = Time.get_ticks_msec()
+	if now - _last_restart_time < 1000:
+		_restart_count += 1
+		if _restart_count > 5:
+			push_error("TerminalFurniture: Shell crashed too many times, not restarting")
+			return
+	else:
+		_restart_count = 0
+	_last_restart_time = now
 	_restart_pending = true
 	call_deferred("_restart_shell")
 
 func _restart_shell() -> void:
 	_restart_pending = false
 
+	# Don't restart if terminal is gone
+	if not is_instance_valid(_terminal):
+		return
+
 	# Clear the terminal before restarting
-	if _terminal and _terminal.has_method("clear"):
+	if _terminal.has_method("clear"):
 		_terminal.call("clear")
 
 	# Destroy old PTY and create a new one
-	if _pty:
+	if _pty and is_instance_valid(_pty):
 		_pty.queue_free()
 		_pty = null
 
 	_pty = _create_pty()
-	if _pty and _terminal:
+	if _pty:
 		_terminal.add_child(_pty)
 		_pty.set("cols", TERMINAL_COLUMNS)
 		_pty.set("rows", TERMINAL_ROWS)
