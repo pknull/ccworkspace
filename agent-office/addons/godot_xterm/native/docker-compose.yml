@@ -1,0 +1,92 @@
+---
+services:
+  javascript:
+    build:
+      context: .
+      dockerfile: javascript.Dockerfile
+    user: ${UID_GID}
+    volumes:
+      - .:/src/native
+      - ../lib:/src/lib
+    working_dir: /src/native
+    command:
+      - /bin/bash
+      - -c
+      - |
+        scons platform=web target=$${TARGET:-template_debug} -j$$(nproc)
+  libuv-linux:
+    user: ${UID_GID}
+    build:
+      context: .
+      dockerfile: linux.Dockerfile
+    volumes:
+      - ./thirdparty/libuv:/libuv
+    working_dir: /libuv
+    command:
+      - /bin/bash
+      - -c
+      - |
+        target=$${TARGET:-release}
+        arch=$${ARCH:-x86_64}
+        mkdir build 2>/dev/null ;
+        args="-DCMAKE_BUILD_TYPE=$$target \
+          -DBUILD_SHARED_LIBS=OFF \
+          -DCMAKE_POSITION_INDEPENDENT_CODE=TRUE"
+        if [[ $$arch == "x86_32" ]]; then
+          args="$$args -DCMAKE_SYSTEM_PROCESSOR=i686 -DCMAKE_C_FLAGS=-m32";
+        elif [[ $$arch == "x86_64" ]]; then
+          args="$$args -DCMAKE_SYSTEM_PROCESSOR=x86_64 -DCMAKE_C_FLAGS=";
+        elif [[ $$arch == "arm64" ]]; then
+          args="$$args -DCMAKE_SYSTEM_PROCESSOR=aarch64 -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc-7 -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++-7";
+        elif [[ $$arch == "arm32" ]]; then
+          args="$$args -DCMAKE_SYSTEM_PROCESSOR=arm -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc-7 -DCMAKE_CXX_COMPILER=arm-linux-gnueabihf-g++-7";
+        else
+          args="$$args -DCMAKE_SYSTEM_PROCESSOR=x86_64 -DCMAKE_C_FLAGS=";
+        fi
+        pushd build
+        cmake .. $$args
+        popd
+        cmake --build build
+  libgodot-xterm-linux:
+    user: ${UID_GID}
+    build:
+      context: .
+      dockerfile: linux.Dockerfile
+    volumes:
+      - .:/src/native
+      - ../lib:/src/lib
+    working_dir: /src/native
+    environment:
+      - SCONS_CACHE=/scons-cache
+    command:
+      - /bin/bash
+      - -c
+      - |
+        arch=$${ARCH:-x86_64}
+        mkdir -p /tmp/cross-bin
+        if [[ $$arch == "arm64" ]]; then
+          ln -sf /usr/bin/aarch64-linux-gnu-gcc-7 /tmp/cross-bin/gcc
+          ln -sf /usr/bin/aarch64-linux-gnu-g++-7 /tmp/cross-bin/g++
+          export PATH="/tmp/cross-bin:$$PATH"
+        elif [[ $$arch == "arm32" ]]; then
+          ln -sf /usr/bin/arm-linux-gnueabihf-gcc-7 /tmp/cross-bin/gcc
+          ln -sf /usr/bin/arm-linux-gnueabihf-g++-7 /tmp/cross-bin/g++
+          export PATH="/tmp/cross-bin:$$PATH"
+        fi
+        scons target=template_$${TARGET:-debug} arch=$$arch
+
+        # Copy libstdc++ fallback for cross-distribution compatibility.
+        echo "Copying libstdc++ for arch: $$arch"
+        if [[ $$arch == "x86_64" ]]; then
+          libstdc_src="/usr/lib/x86_64-linux-gnu/libstdc++.so.6"
+        elif [[ $$arch == "arm64" ]]; then
+          libstdc_src="/usr/lib/gcc-cross/aarch64-linux-gnu/7/libstdc++.so"
+        elif [[ $$arch == "arm32" ]]; then
+          libstdc_src="/usr/lib/gcc-cross/arm-linux-gnueabihf/7/libstdc++.so"
+        elif [[ $$arch == "x86_32" ]]; then
+          libstdc_src="/usr/lib/gcc/x86_64-linux-gnu/9/32/libstdc++.so"
+        fi
+
+        libstdc_dest="../lib/$$arch/libstdc++.so.6"
+        mkdir -p "../lib/$$arch/"
+        cp "$$libstdc_src" "../lib/$$arch/"

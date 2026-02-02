@@ -656,7 +656,7 @@ func _list_tools() -> Array[Dictionary]:
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"type": {"type": "string", "description": "Furniture type: water_cooler, potted_plant, filing_cabinet, shredder, cat_bed, meeting_table, taskboard"},
+					"type": {"type": "string", "description": "Furniture type: water_cooler, potted_plant, filing_cabinet, shredder, cat_bed, meeting_table, taskboard, terminal_furniture"},
 					"x": {"type": "number", "description": "X position"},
 					"y": {"type": "number", "description": "Y position"}
 				},
@@ -1172,7 +1172,7 @@ func _tool_add_furniture(args: Dictionary) -> Dictionary:
 	if ftype.is_empty():
 		return _tool_error("type is required")
 
-	var valid_types = ["water_cooler", "potted_plant", "filing_cabinet", "shredder", "cat_bed", "meeting_table", "taskboard"]
+	var valid_types = ["water_cooler", "potted_plant", "filing_cabinet", "shredder", "cat_bed", "meeting_table", "taskboard", "terminal_furniture"]
 	if not ftype in valid_types:
 		return _tool_error("Invalid type: %s. Valid: %s" % [ftype, ", ".join(valid_types)])
 

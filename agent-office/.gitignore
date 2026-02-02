@@ -14,6 +14,11 @@ mono_crash.*.json
 
 # Build outputs (not tracked - generated during release)
 builds/
+native/pty/build/
+native/pty/bin/
+third_party/godot-cpp/
+addons/godot_xterm/native/thirdparty/libuv/build/
+addons/godot_xterm/native/thirdparty/godot-cpp/bin/
 
 # Log files
 *.log
@@ -34,3 +39,4 @@ Memory/vector_db/
 Memory/reasoning_bank/
 *.pyc
 __pycache__/
+addons/godot_xterm/native/thirdparty/

@@ -1,0 +1,6 @@
+[gd_resource type="FontVariation" load_steps=2 format=3 uid="uid://vmgmcu8gc6nt"]
+
+[ext_resource type="FontFile" path="res://third_party/gohufont/gohufont-11.ttf" id="1_gohu"]
+
+[resource]
+base_font = ExtResource("1_gohu")

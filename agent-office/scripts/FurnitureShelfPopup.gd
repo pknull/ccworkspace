@@ -15,6 +15,7 @@ signal wall_item_toggled(item_type: String, visible: bool)
 # Available furniture types with display info
 const FURNITURE_TYPES: Array[Dictionary] = [
 	{"type": "desk", "name": "Desk", "color": Color(0.55, 0.4, 0.25), "size": Vector2(50, 30)},
+	{"type": "terminal_furniture", "name": "Terminal", "color": Color(0.2, 0.2, 0.22), "size": Vector2(90, 60)},
 	{"type": "meeting_table", "name": "Meeting Table", "color": Color(0.45, 0.35, 0.25), "size": Vector2(65, 35)},
 	{"type": "water_cooler", "name": "Water Cooler", "color": Color(0.7, 0.85, 0.95), "size": Vector2(30, 40)},
 	{"type": "potted_plant", "name": "Plant", "color": Color(0.4, 0.7, 0.3), "size": Vector2(25, 35)},

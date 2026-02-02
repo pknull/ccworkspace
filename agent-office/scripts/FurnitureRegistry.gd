@@ -16,6 +16,7 @@ func _init() -> void:
 func _register_default_types() -> void:
 	# Register built-in furniture types
 	register("desk", "res://furniture/desk.gd")
+	register("terminal_furniture", "res://furniture/terminal_furniture.gd")
 	register("shredder", "res://furniture/shredder.gd")
 	register("filing_cabinet", "res://furniture/filing_cabinet.gd")
 	register("water_cooler", "res://furniture/water_cooler.gd")

@@ -63,6 +63,7 @@ Traits define what agents can do with furniture. Most furniture has multiple tra
 | Plant | `social` |
 | Taskboard | `viewable`, `social` |
 | Cat Bed | `cat_rest` |
+| Terminal (large) | *(no agent traits; user-interactive)* |
 
 Note: `social` is additive - agents can socialize at most furniture except desks (work-focused).
 
@@ -129,6 +130,7 @@ Each furniture type is a self-contained `.gd` file:
 agent-office/
 └── furniture/
     ├── desk.gd
+    ├── terminal_furniture.gd
     ├── meeting_table.gd
     ├── shredder.gd
     ├── filing_cabinet.gd

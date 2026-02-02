@@ -293,6 +293,9 @@ func _request_quit() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed:
+		# Skip shortcuts if a terminal has focus (let it receive all keyboard input)
+		if _is_terminal_focused():
+			return
 		if event.keycode == KEY_ESCAPE:
 			_toggle_pause_menu()
 		# Keyboard shortcuts (R=roster, P=profile, F=furniture)
@@ -304,6 +307,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			var top = agent_roster.get_top_agent()
 			if top:
 				_show_agent_profile(top.id)
+
+func _is_terminal_focused() -> bool:
+	var focused = get_viewport().gui_get_focus_owner()
+	if focused == null:
+		return false
+	# Check if the focused node is a GodotXterm Terminal
+	return focused.get_class() == "Terminal"
 
 func _process(delta: float) -> void:
 	# Throttle taskboard updates (doesn't need to run every frame)
