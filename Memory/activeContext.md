@@ -1,9 +1,9 @@
 ---
-version: "3.2"
-lastUpdated: "2026-02-01 UTC"
+version: "3.3"
+lastUpdated: "2026-02-02 UTC"
 lifecycle: "active"
 stakeholder: "all"
-changeTrigger: "Session save - terminal furniture fixes (shell restart, font config)"
+changeTrigger: "Session save - v2.2.0 release (terminal furniture, itch.io CI)"
 validatedBy: "user"
 dependencies: ["communicationStyle.md"]
 ---
@@ -15,10 +15,30 @@ dependencies: ["communicationStyle.md"]
 **Primary Focus**: Feature-complete office simulation - published on itch.io
 
 **Active Work**:
-- Terminal furniture integration (branch: `terminal-furniture`, not merged)
+- Feature-complete, v2.2.0 released with terminal furniture
 - Stability fixes and crash prevention
 
 **Recent Activities** (last 7 days):
+- **2026-02-02 (Session 24)**: v2.2.0 release - Terminal furniture complete:
+  - **Goal**: Complete terminal furniture integration, merge to main, release
+  - **Font investigation**: Tested spleen (5x8, 6x12), cozette, JetBrains Mono
+    - **Result**: Gohufont 11px (6×11) remains best - crisp, correct size, retro aesthetic
+    - Other fonts either too big, too crushed, or poor antialiasing in Godot
+  - **Color rendering fix**: White halo around colored text (e.g., blue on black)
+    - **Root cause**: GodotXterm dual-layer rendering - foreground color as base, ANSI colors on top
+    - **Solution**: Monochrome amber theme - all 16 ANSI colors mapped to same amber
+    - **Result**: Clean retro terminal aesthetic, no rendering artifacts
+  - **Code review & fixes** (code-reviewer agent):
+    - **Critical**: Added `_exit_tree()` to kill PTY process on furniture removal
+    - **High**: Replaced SceneTree timer with child Timer node (prevents callback on freed object)
+    - **High**: Added restart throttling (max 5 retries within 1 second)
+    - **Medium**: `is_instance_valid()` checks throughout, font resource duplication
+  - **Cleanup**: Removed unused files (TerminalEmulator.gd, spleen/cozette/unscii fonts, build artifacts)
+  - **MIT License**: Added project license file
+  - **CI/CD**: Added itch.io publishing via butler to release workflow
+  - **Release**: v2.2.0 tagged, pushed, CI building exports for GitHub + itch.io
+  - **Learning**: GodotXterm's foreground/ANSI layering causes color halos; monochrome avoids this
+
 - **2026-02-01 (Session 23)**: Terminal furniture bug fixes:
   - **Goal**: Investigate new terminal furniture, improve font rendering, fix bugs
   - **Font investigation**: Explored bitmap fonts (lime, nu, limey, cozette) for crisp rendering
@@ -223,6 +243,7 @@ Port 9999, JSON messages with `"event"` field:
 - [x] v2.0.2 released - desk collision fix, monitor cleanup, typing sounds
 - [x] v2.1.0 released - context stress visuals, custom session paths, Clawdbot harness
 - [x] v2.1.1 released - X11 crash cascade prevention via deferred roster signals
+- [x] v2.2.0 released - terminal furniture with embedded GodotXterm, itch.io CI publishing
 
 **Blocked**:
 - None
@@ -433,6 +454,75 @@ func _emit_session_end(session_id: String, session_path: String, harness: String
     event_received.emit({...})
 ```
 This breaks the synchronous cascade and gives X11 time to complete pending operations.
+
+### GodotXterm Color Rendering Artifacts
+GodotXterm renders text in two layers: foreground color as base, then ANSI colors applied on top. When ANSI colors differ from foreground, the base layer shows through as a "halo" around characters (especially visible with blue on black background). Solutions:
+1. **Monochrome theme**: Map all 16 ANSI colors to the same foreground color
+2. **Accept artifacts**: If colors are essential, the halos are unavoidable with current GodotXterm architecture
+Pattern:
+```gdscript
+# Monochrome amber theme - no color artifacts
+var fg = Color(1.0, 0.6, 0.2, 1.0)  # Amber
+for i in range(16):
+    terminal.add_theme_color_override("ansi_%d_color" % i, fg)
+```
+
+### SceneTree Timer vs Child Timer
+`get_tree().create_timer()` creates a timer that lives in the SceneTree, NOT as a child of the calling node. If the node is freed before the timer fires, the callback attempts to call a method on a freed object (crash). Solution: Use child Timer nodes that get freed with parent:
+```gdscript
+# Unsafe - timer survives node deletion
+var timer = get_tree().create_timer(0.1)
+timer.timeout.connect(_my_callback)
+
+# Safe - timer dies with parent
+var timer = Timer.new()
+timer.wait_time = 0.1
+timer.one_shot = true
+timer.timeout.connect(_my_callback)
+add_child(timer)
+timer.start()
+```
+
+### PTY Cleanup in _exit_tree
+PTY (pseudo-terminal) processes continue running after their Godot node is freed. Always kill the PTY process explicitly in `_exit_tree()` to prevent orphaned shell processes:
+```gdscript
+func _exit_tree() -> void:
+    if _pty and is_instance_valid(_pty):
+        if _pty.has_method("kill"):
+            _pty.call("kill", 15)  # SIGTERM
+        _pty = null
+```
+
+### Shell Restart Throttling
+Auto-restarting shells on exit can create infinite loops if the shell immediately crashes (invalid SHELL, permission issues). Add throttling:
+```gdscript
+var _restart_count := 0
+var _last_restart_time := 0
+
+func _on_pty_exited(_exit_code: int, _signum: int) -> void:
+    var now = Time.get_ticks_msec()
+    if now - _last_restart_time < 1000:
+        _restart_count += 1
+        if _restart_count > 5:
+            push_error("Shell crashed too many times, not restarting")
+            return
+    else:
+        _restart_count = 0
+    _last_restart_time = now
+    # ... proceed with restart
+```
+
+### Font Resource Global Mutation
+`load()` returns a shared resource instance. Modifying properties (antialiasing, hinting) affects ALL users of that resource. Always duplicate before modifying:
+```gdscript
+# Wrong - modifies global resource
+var font = load(font_path) as FontFile
+font.antialiasing = TextServer.FONT_ANTIALIASING_NONE
+
+# Correct - local copy
+var font = load(font_path).duplicate() as FontFile
+font.antialiasing = TextServer.FONT_ANTIALIASING_NONE
+```
 
 ### Parallel State Tracking Desync
 When two systems track related state independently (e.g., `active_agents` dict vs `working_agents` dict), they can desync if one system's cleanup path fails. Solutions:
