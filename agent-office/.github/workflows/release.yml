@@ -8,6 +8,8 @@ on:
 env:
   GODOT_VERSION: "4.5"
   EXPORT_NAME: inference-inc
+  ITCH_USER: pknull
+  ITCH_GAME: inference-inc
 
 jobs:
   export:
@@ -90,3 +92,29 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
+
+  publish-itch:
+    name: Publish to itch.io
+    needs: export
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Install butler
+        run: |
+          curl -L -o butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
+          unzip butler.zip
+          chmod +x butler
+          ./butler -V
+
+      - name: Push to itch.io
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          ./butler push artifacts/inference-inc-linux/inference-inc-linux.zip ${{ env.ITCH_USER }}/${{ env.ITCH_GAME }}:linux --userversion ${{ github.ref_name }}
+          ./butler push artifacts/inference-inc-windows/inference-inc-windows.zip ${{ env.ITCH_USER }}/${{ env.ITCH_GAME }}:windows --userversion ${{ github.ref_name }}
+          ./butler push artifacts/inference-inc-macos/inference-inc-macos.zip ${{ env.ITCH_USER }}/${{ env.ITCH_GAME }}:macos --userversion ${{ github.ref_name }}
