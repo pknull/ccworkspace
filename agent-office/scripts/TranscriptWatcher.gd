@@ -228,7 +228,7 @@ func _prune_context_entries() -> void:
 
 		# If entries were pruned, emit updated percentage
 		if new_entries.size() != original_size:
-			context_updated.emit(session_path, get_context_percent(session_path))
+			call_deferred("_emit_context_updated", session_path, get_context_percent(session_path))
 
 func _sum_context_bytes(session_path: String) -> int:
 	var entries: Array = session_context_entries.get(session_path, [])
@@ -391,6 +391,16 @@ func _emit_event(data: Dictionary) -> void:
 		return
 	event_received.emit(data)
 
+func _emit_context_updated(session_path: String, context_percent: float) -> void:
+	## Deferred emission helper for context_updated signal.
+	if not is_inside_tree():
+		return
+	if is_queued_for_deletion():
+		return
+	if get_tree() == null:
+		return
+	context_updated.emit(session_path, context_percent)
+
 func _emit_session_start(session_id: String, session_path: String) -> void:
 	var harness = _derive_harness(session_path)
 	call_deferred("_emit_event", {
@@ -480,7 +490,7 @@ func process_line(line: String, session_path: String = "") -> void:
 			"time": Time.get_unix_time_from_system(),
 			"size": line_bytes
 		})
-		context_updated.emit(session_path, get_context_percent(session_path))
+		call_deferred("_emit_context_updated", session_path, get_context_percent(session_path))
 
 	if _process_codex_entry(entry, session_path):
 		return
@@ -513,7 +523,7 @@ func process_line(line: String, session_path: String = "") -> void:
 				if user_content.contains("<command-name>/compact</command-name>"):
 					print("[TranscriptWatcher] COMPACT detected for session: %s" % _derive_session_id(session_path))
 					session_context_entries[session_path] = []
-					context_updated.emit(session_path, 0.0)
+					call_deferred("_emit_context_updated", session_path, 0.0)
 
 	var message = entry.get("message", {})
 	if not message is Dictionary:

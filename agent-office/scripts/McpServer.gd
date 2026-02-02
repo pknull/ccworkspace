@@ -98,6 +98,16 @@ func record_event(event_data: Dictionary) -> void:
 	if recent_events.size() > EVENT_HISTORY_LIMIT:
 		recent_events.pop_front()
 
+func _emit_event(event_data: Dictionary) -> void:
+	## Deferred emission helper - breaks synchronous cascades that can cause X11 threading issues.
+	if not is_inside_tree():
+		return
+	if is_queued_for_deletion():
+		return
+	if get_tree() == null:
+		return
+	event_received.emit(event_data)
+
 func get_mcp_config() -> Dictionary:
 	return {
 		"enabled": enabled,
@@ -800,7 +810,7 @@ func _tool_post_event(args: Dictionary) -> Dictionary:
 	var event_data = args.duplicate()
 	# Record and emit
 	record_event(event_data)
-	event_received.emit(event_data)
+	call_deferred("_emit_event", event_data)
 	return _tool_ok("Event posted: %s" % event_type)
 
 func _tool_set_weather(args: Dictionary) -> Dictionary:
@@ -839,6 +849,8 @@ func _tool_quit_office(_args: Dictionary) -> Dictionary:
 func _deferred_quit() -> void:
 	# Small delay to ensure HTTP response is sent
 	await get_tree().create_timer(0.1).timeout
+	if not is_instance_valid(self):
+		return
 	get_tree().quit()
 
 func _tool_get_office_state(_args: Dictionary) -> Dictionary:
@@ -1116,7 +1128,7 @@ func _tool_spawn_agent(args: Dictionary) -> Dictionary:
 	}
 
 	record_event(event_data)
-	event_received.emit(event_data)
+	call_deferred("_emit_event", event_data)
 
 	return _tool_ok("Spawned agent: %s (%s)" % [agent_type, agent_id])
 

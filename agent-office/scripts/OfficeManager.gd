@@ -1584,6 +1584,8 @@ func _on_weather_smoke_timeout() -> void:
 func _apply_weather_smoke_state() -> void:
 	if weather_smoke_states.is_empty():
 		return
+	if not is_instance_valid(weather_system):
+		return
 	var state = weather_smoke_states[weather_smoke_index]
 	weather_system.set_live_weather(state)
 

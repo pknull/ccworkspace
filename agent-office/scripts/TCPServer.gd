@@ -104,7 +104,17 @@ func _process_line(line: String) -> void:
 	var data = json.get_data()
 	if data is Dictionary:
 		print("[EventServer] Event received: %s" % data.get("event", "unknown"))
-		event_received.emit(data)
+		call_deferred("_emit_event", data)
+
+func _emit_event(data: Dictionary) -> void:
+	## Deferred emission helper - breaks synchronous cascades that can cause X11 threading issues.
+	if not is_inside_tree():
+		return
+	if is_queued_for_deletion():
+		return
+	if get_tree() == null:
+		return
+	event_received.emit(data)
 
 func _exit_tree() -> void:
 	if server:

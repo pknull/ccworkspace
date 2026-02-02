@@ -16,6 +16,10 @@ run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.5", "Forward Plus")
 config/icon="res://icon.svg"
 
+[autoload]
+
+SettingsRegistry="*res://scripts/SettingsRegistry.gd"
+
 [display]
 
 window/size/viewport_width=1280
@@ -24,10 +28,6 @@ window/size/window_width_override=1280
 window/size/window_height_override=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
-
-[autoload]
-
-SettingsRegistry="*res://scripts/SettingsRegistry.gd"
 
 [gdextension]
 
