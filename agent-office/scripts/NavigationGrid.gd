@@ -216,6 +216,16 @@ func can_place_obstacle(world_rect: Rect2, exclude_obstacle_id: String = "") -> 
 				return false  # Blocked by another obstacle
 	return true
 
+func get_blocking_obstacle(world_rect: Rect2, exclude_obstacle_id: String = "") -> String:
+	# Return the ID of the first obstacle blocking this rect
+	var grid_cells = _rect_to_grid_cells(world_rect)
+	for cell in grid_cells:
+		if get_cell_state(cell) == CellState.BLOCKED:
+			for obstacle_id in obstacles.keys():
+				if obstacle_id != exclude_obstacle_id and cell in obstacles[obstacle_id]:
+					return obstacle_id
+	return ""
+
 func find_nearest_valid_position(world_rect: Rect2, exclude_obstacle_id: String = "") -> Vector2:
 	# If current position is valid, return it
 	if can_place_obstacle(world_rect, exclude_obstacle_id):

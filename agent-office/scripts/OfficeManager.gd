@@ -241,6 +241,9 @@ func _ready() -> void:
 	# Register desks and furniture with navigation grid
 	_register_with_navigation_grid()
 
+	# Verify and normalize furniture IDs for consistent collision detection
+	_verify_furniture_ids()
+
 	# Connect event sources
 	transcript_watcher = TranscriptWatcherScript.new()
 	add_child(transcript_watcher)
@@ -596,7 +599,9 @@ func _create_desks() -> void:
 				push_warning("Failed to spawn desk at %s" % pos)
 				continue
 
-			desk.furniture_id = saved.get("id", "desk_%d" % desk_index)
+			var desk_id = saved.get("id", "desk_%d" % desk_index)
+			desk.furniture_id = desk_id
+			desk.item_name = desk_id  # Must match for collision exclusion
 			desk.navigation_grid = navigation_grid
 			desk.office_manager = self
 			desk.position_changed.connect(_on_desk_position_changed)
@@ -629,7 +634,9 @@ func _create_desks() -> void:
 			push_warning("Failed to spawn desk at %s" % pos)
 			continue
 
-		desk.furniture_id = "desk_%d" % desk_index
+		var desk_id = "desk_%d" % desk_index
+		desk.furniture_id = desk_id
+		desk.item_name = desk_id  # Must match for collision exclusion
 		desk.navigation_grid = navigation_grid
 		desk.office_manager = self
 		desk.position_changed.connect(_on_desk_position_changed)
@@ -743,7 +750,7 @@ func _register_with_navigation_grid() -> void:
 			OfficeConstants.DESK_WIDTH,
 			OfficeConstants.DESK_DEPTH
 		)
-		navigation_grid.register_obstacle(desk_rect, "desk_%d" % desk.get_instance_id())
+		navigation_grid.register_obstacle(desk_rect, desk.furniture_id)
 		# Work position is in front of the desk
 		var work_pos = desk.get_work_position()
 		navigation_grid.register_work_position(work_pos, desk)
@@ -769,6 +776,84 @@ func _register_with_navigation_grid() -> void:
 func _register_furniture_obstacle(obstacle_id: String, pos: Vector2, size: Vector2) -> void:
 	var rect = Rect2(pos.x - size.x / 2, pos.y - size.y / 2, size.x, size.y)
 	navigation_grid.register_obstacle(rect, obstacle_id)
+
+
+func _verify_furniture_ids() -> void:
+	## Normalize all furniture IDs and verify obstacle registrations match.
+	## Fixes inconsistencies from old saves using instance_id format.
+	var fixes_applied := 0
+
+	# Normalize desk IDs to desk_0, desk_1, etc.
+	for i in range(desks.size()):
+		var desk = desks[i]
+		var expected_id = "desk_%d" % i
+
+		var needs_fix = desk.furniture_id != expected_id or desk.item_name != expected_id
+		if needs_fix:
+			var old_id = desk.furniture_id
+			# Unregister old obstacle (try both old IDs in case of mismatch)
+			navigation_grid.unregister_obstacle(old_id)
+			if desk.item_name != old_id:
+				navigation_grid.unregister_obstacle(desk.item_name)
+			# Unregister old work position
+			navigation_grid.unregister_work_position(desk)
+			# Update IDs
+			desk.furniture_id = expected_id
+			desk.item_name = expected_id
+			# Re-register with new ID
+			var desk_rect = Rect2(
+				desk.position.x - OfficeConstants.DESK_WIDTH / 2,
+				desk.position.y,
+				OfficeConstants.DESK_WIDTH,
+				OfficeConstants.DESK_DEPTH
+			)
+			navigation_grid.register_obstacle(desk_rect, expected_id)
+			# Re-register work position
+			navigation_grid.register_work_position(desk.get_work_position(), desk)
+			fixes_applied += 1
+			print("[OfficeManager] Normalized desk ID: %s -> %s" % [old_id, expected_id])
+
+	# Verify default furniture IDs match their obstacle registrations
+	var default_furniture = [
+		["water_cooler", draggable_water_cooler],
+		["plant", draggable_plant],
+		["filing_cabinet", draggable_filing_cabinet],
+		["shredder", draggable_shredder],
+		["meeting_table", meeting_table],
+		["cat_bed", draggable_cat_bed],
+		["taskboard", draggable_taskboard],
+	]
+	for entry in default_furniture:
+		var expected_id: String = entry[0]
+		var furniture: Node = entry[1]
+		if furniture and is_instance_valid(furniture):
+			if furniture.item_name != expected_id:
+				furniture.item_name = expected_id
+				fixes_applied += 1
+				print("[OfficeManager] Fixed item_name for %s" % expected_id)
+			if "furniture_id" in furniture and furniture.furniture_id != expected_id:
+				furniture.furniture_id = expected_id
+				fixes_applied += 1
+				print("[OfficeManager] Fixed furniture_id for %s" % expected_id)
+
+	# Verify dynamic furniture IDs match obstacle registrations
+	for f in placed_furniture:
+		var fid: String = f.get("id", "")
+		var node: Node = f.get("node")
+		if node and is_instance_valid(node) and not fid.is_empty():
+			if node.item_name != fid:
+				node.item_name = fid
+				fixes_applied += 1
+				print("[OfficeManager] Fixed dynamic furniture item_name: %s" % fid)
+
+	if fixes_applied > 0:
+		print("[OfficeManager] Furniture verification: %d fixes applied" % fixes_applied)
+		navigation_grid.print_grid_summary()
+		# Persist normalized IDs immediately
+		call_deferred("_save_positions")
+	else:
+		print("[OfficeManager] Furniture verification: all IDs consistent")
+
 
 # =============================================================================
 # INTERACTION POINTS - Standing positions at furniture
@@ -1152,7 +1237,7 @@ func _on_desk_position_changed(desk: FurnitureDesk, new_position: Vector2) -> vo
 	print("[OfficeManager] Desk moved to %s" % new_position)
 
 	# Update navigation grid - remove old position, add new
-	var desk_id = "desk_%d" % desk.get_instance_id()
+	var desk_id = desk.furniture_id
 	navigation_grid.unregister_obstacle(desk_id)
 	navigation_grid.unregister_work_position(desk)
 
@@ -2904,9 +2989,8 @@ func _remove_desk(desk_index: int) -> bool:
 	if not desk.is_empty():
 		return false
 
-	# Unregister from navigation grid - always use instance_id for consistency
-	var desk_id = "desk_%d" % desk.get_instance_id()
-	navigation_grid.unregister_obstacle(desk_id)
+	# Unregister from navigation grid - use furniture_id to match registration
+	navigation_grid.unregister_obstacle(desk.furniture_id)
 
 	# Unregister from trait furniture system
 	unregister_trait_furniture(desk)
@@ -2925,7 +3009,9 @@ func _add_desk(pos: Vector2) -> int:
 		return -1
 
 	var desk_index = desks.size()
-	desk.furniture_id = "desk_%d" % desk_index
+	var desk_id = "desk_%d" % desk_index
+	desk.furniture_id = desk_id
+	desk.item_name = desk_id  # Must match for collision exclusion
 	desk.navigation_grid = navigation_grid
 	desk.office_manager = self
 	desk.position_changed.connect(_on_desk_position_changed)
@@ -2934,14 +3020,14 @@ func _add_desk(pos: Vector2) -> int:
 	desks.append(desk)
 	register_trait_furniture(desk)
 
-	# Register obstacle - use instance_id to match _on_desk_position_changed
+	# Register obstacle - use furniture_id to match item_name for drag exclusion
 	var desk_rect = Rect2(
 		pos.x - OfficeConstants.DESK_WIDTH / 2,
 		pos.y,
 		OfficeConstants.DESK_WIDTH,
 		OfficeConstants.DESK_DEPTH
 	)
-	navigation_grid.register_obstacle(desk_rect, "desk_%d" % desk.get_instance_id())
+	navigation_grid.register_obstacle(desk_rect, desk.furniture_id)
 
 	_save_positions()
 	print("[OfficeManager] Added desk at %s (index %d)" % [pos, desk_index])

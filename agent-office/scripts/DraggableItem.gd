@@ -3,6 +3,17 @@ class_name DraggableItem
 
 signal position_changed(item_name: String, new_position: Vector2)
 
+# Mapping: obstacle_id -> variable_name in office_manager
+const DEFAULT_FURNITURE_MAP := {
+	"water_cooler": "draggable_water_cooler",
+	"plant": "draggable_plant",
+	"filing_cabinet": "draggable_filing_cabinet",
+	"shredder": "draggable_shredder",
+	"meeting_table": "meeting_table",
+	"cat_bed": "draggable_cat_bed",
+	"taskboard": "draggable_taskboard",
+}
+
 @export var item_name: String = ""
 @export var drag_bounds_min: Vector2 = Vector2(30, 100)
 @export var drag_bounds_max: Vector2 = Vector2(1250, 620)
@@ -26,6 +37,9 @@ var navigation_grid: NavigationGrid = null
 var office_manager: Node = null  # Set by OfficeManager to check popup state
 var obstacle_size: Vector2 = Vector2(40, 40)  # Default size, set by OfficeManager
 
+# Collision highlight tracking
+var _highlighted_obstacle: Node2D = null
+
 func _ready() -> void:
 	# Will be configured by parent
 	# Set initial z_index based on Y position (only for floor items)
@@ -48,6 +62,13 @@ func _snap_to_grid(pos: Vector2) -> Vector2:
 func _get_obstacle_rect(pos: Vector2) -> Rect2:
 	return Rect2(pos.x - obstacle_size.x / 2, pos.y - obstacle_size.y / 2, obstacle_size.x, obstacle_size.y)
 
+
+func _get_clamped_mouse_pos() -> Vector2:
+	var mouse_pos = get_global_mouse_position()
+	mouse_pos.x = clamp(mouse_pos.x, drag_bounds_min.x, drag_bounds_max.x)
+	mouse_pos.y = clamp(mouse_pos.y, drag_bounds_min.y, drag_bounds_max.y)
+	return mouse_pos
+
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
@@ -59,14 +80,17 @@ func _input(event: InputEvent) -> void:
 				var local_pos = get_local_mouse_position()
 				if click_area.has_point(local_pos):
 					is_dragging = true
-					drag_offset = position - get_global_mouse_position()
+					# Warp cursor to furniture center so user knows the alignment point
+					Input.warp_mouse(global_position)
+					drag_offset = Vector2.ZERO  # Cursor is now at center
 					_create_ghost_preview()
 					_create_grid_overlay()
 			else:
 				if is_dragging:
 					is_dragging = false
-					# Use ghost position if valid, otherwise find nearest valid
-					var snapped_pos = _snap_to_grid(position)
+					_clear_obstacle_highlight()
+					# Snap based on mouse position for consistent collision
+					var snapped_pos = _snap_to_grid(_get_clamped_mouse_pos())
 					var original_snapped = snapped_pos
 
 					# Check for valid placement (no overlap with other objects)
@@ -83,14 +107,11 @@ func _input(event: InputEvent) -> void:
 					position_changed.emit(item_name, position)
 
 	elif event is InputEventMouseMotion and is_dragging:
-		var new_pos = get_global_mouse_position() + drag_offset
-		# Clamp to bounds
-		new_pos.x = clamp(new_pos.x, drag_bounds_min.x, drag_bounds_max.x)
-		new_pos.y = clamp(new_pos.y, drag_bounds_min.y, drag_bounds_max.y)
-		position = new_pos
+		var mouse_pos = _get_clamped_mouse_pos()
+		position = mouse_pos  # drag_offset is zero due to cursor warp
 
-		# Update ghost preview position and validity
-		var snapped_pos = _snap_to_grid(new_pos)
+		# Snap based on mouse position for consistent collision checking
+		var snapped_pos = _snap_to_grid(mouse_pos)
 		if ghost_preview:
 			ghost_preview.position = snapped_pos
 		if grid_overlay:
@@ -101,6 +122,12 @@ func _input(event: InputEvent) -> void:
 		if navigation_grid:
 			var test_rect = _get_obstacle_rect(snapped_pos)
 			is_valid = navigation_grid.can_place_obstacle(test_rect, item_name)
+			# Highlight blocking obstacle when invalid
+			if not is_valid:
+				var blocking_id = navigation_grid.get_blocking_obstacle(test_rect, item_name)
+				_highlight_obstacle(blocking_id)
+			else:
+				_clear_obstacle_highlight()
 		_update_ghost_validity(is_valid)
 
 
@@ -172,3 +199,72 @@ func _cleanup_drag_visuals() -> void:
 	if grid_overlay:
 		grid_overlay.queue_free()
 		grid_overlay = null
+
+
+func _highlight_obstacle(obstacle_id: String) -> void:
+	if obstacle_id.is_empty():
+		_clear_obstacle_highlight()
+		return
+	# Skip if already highlighting this obstacle
+	if _highlighted_obstacle and is_instance_valid(_highlighted_obstacle):
+		var current_id = _get_obstacle_id_for_node(_highlighted_obstacle)
+		if current_id == obstacle_id:
+			return
+	_clear_obstacle_highlight()
+	# Find the furniture node by ID via office_manager
+	var furniture = _find_furniture_by_id(obstacle_id)
+	if furniture and is_instance_valid(furniture):
+		_highlighted_obstacle = furniture
+		furniture.modulate = OfficePalette.GRUVBOX_RED.lightened(0.3)
+
+
+func _clear_obstacle_highlight() -> void:
+	if _highlighted_obstacle and is_instance_valid(_highlighted_obstacle):
+		_highlighted_obstacle.modulate = Color.WHITE
+	_highlighted_obstacle = null
+
+
+func _get_obstacle_id_for_node(node: Node2D) -> String:
+	# Reverse lookup: find obstacle ID for a given node
+	if not office_manager or not node:
+		return ""
+	# Check default furniture (iterate obstacle_id -> var_name, match by var_name)
+	for obstacle_id in DEFAULT_FURNITURE_MAP:
+		var var_name = DEFAULT_FURNITURE_MAP[obstacle_id]
+		if var_name in office_manager and office_manager.get(var_name) == node:
+			return obstacle_id
+	# Check placed_furniture
+	if "placed_furniture" in office_manager:
+		for f in office_manager.placed_furniture:
+			if f is Dictionary and f.get("node") == node:
+				return f.get("id", "")
+	# Check desks (obstacle ID matches furniture_id)
+	if "desks" in office_manager:
+		if node in office_manager.desks:
+			return node.furniture_id
+	return ""
+
+
+func _find_furniture_by_id(obstacle_id: String) -> Node2D:
+	if not office_manager:
+		return null
+	# Check default furniture variables (obstacle_id -> variable name)
+	if obstacle_id in DEFAULT_FURNITURE_MAP:
+		var var_name = DEFAULT_FURNITURE_MAP[obstacle_id]
+		if var_name in office_manager:
+			var node = office_manager.get(var_name)
+			if node is Node2D and is_instance_valid(node):
+				return node
+	# Check placed_furniture array for dynamic furniture
+	if "placed_furniture" in office_manager:
+		for f in office_manager.placed_furniture:
+			if f is Dictionary and f.get("id") == obstacle_id:
+				var node = f.get("node")
+				if node is Node2D and is_instance_valid(node):
+					return node
+	# Check for desk obstacles (desk_<index> format, matches furniture_id)
+	if obstacle_id.begins_with("desk_") and "desks" in office_manager:
+		for desk in office_manager.desks:
+			if is_instance_valid(desk) and desk.furniture_id == obstacle_id:
+				return desk
+	return null

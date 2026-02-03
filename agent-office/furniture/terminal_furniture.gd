@@ -11,6 +11,8 @@ const CELL_HEIGHT := 11  # gohufont-11: 11px tall
 const BORDER_THICKNESS := 10
 const TERMINAL_PADDING := 2  # Extra padding for terminal's internal margins
 const SHADOW_OFFSET := Vector2(3, 3)
+const PTY_RESTART_THROTTLE_MS := 1000
+const PTY_MAX_RESTART_ATTEMPTS := 5
 
 var _terminal_size: Vector2 = Vector2.ZERO
 var _frame_size: Vector2 = Vector2.ZERO
@@ -36,7 +38,10 @@ func _init() -> void:
 	furniture_type = "terminal_furniture"
 	traits = []
 	capacity = 0
-	obstacle_size = Vector2.ZERO
+	# Default obstacle size based on terminal dimensions + frame
+	# Will be updated in _adjust_terminal_size() after terminal calculates actual size
+	var default_terminal = Vector2(TERMINAL_COLUMNS * CELL_WIDTH, TERMINAL_ROWS * CELL_HEIGHT)
+	obstacle_size = default_terminal + Vector2(BORDER_THICKNESS * 2, BORDER_THICKNESS * 2)
 	slots = []
 
 func _ready() -> void:
@@ -250,6 +255,10 @@ func _adjust_terminal_size() -> void:
 				_frame_size.x + 12,
 				_frame_size.y + 12
 			)
+			# Update obstacle in navigation grid if registered
+			if navigation_grid and not furniture_id.is_empty():
+				var obstacle_rect = Rect2(position - obstacle_size / 2, obstacle_size)
+				navigation_grid.update_obstacle(furniture_id, obstacle_rect)
 
 func _apply_frame_layout(terminal_size: Vector2) -> void:
 	_terminal_size = _rounded_vec2(terminal_size)
@@ -304,9 +313,9 @@ func _on_pty_exited(_exit_code: int, _signum: int) -> void:
 		return
 	# Throttle restarts to prevent infinite loop on immediate crash
 	var now = Time.get_ticks_msec()
-	if now - _last_restart_time < 1000:
+	if now - _last_restart_time < PTY_RESTART_THROTTLE_MS:
 		_restart_count += 1
-		if _restart_count > 5:
+		if _restart_count > PTY_MAX_RESTART_ATTEMPTS:
 			push_error("TerminalFurniture: Shell crashed too many times, not restarting")
 			return
 	else:
