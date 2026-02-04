@@ -207,8 +207,8 @@ func _apply_terminal_theme(terminal: Control) -> void:
 		if ResourceLoader.exists(font_path):
 			var font_file = load(font_path).duplicate() as FontFile
 			if font_file:
-				font_file.antialiasing = TextServer.FONT_ANTIALIASING_LCD
-				font_file.hinting = TextServer.HINTING_LIGHT
+				font_file.antialiasing = TextServer.FONT_ANTIALIASING_NONE
+				font_file.hinting = TextServer.HINTING_FULL
 				terminal.add_theme_font_override(theme_name, font_file)
 	terminal.add_theme_font_size_override("font_size", TERMINAL_FONT_SIZE)
 
