@@ -5,9 +5,9 @@ class_name FurnitureTerminalFurniture
 
 const TERMINAL_COLUMNS := 80
 const TERMINAL_ROWS := 24
-const TERMINAL_FONT_SIZE := 11  # Gohufont 11px bitmap font
-const CELL_WIDTH := 6   # gohufont-11: 6px wide
-const CELL_HEIGHT := 11  # gohufont-11: 11px tall
+const TERMINAL_FONT_SIZE := 12  # Terminus bitmap font
+const CELL_WIDTH := 6   # Terminus at 12pt: 6px wide
+const CELL_HEIGHT := 12  # Terminus at 12pt: 12px tall
 const BORDER_THICKNESS := 10
 const TERMINAL_PADDING := 2  # Extra padding for terminal's internal margins
 const SHADOW_OFFSET := Vector2(3, 3)
@@ -194,18 +194,23 @@ func _create_pty() -> Node:
 	return ClassDB.instantiate(PTY_CLASS)
 
 func _apply_terminal_theme(terminal: Control) -> void:
-	# Gohufont 11px - crisp bitmap font, retro aesthetic
-	var font_path = "res://third_party/gohufont/gohufont-11.ttf"
-	if ResourceLoader.exists(font_path):
-		var font_file = load(font_path).duplicate() as FontFile
-		if font_file:
-			font_file.antialiasing = TextServer.FONT_ANTIALIASING_NONE
-			font_file.hinting = TextServer.HINTING_NONE
-			font_file.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
-			terminal.add_theme_font_override("normal_font", font_file)
-			terminal.add_theme_font_override("bold_font", font_file)
-			terminal.add_theme_font_override("italics_font", font_file)
-			terminal.add_theme_font_override("bold_italics_font", font_file)
+	# Terminus - bitmap font with box-drawing, block elements, extended Unicode
+	var font_dir = "res://third_party/terminus/"
+	var font_variants = {
+		"normal_font": "TerminusTTF-4.49.3.ttf",
+		"bold_font": "TerminusTTF-Bold-4.49.3.ttf",
+		"italics_font": "TerminusTTF-Italic-4.49.3.ttf",
+		"bold_italics_font": "TerminusTTF-Bold-Italic-4.49.3.ttf"
+	}
+	for theme_name in font_variants:
+		var font_path = font_dir + font_variants[theme_name]
+		if ResourceLoader.exists(font_path):
+			var font_file = load(font_path).duplicate() as FontFile
+			if font_file:
+				font_file.antialiasing = TextServer.FONT_ANTIALIASING_NONE
+				font_file.hinting = TextServer.HINTING_NONE
+				font_file.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
+				terminal.add_theme_font_override(theme_name, font_file)
 	terminal.add_theme_font_size_override("font_size", TERMINAL_FONT_SIZE)
 
 	# Gruvbox Dark terminal theme
