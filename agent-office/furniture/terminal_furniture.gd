@@ -14,6 +14,26 @@ const SHADOW_OFFSET := Vector2(3, 3)
 const PTY_RESTART_THROTTLE_MS := 1000
 const PTY_MAX_RESTART_ATTEMPTS := 5
 
+# Gruvbox Dark 16-color ANSI palette
+const ANSI_COLORS := [
+	Color(0.157, 0.157, 0.157, 1.0), # 0: Black (#282828)
+	Color(0.800, 0.141, 0.114, 1.0), # 1: Red (#cc241d)
+	Color(0.596, 0.592, 0.102, 1.0), # 2: Green (#98971a)
+	Color(0.843, 0.600, 0.129, 1.0), # 3: Yellow (#d79921)
+	Color(0.271, 0.522, 0.533, 1.0), # 4: Blue (#458588)
+	Color(0.694, 0.384, 0.525, 1.0), # 5: Magenta (#b16286)
+	Color(0.408, 0.616, 0.416, 1.0), # 6: Cyan (#689d6a)
+	Color(0.659, 0.600, 0.518, 1.0), # 7: White (#a89984)
+	Color(0.573, 0.514, 0.455, 1.0), # 8: Bright Black (#928374)
+	Color(0.984, 0.286, 0.204, 1.0), # 9: Bright Red (#fb4934)
+	Color(0.722, 0.733, 0.149, 1.0), # 10: Bright Green (#b8bb26)
+	Color(0.980, 0.741, 0.184, 1.0), # 11: Bright Yellow (#fabd2f)
+	Color(0.514, 0.647, 0.596, 1.0), # 12: Bright Blue (#83a598)
+	Color(0.827, 0.525, 0.608, 1.0), # 13: Bright Magenta (#d3869b)
+	Color(0.557, 0.753, 0.486, 1.0), # 14: Bright Cyan (#8ec07c)
+	Color(0.922, 0.859, 0.698, 1.0), # 15: Bright White (#ebdbb2)
+]
+
 var _terminal_size: Vector2 = Vector2.ZERO
 var _frame_size: Vector2 = Vector2.ZERO
 
@@ -189,16 +209,16 @@ func _apply_terminal_theme(terminal: Control) -> void:
 			terminal.add_theme_font_override("bold_italics_font", font_file)
 	terminal.add_theme_font_size_override("font_size", TERMINAL_FONT_SIZE)
 
-	# Monochrome amber/orange retro terminal theme
-	var bg = Color(0.06, 0.04, 0.02, 1.0)      # Dark amber background
-	var fg = Color(1.0, 0.6, 0.2, 1.0)          # Amber/orange foreground
+	# Gruvbox Dark terminal theme
+	var bg = Color(0.157, 0.157, 0.157, 1.0)   # Gruvbox bg (#282828)
+	var fg = Color(0.922, 0.859, 0.698, 1.0)   # Gruvbox fg (#ebdbb2)
 
 	terminal.add_theme_color_override("background_color", bg)
 	terminal.add_theme_color_override("foreground_color", fg)
 
-	# Map ALL ANSI colors to the same amber - true monochrome
-	for i in range(16):
-		terminal.add_theme_color_override("ansi_%d_color" % i, fg)
+	# Apply standard 16-color ANSI palette
+	for i in range(ANSI_COLORS.size()):
+		terminal.add_theme_color_override("ansi_%d_color" % i, ANSI_COLORS[i])
 
 func _calc_terminal_size_fallback() -> Vector2:
 	# Use exact pixel dimensions for crisp bitmap font rendering

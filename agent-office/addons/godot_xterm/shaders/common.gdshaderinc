@@ -47,7 +47,11 @@ void fragment() {
 #ifdef BACKGROUND
 		color = texture(background_colors, sample_uv);
 #elif defined(FOREGROUND)
-		color = texture(TEXTURE, UV);
+		// Use texelFetch for pixel-perfect sampling - prevents bilinear filtering
+		// artifacts (white halos) when viewport texture has transparent background
+		ivec2 tex_size = textureSize(TEXTURE, 0);
+		ivec2 texel_coord = ivec2(UV * vec2(tex_size));
+		color = texelFetch(TEXTURE, texel_coord, 0);
 #endif
 
 		bool unfocused_cursor = !has_focus && has_attribute(sample_uv, FLAG_CURSOR);
