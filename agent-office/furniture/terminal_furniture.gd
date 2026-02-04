@@ -5,9 +5,9 @@ class_name FurnitureTerminalFurniture
 
 const TERMINAL_COLUMNS := 80
 const TERMINAL_ROWS := 24
-const TERMINAL_FONT_SIZE := 14  # JetBrains Mono
-const CELL_WIDTH := 8   # JetBrains Mono at 14pt: ~8px wide
-const CELL_HEIGHT := 16  # JetBrains Mono at 14pt: ~16px tall
+const TERMINAL_FONT_SIZE := 11  # JetBrains Mono
+const CELL_WIDTH := 7   # JetBrains Mono at 11pt: ~7px wide
+const CELL_HEIGHT := 13  # JetBrains Mono at 11pt: ~13px tall
 const BORDER_THICKNESS := 10
 const TERMINAL_PADDING := 2  # Extra padding for terminal's internal margins
 const SHADOW_OFFSET := Vector2(3, 3)
