@@ -5,9 +5,9 @@ class_name FurnitureTerminalFurniture
 
 const TERMINAL_COLUMNS := 80
 const TERMINAL_ROWS := 24
-const TERMINAL_FONT_SIZE := 12  # Spleen 6x12
-const CELL_WIDTH := 6   # spleen-6x12: 6px wide
-const CELL_HEIGHT := 12  # spleen-6x12: 12px tall
+const TERMINAL_FONT_SIZE := 16  # Spleen 8x16 (full box-drawing/block elements)
+const CELL_WIDTH := 8   # spleen-8x16: 8px wide
+const CELL_HEIGHT := 16  # spleen-8x16: 16px tall
 const BORDER_THICKNESS := 10
 const TERMINAL_PADDING := 2  # Extra padding for terminal's internal margins
 const SHADOW_OFFSET := Vector2(3, 3)
@@ -194,8 +194,8 @@ func _create_pty() -> Node:
 	return ClassDB.instantiate(PTY_CLASS)
 
 func _apply_terminal_theme(terminal: Control) -> void:
-	# Spleen 6x12 - bitmap font with box-drawing, block elements
-	var font_path = "res://third_party/spleen/spleen-6x12.otf"
+	# Spleen 8x16 - bitmap font with full box-drawing, block elements, Braille
+	var font_path = "res://third_party/spleen/spleen-8x16.otf"
 	if ResourceLoader.exists(font_path):
 		var font_file = load(font_path).duplicate() as FontFile
 		if font_file:
