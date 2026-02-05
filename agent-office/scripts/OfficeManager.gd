@@ -346,6 +346,7 @@ func _process(delta: float) -> void:
 	if roster_reconcile_timer >= ROSTER_RECONCILE_INTERVAL:
 		roster_reconcile_timer = 0.0
 		_reconcile_roster()
+		_reconcile_desk_state()
 
 	# Check if MCP manager should leave due to inactivity
 	_check_mcp_manager_timeout(delta)
@@ -2169,6 +2170,20 @@ func _reconcile_roster() -> void:
 	var cleared = agent_roster.reconcile_working_agents(active_profile_ids)
 	if cleared > 0:
 		print("[OfficeManager] Reconciled roster: released %d orphaned working entries" % cleared)
+
+func _reconcile_desk_state() -> int:
+	## Release desk slots occupied by agents not in active_agents.
+	## Returns number of ghost slots cleaned.
+	var cleaned := 0
+	for desk_idx in range(desks.size()):
+		var desk = desks[desk_idx]
+		for i in range(desk.slots.size()):
+			var occupant: String = desk.slots[i].occupied_by
+			if occupant != "" and not active_agents.has(occupant):
+				push_warning("[OfficeManager] Ghost agent on desk %d slot %d: '%s' — releasing" % [desk_idx, i, occupant])
+				desk.release_slot(i)
+				cleaned += 1
+	return cleaned
 
 func _prune_session_agent_ids(session_id: String) -> void:
 	if session_id.is_empty():

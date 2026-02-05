@@ -740,6 +740,14 @@ func _list_tools() -> Array[Dictionary]:
 				},
 				"required": ["category", "key", "value"]
 			}
+		},
+		{
+			"name": "reconcile_desks",
+			"description": "Release desk slots occupied by agents that no longer exist. Fixes ghost agents from ungraceful session termination.",
+			"inputSchema": {
+				"type": "object",
+				"properties": {}
+			}
 		}
 	]
 
@@ -799,6 +807,8 @@ func _call_tool(params) -> Dictionary:
 			return _tool_get_settings_new(args)
 		"set_setting":
 			return _tool_set_setting(args)
+		"reconcile_desks":
+			return _tool_reconcile_desks(args)
 		_:
 			return _tool_error("Unknown tool")
 
@@ -1500,6 +1510,15 @@ func _tool_set_setting(args: Dictionary) -> Dictionary:
 
 	var new_value = registry.get_setting(category, key)
 	return _tool_ok("Set %s.%s = %s" % [category, key, str(new_value)])
+
+func _tool_reconcile_desks(_args: Dictionary) -> Dictionary:
+	if not office_manager:
+		return _tool_error("Office manager not available")
+	var cleaned = office_manager._reconcile_desk_state()
+	if cleaned > 0:
+		return _tool_ok("Reconciled %d ghost desk slot(s)" % cleaned)
+	else:
+		return _tool_ok("No ghost slots found — all desks consistent")
 
 # Legacy function - kept for backwards compatibility but no longer used
 func _tool_get_settings(_args: Dictionary) -> Dictionary:
