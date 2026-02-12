@@ -1,6 +1,8 @@
 extends RefCounted
 class_name AppearanceRegistry
 
+const _JsonLoader = preload("res://scripts/FurnitureJsonLoader.gd")
+
 ## Registry for JSON-driven agent appearance items.
 ## Scans directories for tops, bottoms, hair colors, and hair styles.
 
@@ -30,7 +32,7 @@ func _scan_all() -> void:
 	_scan_category(HAIR_STYLES_DIR, _hair_styles, _hair_style_ids)
 
 func _scan_category(dir_path: String, target: Dictionary, id_list: Array[String]) -> void:
-	var defs := FurnitureJsonLoader.scan_directory(dir_path)
+	var defs := _JsonLoader.scan_directory(dir_path, false)
 	for data in defs:
 		var item_id: String = data.get("id", "")
 		if item_id.is_empty():
@@ -57,7 +59,7 @@ func get_top_color(id: String) -> Color:
 	var item := get_top(id)
 	if item.is_empty():
 		return Color.MAGENTA
-	return FurnitureJsonLoader.resolve_color(item.get("color", null))
+	return _JsonLoader.resolve_color(item.get("color", null))
 
 func has_top(id: String) -> bool:
 	return _tops.has(id)
@@ -80,7 +82,7 @@ func get_bottom_color(id: String) -> Color:
 	var item := get_bottom(id)
 	if item.is_empty():
 		return Color.MAGENTA
-	return FurnitureJsonLoader.resolve_color(item.get("color", null))
+	return _JsonLoader.resolve_color(item.get("color", null))
 
 func has_bottom(id: String) -> bool:
 	return _bottoms.has(id)
@@ -103,7 +105,7 @@ func get_hair_color_value(id: String) -> Color:
 	var item := get_hair_color(id)
 	if item.is_empty():
 		return Color.MAGENTA
-	return FurnitureJsonLoader.resolve_color(item.get("color", null))
+	return _JsonLoader.resolve_color(item.get("color", null))
 
 func has_hair_color(id: String) -> bool:
 	return _hair_colors.has(id)

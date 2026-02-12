@@ -39,6 +39,17 @@ var context_prune_timer: float = 0.0
 var poll_timer: float = 0.0
 var scan_timer: float = 0.0
 
+static func _get_home_dir() -> String:
+	if OS.get_name() == "Windows":
+		var userprofile = OS.get_environment("USERPROFILE")
+		if not userprofile.is_empty():
+			return userprofile
+		var homedrive = OS.get_environment("HOMEDRIVE")
+		var homepath = OS.get_environment("HOMEPATH")
+		if not homedrive.is_empty() and not homepath.is_empty():
+			return homedrive + homepath
+	return OS.get_environment("HOME")
+
 # Track tool_use_id -> agent info for matching with tool_result
 var pending_agents: Dictionary = {}  # tool_use_id -> {agent_type, description, session_path, created_at}
 
@@ -254,7 +265,7 @@ func _scan_claude_sessions(current_time: float) -> void:
 	if not custom_path.is_empty():
 		projects_dir = custom_path
 	else:
-		var home_dir = OS.get_environment("HOME")
+		var home_dir = _get_home_dir()
 		projects_dir = home_dir + CLAUDE_PROJECTS_DIR
 
 	var dir = DirAccess.open(projects_dir)
@@ -331,7 +342,7 @@ func _get_codex_sessions_dir() -> String:
 		return custom_path
 	var codex_home = OS.get_environment("CODEX_HOME")
 	if codex_home.is_empty():
-		var home_dir = OS.get_environment("HOME")
+		var home_dir = _get_home_dir()
 		codex_home = home_dir + "/.codex"
 	return codex_home + "/sessions"
 
@@ -339,7 +350,7 @@ func _get_clawdbot_sessions_dir() -> String:
 	var custom_path = harness_paths.get("clawdbot", "")
 	if not custom_path.is_empty():
 		return custom_path
-	var home_dir = OS.get_environment("HOME")
+	var home_dir = _get_home_dir()
 	return home_dir + CLAWDBOT_SESSIONS_DIR
 
 func _remove_stale_sessions(current_time: float) -> void:
@@ -821,12 +832,13 @@ func _derive_session_id(file_path: String) -> String:
 	return basename
 
 func _derive_harness(session_path: String) -> String:
-	# Determine if this is a claude or codex session based on path
-	if session_path.contains("/.claude/"):
+	# Determine harness from path (handles both / and \ separators)
+	var normalized = session_path.replace("\\", "/")
+	if normalized.contains("/.claude/"):
 		return "claude"
-	elif session_path.contains("/.codex/"):
+	elif normalized.contains("/.codex/"):
 		return "codex"
-	elif session_path.contains("/.clawdbot/"):
+	elif normalized.contains("/.clawdbot/"):
 		return "clawdbot"
 	return ""
 

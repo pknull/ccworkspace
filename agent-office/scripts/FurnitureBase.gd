@@ -1,6 +1,8 @@
 extends DraggableItem
 class_name FurnitureBase
 
+const _JsonLoader = preload("res://scripts/FurnitureJsonLoader.gd")
+
 ## Base class for all furniture in the office.
 ## Extends DraggableItem to add trait-based agent interaction.
 
@@ -72,7 +74,7 @@ func _build_visuals() -> void:
 	if not _json_data.is_empty() and _json_data.has("visuals"):
 		var visuals = _json_data.get("visuals")
 		if visuals is Array:
-			FurnitureJsonLoader.build_visuals(self, visuals)
+			_JsonLoader.build_visuals(self, visuals)
 		return
 
 # --- Trait System ---

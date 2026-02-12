@@ -1192,7 +1192,7 @@ func _tool_add_furniture(args: Dictionary) -> Dictionary:
 	if ftype.is_empty():
 		return _tool_error("type is required")
 
-	var valid_types := office_manager.furniture_registry.get_available_types()
+	var valid_types: Array[String] = office_manager.furniture_registry.get_available_types()
 	# Support legacy "potted_plant" name
 	if ftype == "potted_plant":
 		ftype = "plant"

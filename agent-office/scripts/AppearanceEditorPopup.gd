@@ -1,6 +1,8 @@
 extends CanvasLayer
 class_name AppearanceEditorPopup
 
+const _JsonLoader = preload("res://scripts/FurnitureJsonLoader.gd")
+
 # =============================================================================
 # APPEARANCE EDITOR POPUP - Edit Agent Appearance
 # =============================================================================
@@ -441,7 +443,7 @@ func _create_agent_preview(cx: float, cy: float, scale: float, skin: Color, hair
 		var tie = ColorRect.new()
 		tie.size = Vector2(4 * scale, 14 * scale)
 		tie.position = Vector2(cx - 2 * scale, cy - 5 * scale)
-		tie.color = FurnitureJsonLoader.resolve_color(tie_color_ref)
+		tie.color = _JsonLoader.resolve_color(tie_color_ref)
 		preview_layer.add_child(tie)
 
 	# Head

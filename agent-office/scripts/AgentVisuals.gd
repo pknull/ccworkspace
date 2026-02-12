@@ -1,6 +1,8 @@
 extends RefCounted
 class_name AgentVisuals
 
+const _JsonLoader = preload("res://scripts/FurnitureJsonLoader.gd")
+
 # =============================================================================
 # AGENT VISUALS
 # =============================================================================
@@ -254,7 +256,7 @@ func _create_agent_body(p_skin_color: Color) -> void:
 
 	# Collar + Tie (rendered when top has tie_color)
 	if not tie_color_ref.is_empty():
-		var resolved_tie_color := FurnitureJsonLoader.resolve_color(tie_color_ref)
+		var resolved_tie_color := _JsonLoader.resolve_color(tie_color_ref)
 
 		var collar_left = ColorRect.new()
 		collar_left.size = Vector2(8, 6)
@@ -336,7 +338,7 @@ func _build_hair(hair_col: Color) -> void:
 			if color_ref is String and color_ref == "HAIR_COLOR":
 				rect.color = hair_col
 			else:
-				rect.color = FurnitureJsonLoader.resolve_color(color_ref)
+				rect.color = _JsonLoader.resolve_color(color_ref)
 			head.add_child(rect)
 		# Track 'hair' reference for animations — prefer named, fall back to first ColorRect
 		if head.get_child_count() > 0:

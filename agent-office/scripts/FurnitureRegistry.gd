@@ -1,6 +1,8 @@
 extends RefCounted
 class_name FurnitureRegistry
 
+const _JsonLoader = preload("res://scripts/FurnitureJsonLoader.gd")
+
 ## Registry of available furniture types for spawning.
 ## Supports both script-based (desk, terminal) and JSON-driven furniture.
 
@@ -29,7 +31,7 @@ func _register_default_types() -> void:
 
 func _scan_json_definitions() -> void:
 	# Load all JSON definitions from the definitions directory
-	var defs := FurnitureJsonLoader.scan_directory(DEFINITIONS_DIR)
+	var defs := _JsonLoader.scan_directory(DEFINITIONS_DIR)
 	for data in defs:
 		var type_name: String = data.get("type", "")
 		if type_name.is_empty():
@@ -52,7 +54,7 @@ func _scan_json_definitions() -> void:
 	_load_script_metadata("res://furniture/terminal_furniture.json", "terminal_furniture")
 
 func _load_script_metadata(path: String, type_name: String) -> void:
-	var data := FurnitureJsonLoader.load_definition(path)
+	var data := _JsonLoader.load_definition(path)
 	if data.is_empty():
 		return
 	_metadata[type_name] = {
@@ -153,7 +155,7 @@ func spawn(type_name: String, pos: Vector2) -> FurnitureBase:
 		if not _json_data.has(type_name):
 			push_error("FurnitureRegistry: No JSON data for '%s'" % type_name)
 			return null
-		var furniture := FurnitureJsonLoader.create_furniture(_json_data[type_name])
+		var furniture := _JsonLoader.create_furniture(_json_data[type_name])
 		furniture.furniture_id = FurnitureBase.generate_id(type_name)
 		furniture.position = pos
 		furniture.navigation_grid = navigation_grid

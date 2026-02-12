@@ -1,5 +1,3 @@
-class_name FurnitureJsonLoader
-
 ## Static utility for loading furniture definitions from JSON files.
 ## Handles parsing, color resolution, visual construction, and directory scanning.
 
@@ -7,8 +5,8 @@ const REQUIRED_FIELDS: Array[String] = ["type", "display_name", "category", "tra
 
 # --- Loading ---
 
-static func load_definition(path: String) -> Dictionary:
-	## Parse and validate a JSON furniture definition file.
+static func load_definition(path: String, validate: bool = true) -> Dictionary:
+	## Parse a JSON definition file. Set validate=false for non-furniture items.
 	## Returns empty dictionary on failure.
 	if not FileAccess.file_exists(path):
 		push_warning("FurnitureJsonLoader: File not found: %s" % path)
@@ -29,7 +27,7 @@ static func load_definition(path: String) -> Dictionary:
 		return {}
 
 	var data: Dictionary = json.data
-	if not _validate(data, path):
+	if validate and not _validate(data, path):
 		return {}
 
 	return data
@@ -227,7 +225,7 @@ static func create_furniture(data: Dictionary) -> FurnitureBase:
 
 # --- Directory Scanning ---
 
-static func scan_directory(dir_path: String) -> Array[Dictionary]:
+static func scan_directory(dir_path: String, validate: bool = true) -> Array[Dictionary]:
 	## Load all .json files from a directory. Returns array of parsed definitions.
 	var results: Array[Dictionary] = []
 
@@ -241,7 +239,7 @@ static func scan_directory(dir_path: String) -> Array[Dictionary]:
 	while file_name != "":
 		if not dir.current_is_dir() and file_name.ends_with(".json"):
 			var full_path := dir_path.path_join(file_name)
-			var data := load_definition(full_path)
+			var data := load_definition(full_path, validate)
 			if not data.is_empty():
 				results.append(data)
 		file_name = dir.get_next()
