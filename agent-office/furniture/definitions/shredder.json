@@ -1,0 +1,80 @@
+{
+  "type": "shredder",
+  "display_name": "Shredder",
+  "category": "dropoff",
+  "traits": ["delivery", "social"],
+  "capacity": 4,
+  "delivery_sound": "shredder",
+  "obstacle_size": [30, 40],
+  "click_area": [-30, -25, 60, 60],
+  "wall_mounted": false,
+  "z_index": {"mode": "dynamic"},
+  "slots": [
+    {"offset": [-50, 0]},
+    {"offset": [50, 0]},
+    {"offset": [0, 45]},
+    {"offset": [0, -35]}
+  ],
+  "shelf_preview": {
+    "color": "SHREDDER_BODY",
+    "size": [25, 30]
+  },
+  "visuals": [
+    {
+      "type": "color_rect",
+      "name": "shadow",
+      "size": [52, 16],
+      "position": [-26, 28],
+      "color": "SHADOW"
+    },
+    {
+      "type": "color_rect",
+      "name": "bin_front",
+      "size": [48, 24],
+      "position": [-24, 4],
+      "color": "SHREDDER_BIN"
+    },
+    {
+      "type": "color_rect",
+      "name": "body_front",
+      "size": [48, 20],
+      "position": [-24, -16],
+      "color": "SHREDDER_BODY"
+    },
+    {
+      "type": "color_rect",
+      "name": "body_top",
+      "size": [48, 12],
+      "position": [-24, -28],
+      "color": "SHREDDER_TOP"
+    },
+    {
+      "type": "color_rect",
+      "name": "slot",
+      "size": [36, 6],
+      "position": [-18, -26],
+      "color": "SHREDDER_SLOT"
+    },
+    {
+      "type": "color_rect",
+      "name": "shreds1",
+      "size": [40, 4],
+      "position": [-20, 18],
+      "color": "SHREDDED_PAPER"
+    },
+    {
+      "type": "color_rect",
+      "name": "shreds2",
+      "size": [36, 3],
+      "position": [-18, 14],
+      "color": "SHREDDED_PAPER_DARK"
+    },
+    {
+      "type": "color_rect",
+      "name": "led",
+      "size": [5, 5],
+      "position": [16, -24],
+      "color": "STATUS_LED_GREEN_BRIGHT"
+    }
+  ]
+}

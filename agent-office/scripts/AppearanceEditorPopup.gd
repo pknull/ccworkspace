@@ -4,7 +4,7 @@ class_name AppearanceEditorPopup
 # =============================================================================
 # APPEARANCE EDITOR POPUP - Edit Agent Appearance
 # =============================================================================
-# Allows editing agent appearance: skin tone, hair, top (blouse/shirt+tie), bottom (pants/skirt)
+# Allows editing agent appearance using JSON-driven items from AppearanceRegistry.
 
 signal close_requested()
 signal appearance_changed(profile: AgentProfile)
@@ -24,74 +24,42 @@ var preview_layer: Control
 var skin_container: HBoxContainer
 var hair_color_container: HBoxContainer
 var hair_style_container: HBoxContainer
-var top_type_container: HBoxContainer
-var top_color_label: Label
-var top_color_container: HBoxContainer
-var bottom_type_container: HBoxContainer
-var bottom_color_label: Label
-var bottom_color_container: HBoxContainer
+var top_container: HBoxContainer
+var bottom_container: HBoxContainer
 
-# Current selections
+# Current selections (ID-based)
 var current_profile: AgentProfile = null
 var selected_skin: int = 0
-var selected_hair_color: int = 0
-var selected_hair_style: int = 0
-var selected_top_type: int = 0  # 0=Blouse, 1=Shirt+Tie
-var selected_top_color: int = 0
-var selected_bottom_type: int = 0  # 0=Pants, 1=Skirt
-var selected_bottom_color: int = 0
+var selected_top_id: String = "white_shirt"
+var selected_bottom_id: String = "dark_pants"
+var selected_hair_color_id: String = "brown"
+var selected_hair_style_id: String = "short"
 
 # Layout constants
 const PANEL_WIDTH: float = 480
-const PANEL_HEIGHT: float = 420
+const PANEL_HEIGHT: float = 380
 const PREVIEW_SIZE: float = 80
 const SWATCH_SIZE: float = 24
 const SWATCH_SPACING: float = 4
 
-# Use centralized arrays from OfficePalette
+# Skin tones (remain index-based)
 const SKIN_TONES = OfficePalette.SKIN_TONES
-const HAIR_COLORS = OfficePalette.HAIR_COLORS
 
-const BLOUSE_COLORS: Array[Color] = [
-	Color(0.976, 0.961, 0.890),  # White/Cream
-	Color(0.879, 0.668, 0.726),  # Pink
-	Color(0.611, 0.718, 0.677),  # Blue
-	Color(0.75, 0.65, 0.80),     # Lavender
-]
-
-const TIE_COLORS: Array[Color] = [
-	OfficePalette.GRUVBOX_RED,
-	OfficePalette.GRUVBOX_BLUE,
-	OfficePalette.GRUVBOX_GREEN,
-	OfficePalette.GRUVBOX_PURPLE,
-]
-
-const PANTS_COLORS: Array[Color] = [
-	OfficePalette.GRUVBOX_BG,      # Dark
-	OfficePalette.GRUVBOX_BG2,     # Medium dark
-	Color(0.25, 0.22, 0.21),       # Charcoal
-	Color(0.15, 0.20, 0.25),       # Navy
-]
-
-const SKIRT_COLORS: Array[Color] = [
-	OfficePalette.GRUVBOX_BG1,     # Dark
-	Color(0.25, 0.22, 0.21),       # Charcoal
-	Color(0.15, 0.20, 0.25),       # Navy
-	Color(0.35, 0.25, 0.30),       # Burgundy
-]
-
-const HAIR_STYLE_NAMES: Array[String] = ["Short", "Long", "Bob", "Updo"]
-const TOP_TYPE_NAMES: Array[String] = ["Blouse", "Shirt+Tie"]
-const BOTTOM_TYPE_NAMES: Array[String] = ["Pants", "Skirt"]
+# Registry reference (set by OfficeManager)
+var appearance_registry: AppearanceRegistry = null
 
 # References for button highlighting
 var skin_buttons: Array[Button] = []
 var hair_color_buttons: Array[Button] = []
 var hair_style_buttons: Array[Button] = []
-var top_type_buttons: Array[Button] = []
-var top_color_buttons: Array[Button] = []
-var bottom_type_buttons: Array[Button] = []
-var bottom_color_buttons: Array[Button] = []
+var top_buttons: Array[Button] = []
+var bottom_buttons: Array[Button] = []
+
+# Map button index to item ID
+var _hair_color_ids: Array[String] = []
+var _hair_style_ids: Array[String] = []
+var _top_ids: Array[String] = []
+var _bottom_ids: Array[String] = []
 
 func _init() -> void:
 	layer = OfficeConstants.Z_UI_POPUP_LAYER + 1  # Above ProfilePopup
@@ -106,19 +74,21 @@ func show_editor(profile: AgentProfile) -> void:
 
 	current_profile = profile
 	selected_skin = profile.skin_color_index
-	selected_hair_color = profile.hair_color_index
-	selected_hair_style = profile.hair_style_index
-	# is_female means "uses blouse" (true) vs "uses shirt+tie" (false)
-	selected_top_type = 0 if profile.is_female else 1
-	selected_top_color = profile.blouse_color_index
-	selected_bottom_type = profile.bottom_type
-	selected_bottom_color = profile.bottom_color_index
+	selected_top_id = profile.top_id
+	selected_bottom_id = profile.bottom_id
+	selected_hair_color_id = profile.hair_color_id
+	selected_hair_style_id = profile.hair_style_id
 
-	_rebuild_top_color_buttons()
-	_rebuild_bottom_color_buttons()
+	_rebuild_all_buttons()
 	_update_button_highlights()
 	_update_preview()
 	visible = true
+
+func _rebuild_all_buttons() -> void:
+	_rebuild_hair_color_buttons()
+	_rebuild_hair_style_buttons()
+	_rebuild_top_buttons()
+	_rebuild_bottom_buttons()
 
 func _create_visuals() -> void:
 	container = Control.new()
@@ -203,37 +173,21 @@ func _create_visuals() -> void:
 	# Hair color row
 	_create_label("Hair Color:", options_x, options_y)
 	hair_color_container = _create_option_row(options_x + 80, options_y)
-	_create_hair_color_buttons()
 	options_y += row_height
 
 	# Hair style row
 	_create_label("Hair Style:", options_x, options_y)
 	hair_style_container = _create_option_row(options_x + 80, options_y)
-	_create_hair_style_buttons()
 	options_y += row_height
 
-	# Top type row
+	# Top row
 	_create_label("Top:", options_x, options_y)
-	top_type_container = _create_option_row(options_x + 80, options_y)
-	_create_top_type_buttons()
+	top_container = _create_option_row(options_x + 80, options_y)
 	options_y += row_height
 
-	# Top color row
-	top_color_label = _create_label("Top Color:", options_x, options_y)
-	top_color_container = _create_option_row(options_x + 80, options_y)
-	# Buttons created dynamically based on top type
-	options_y += row_height
-
-	# Bottom type row
+	# Bottom row
 	_create_label("Bottom:", options_x, options_y)
-	bottom_type_container = _create_option_row(options_x + 80, options_y)
-	_create_bottom_type_buttons()
-	options_y += row_height
-
-	# Bottom color row
-	bottom_color_label = _create_label("Bottom Color:", options_x, options_y)
-	bottom_color_container = _create_option_row(options_x + 80, options_y)
-	# Buttons created dynamically based on bottom type
+	bottom_container = _create_option_row(options_x + 80, options_y)
 	options_y += row_height
 
 	# Save button
@@ -260,6 +214,8 @@ func _create_option_row(x: float, y: float) -> HBoxContainer:
 	container.add_child(hbox)
 	return hbox
 
+# --- Button Creation ---
+
 func _create_skin_buttons() -> void:
 	for i in range(SKIN_TONES.size()):
 		var btn = _create_color_swatch(SKIN_TONES[i])
@@ -267,67 +223,80 @@ func _create_skin_buttons() -> void:
 		skin_container.add_child(btn)
 		skin_buttons.append(btn)
 
-func _create_hair_color_buttons() -> void:
-	for i in range(HAIR_COLORS.size()):
-		var btn = _create_color_swatch(HAIR_COLORS[i])
-		btn.pressed.connect(func(): _select_hair_color(i))
+func _rebuild_hair_color_buttons() -> void:
+	for btn in hair_color_buttons:
+		btn.queue_free()
+	hair_color_buttons.clear()
+	_hair_color_ids.clear()
+
+	if not appearance_registry:
+		return
+
+	for item in appearance_registry.get_all_hair_colors():
+		var item_id: String = item.get("id", "")
+		var color := appearance_registry.get_hair_color_value(item_id)
+		var btn = _create_color_swatch(color)
+		btn.pressed.connect(_select_hair_color.bind(item_id))
 		hair_color_container.add_child(btn)
 		hair_color_buttons.append(btn)
+		_hair_color_ids.append(item_id)
 
-func _create_hair_style_buttons() -> void:
-	for i in range(HAIR_STYLE_NAMES.size()):
+func _rebuild_hair_style_buttons() -> void:
+	for btn in hair_style_buttons:
+		btn.queue_free()
+	hair_style_buttons.clear()
+	_hair_style_ids.clear()
+
+	if not appearance_registry:
+		return
+
+	for item in appearance_registry.get_all_hair_styles():
+		var item_id: String = item.get("id", "")
 		var btn = Button.new()
-		btn.text = HAIR_STYLE_NAMES[i]
+		btn.text = item.get("display_name", item_id)
 		btn.custom_minimum_size = Vector2(50, SWATCH_SIZE)
-		btn.pressed.connect(func(): _select_hair_style(i))
+		btn.pressed.connect(_select_hair_style.bind(item_id))
 		hair_style_container.add_child(btn)
 		hair_style_buttons.append(btn)
+		_hair_style_ids.append(item_id)
 
-func _create_top_type_buttons() -> void:
-	for i in range(TOP_TYPE_NAMES.size()):
-		var btn = Button.new()
-		btn.text = TOP_TYPE_NAMES[i]
-		btn.custom_minimum_size = Vector2(70, SWATCH_SIZE)
-		btn.pressed.connect(func(): _select_top_type(i))
-		top_type_container.add_child(btn)
-		top_type_buttons.append(btn)
-
-func _create_bottom_type_buttons() -> void:
-	for i in range(BOTTOM_TYPE_NAMES.size()):
-		var btn = Button.new()
-		btn.text = BOTTOM_TYPE_NAMES[i]
-		btn.custom_minimum_size = Vector2(60, SWATCH_SIZE)
-		btn.pressed.connect(func(): _select_bottom_type(i))
-		bottom_type_container.add_child(btn)
-		bottom_type_buttons.append(btn)
-
-func _rebuild_top_color_buttons() -> void:
-	# Clear existing buttons
-	for btn in top_color_buttons:
+func _rebuild_top_buttons() -> void:
+	for btn in top_buttons:
 		btn.queue_free()
-	top_color_buttons.clear()
+	top_buttons.clear()
+	_top_ids.clear()
 
-	# Create new buttons based on top type
-	var colors = BLOUSE_COLORS if selected_top_type == 0 else TIE_COLORS
-	for i in range(colors.size()):
-		var btn = _create_color_swatch(colors[i])
-		btn.pressed.connect(func(): _select_top_color(i))
-		top_color_container.add_child(btn)
-		top_color_buttons.append(btn)
+	if not appearance_registry:
+		return
 
-func _rebuild_bottom_color_buttons() -> void:
-	# Clear existing buttons
-	for btn in bottom_color_buttons:
+	for item in appearance_registry.get_all_tops():
+		var item_id: String = item.get("id", "")
+		var color := appearance_registry.get_top_color(item_id)
+		var btn = _create_color_swatch(color)
+		btn.tooltip_text = item.get("display_name", item_id)
+		btn.pressed.connect(_select_top.bind(item_id))
+		top_container.add_child(btn)
+		top_buttons.append(btn)
+		_top_ids.append(item_id)
+
+func _rebuild_bottom_buttons() -> void:
+	for btn in bottom_buttons:
 		btn.queue_free()
-	bottom_color_buttons.clear()
+	bottom_buttons.clear()
+	_bottom_ids.clear()
 
-	# Create new buttons based on bottom type
-	var colors = PANTS_COLORS if selected_bottom_type == 0 else SKIRT_COLORS
-	for i in range(colors.size()):
-		var btn = _create_color_swatch(colors[i])
-		btn.pressed.connect(func(): _select_bottom_color(i))
-		bottom_color_container.add_child(btn)
-		bottom_color_buttons.append(btn)
+	if not appearance_registry:
+		return
+
+	for item in appearance_registry.get_all_bottoms():
+		var item_id: String = item.get("id", "")
+		var color := appearance_registry.get_bottom_color(item_id)
+		var btn = _create_color_swatch(color)
+		btn.tooltip_text = item.get("display_name", item_id)
+		btn.pressed.connect(_select_bottom.bind(item_id))
+		bottom_container.add_child(btn)
+		bottom_buttons.append(btn)
+		_bottom_ids.append(item_id)
 
 func _create_color_swatch(color: Color) -> Button:
 	var btn = Button.new()
@@ -343,73 +312,50 @@ func _create_color_swatch(color: Color) -> Button:
 
 	return btn
 
+# --- Selection Handlers ---
+
 func _select_skin(index: int) -> void:
 	selected_skin = index
 	_update_button_highlights()
 	_update_preview()
 
-func _select_hair_color(index: int) -> void:
-	selected_hair_color = index
+func _select_hair_color(item_id: String) -> void:
+	selected_hair_color_id = item_id
 	_update_button_highlights()
 	_update_preview()
 
-func _select_hair_style(index: int) -> void:
-	selected_hair_style = index
+func _select_hair_style(item_id: String) -> void:
+	selected_hair_style_id = item_id
 	_update_button_highlights()
 	_update_preview()
 
-func _select_top_type(index: int) -> void:
-	selected_top_type = index
-	selected_top_color = 0  # Reset color when type changes
-	_rebuild_top_color_buttons()
+func _select_top(item_id: String) -> void:
+	selected_top_id = item_id
 	_update_button_highlights()
 	_update_preview()
 
-func _select_top_color(index: int) -> void:
-	selected_top_color = index
+func _select_bottom(item_id: String) -> void:
+	selected_bottom_id = item_id
 	_update_button_highlights()
 	_update_preview()
 
-func _select_bottom_type(index: int) -> void:
-	selected_bottom_type = index
-	selected_bottom_color = 0  # Reset color when type changes
-	_rebuild_bottom_color_buttons()
-	_update_button_highlights()
-	_update_preview()
-
-func _select_bottom_color(index: int) -> void:
-	selected_bottom_color = index
-	_update_button_highlights()
-	_update_preview()
+# --- Button Highlighting ---
 
 func _update_button_highlights() -> void:
-	# Skin buttons
 	for i in range(skin_buttons.size()):
 		_set_button_highlight(skin_buttons[i], i == selected_skin)
 
-	# Hair color buttons
 	for i in range(hair_color_buttons.size()):
-		_set_button_highlight(hair_color_buttons[i], i == selected_hair_color)
+		_set_button_highlight(hair_color_buttons[i], _hair_color_ids[i] == selected_hair_color_id)
 
-	# Hair style buttons
 	for i in range(hair_style_buttons.size()):
-		_set_button_highlight(hair_style_buttons[i], i == selected_hair_style)
+		_set_button_highlight(hair_style_buttons[i], _hair_style_ids[i] == selected_hair_style_id)
 
-	# Top type buttons
-	for i in range(top_type_buttons.size()):
-		_set_button_highlight(top_type_buttons[i], i == selected_top_type)
+	for i in range(top_buttons.size()):
+		_set_button_highlight(top_buttons[i], _top_ids[i] == selected_top_id)
 
-	# Top color buttons
-	for i in range(top_color_buttons.size()):
-		_set_button_highlight(top_color_buttons[i], i == selected_top_color)
-
-	# Bottom type buttons
-	for i in range(bottom_type_buttons.size()):
-		_set_button_highlight(bottom_type_buttons[i], i == selected_bottom_type)
-
-	# Bottom color buttons
-	for i in range(bottom_color_buttons.size()):
-		_set_button_highlight(bottom_color_buttons[i], i == selected_bottom_color)
+	for i in range(bottom_buttons.size()):
+		_set_button_highlight(bottom_buttons[i], _bottom_ids[i] == selected_bottom_id)
 
 func _set_button_highlight(btn: Button, selected: bool) -> void:
 	if selected:
@@ -423,28 +369,36 @@ func _create_selected_style() -> StyleBoxFlat:
 	style.set_corner_radius_all(3)
 	return style
 
+# --- Preview ---
+
 func _update_preview() -> void:
-	# Clear existing preview
 	for child in preview_layer.get_children():
 		child.queue_free()
 
 	var skin_color = SKIN_TONES[selected_skin % SKIN_TONES.size()]
-	var hair_color = HAIR_COLORS[selected_hair_color % HAIR_COLORS.size()]
-	var top_color = BLOUSE_COLORS[selected_top_color % BLOUSE_COLORS.size()] if selected_top_type == 0 else TIE_COLORS[selected_top_color % TIE_COLORS.size()]
-	var bottom_color = PANTS_COLORS[selected_bottom_color % PANTS_COLORS.size()] if selected_bottom_type == 0 else SKIRT_COLORS[selected_bottom_color % SKIRT_COLORS.size()]
+	var hair_color := OfficePalette.HAIR_BROWN
+	var top_color := OfficePalette.AGENT_SHIRT_WHITE
+	var bottom_color := OfficePalette.AGENT_TROUSERS_DARK
+	var tie_color_ref: String = ""
+	var is_skirt := false
 
-	# Scale factor for preview (agent is normally ~50px tall)
+	if appearance_registry:
+		hair_color = appearance_registry.get_hair_color_value(selected_hair_color_id)
+		top_color = appearance_registry.get_top_color(selected_top_id)
+		bottom_color = appearance_registry.get_bottom_color(selected_bottom_id)
+		var top_data := appearance_registry.get_top(selected_top_id)
+		var bottom_data := appearance_registry.get_bottom(selected_bottom_id)
+		tie_color_ref = top_data.get("tie_color", "")
+		is_skirt = bottom_data.get("is_skirt", false)
+
 	var scale = 1.5
 	var center_x = PREVIEW_SIZE / 2
 	var center_y = PREVIEW_SIZE / 2 + 10
 
-	_create_agent_preview(center_x, center_y, scale, skin_color, hair_color, top_color, bottom_color)
+	_create_agent_preview(center_x, center_y, scale, skin_color, hair_color, top_color, bottom_color, tie_color_ref, is_skirt)
 
-func _create_agent_preview(cx: float, cy: float, scale: float, skin: Color, hair: Color, top_color: Color, bottom_color: Color) -> void:
-	var show_skirt = (selected_bottom_type == 1)
-	var show_tie = (selected_top_type == 1)
-
-	# Bottom (trousers or skirt) - always with legs
+func _create_agent_preview(cx: float, cy: float, scale: float, skin: Color, hair: Color, top_color: Color, bottom_color: Color, tie_color_ref: String, show_skirt: bool) -> void:
+	# Bottom (trousers or skirt)
 	if show_skirt:
 		var skirt = ColorRect.new()
 		skirt.size = Vector2(20 * scale, 10 * scale)
@@ -452,7 +406,6 @@ func _create_agent_preview(cx: float, cy: float, scale: float, skin: Color, hair
 		skirt.color = bottom_color
 		preview_layer.add_child(skirt)
 
-		# Legs below skirt (skin-toned)
 		var left_leg = ColorRect.new()
 		left_leg.size = Vector2(6 * scale, 8 * scale)
 		left_leg.position = Vector2(cx - 7 * scale, cy + 14 * scale)
@@ -465,7 +418,6 @@ func _create_agent_preview(cx: float, cy: float, scale: float, skin: Color, hair
 		right_leg.color = skin.darkened(0.1)
 		preview_layer.add_child(right_leg)
 	else:
-		# Pants
 		var left_leg = ColorRect.new()
 		left_leg.size = Vector2(7 * scale, 12 * scale)
 		left_leg.position = Vector2(cx - 8 * scale, cy + 8 * scale)
@@ -478,19 +430,18 @@ func _create_agent_preview(cx: float, cy: float, scale: float, skin: Color, hair
 		right_leg.color = bottom_color
 		preview_layer.add_child(right_leg)
 
-	# Top (white shirt for tie outfit, colored for blouse)
+	# Top (shirt body uses top color; tie tops show white shirt + tie)
 	var body = ColorRect.new()
 	body.size = Vector2(17 * scale, 15 * scale)
 	body.position = Vector2(cx - 8.5 * scale, cy - 7 * scale)
-	body.color = OfficePalette.AGENT_SHIRT_WHITE if show_tie else top_color
+	body.color = top_color
 	preview_layer.add_child(body)
 
-	# Tie (only for Shirt+Tie outfit)
-	if show_tie:
+	if not tie_color_ref.is_empty():
 		var tie = ColorRect.new()
 		tie.size = Vector2(4 * scale, 14 * scale)
 		tie.position = Vector2(cx - 2 * scale, cy - 5 * scale)
-		tie.color = top_color
+		tie.color = FurnitureJsonLoader.resolve_color(tie_color_ref)
 		preview_layer.add_child(tie)
 
 	# Head
@@ -500,62 +451,45 @@ func _create_agent_preview(cx: float, cy: float, scale: float, skin: Color, hair
 	head.color = skin
 	preview_layer.add_child(head)
 
-	# Hair (uses selected style)
-	_create_hair_preview(cx, cy, scale, hair, selected_hair_style)
+	# Hair (JSON-driven via registry)
+	_create_hair_preview(cx, cy, scale, hair)
 
 	# Eyes
 	_add_eyes(cx, cy - 2 * scale, scale * 0.95)
 
-func _create_hair_preview(cx: float, cy: float, scale: float, hair: Color, style: int) -> void:
-	match style % 4:
-		0:  # Short
-			var top = ColorRect.new()
-			top.size = Vector2(14 * scale, 5 * scale)
-			top.position = Vector2(cx - 7 * scale, cy - 23 * scale)
-			top.color = hair
-			preview_layer.add_child(top)
-		1:  # Long
-			var top = ColorRect.new()
-			top.size = Vector2(14 * scale, 6 * scale)
-			top.position = Vector2(cx - 7 * scale, cy - 22 * scale)
-			top.color = hair
-			preview_layer.add_child(top)
+func _create_hair_preview(cx: float, cy: float, scale: float, hair: Color) -> void:
+	if not appearance_registry:
+		# Fallback: simple short hair
+		var top = ColorRect.new()
+		top.size = Vector2(14 * scale, 5 * scale)
+		top.position = Vector2(cx - 7 * scale, cy - 23 * scale)
+		top.color = hair
+		preview_layer.add_child(top)
+		return
 
-			var left = ColorRect.new()
-			left.size = Vector2(4 * scale, 14 * scale)
-			left.position = Vector2(cx - 8 * scale, cy - 18 * scale)
-			left.color = hair
-			preview_layer.add_child(left)
+	var style_data := appearance_registry.get_hair_style(selected_hair_style_id)
+	if not style_data.has("visuals") or not (style_data["visuals"] is Array):
+		return
 
-			var right = ColorRect.new()
-			right.size = Vector2(4 * scale, 14 * scale)
-			right.position = Vector2(cx + 4 * scale, cy - 18 * scale)
-			right.color = hair
-			preview_layer.add_child(right)
-		2:  # Bob
-			var top = ColorRect.new()
-			top.size = Vector2(16 * scale, 8 * scale)
-			top.position = Vector2(cx - 8 * scale, cy - 22 * scale)
-			top.color = hair
-			preview_layer.add_child(top)
-
-			var sides = ColorRect.new()
-			sides.size = Vector2(18 * scale, 6 * scale)
-			sides.position = Vector2(cx - 9 * scale, cy - 16 * scale)
-			sides.color = hair
-			preview_layer.add_child(sides)
-		3:  # Updo
-			var top = ColorRect.new()
-			top.size = Vector2(14 * scale, 6 * scale)
-			top.position = Vector2(cx - 7 * scale, cy - 22 * scale)
-			top.color = hair
-			preview_layer.add_child(top)
-
-			var bun = ColorRect.new()
-			bun.size = Vector2(8 * scale, 8 * scale)
-			bun.position = Vector2(cx - 4 * scale, cy - 28 * scale)
-			bun.color = hair
-			preview_layer.add_child(bun)
+	# Render scaled visuals from JSON
+	for entry in style_data["visuals"]:
+		var rect := ColorRect.new()
+		var sz = entry.get("size", [20, 8])
+		var pos = entry.get("position", [0, 0])
+		if sz is Array and sz.size() >= 2 and pos is Array and pos.size() >= 2:
+			# Scale and center the hair relative to head position
+			# Original hair is relative to head (18x18 at head pos)
+			# Preview head center: cx, cy - 20*scale, size 13*scale
+			var head_cx = cx
+			var head_top = cy - 20 * scale
+			var head_w = 13.0 * scale
+			# Map from original 18px head to preview head
+			var ratio = head_w / 18.0
+			rect.size = Vector2(sz[0] * ratio, sz[1] * ratio)
+			# Position relative to head top-left in original: head is at (-9,-35), hair pos is relative to head
+			rect.position = Vector2(head_cx - 6.5 * scale + pos[0] * ratio, head_top + pos[1] * ratio + 5 * ratio)
+		rect.color = hair
+		preview_layer.add_child(rect)
 
 func _add_eyes(cx: float, cy: float, scale: float) -> void:
 	var left_eye = ColorRect.new()
@@ -570,19 +504,17 @@ func _add_eyes(cx: float, cy: float, scale: float) -> void:
 	right_eye.color = OfficePalette.EYE_COLOR
 	preview_layer.add_child(right_eye)
 
+# --- Save / Close ---
+
 func _on_save_pressed() -> void:
 	if current_profile == null:
 		return
 
-	# Update profile
 	current_profile.skin_color_index = selected_skin
-	current_profile.hair_color_index = selected_hair_color
-	current_profile.hair_style_index = selected_hair_style
-	# is_female now means "uses blouse" (true) vs "uses shirt+tie" (false)
-	current_profile.is_female = (selected_top_type == 0)
-	current_profile.blouse_color_index = selected_top_color
-	current_profile.bottom_type = selected_bottom_type
-	current_profile.bottom_color_index = selected_bottom_color
+	current_profile.top_id = selected_top_id
+	current_profile.bottom_id = selected_bottom_id
+	current_profile.hair_color_id = selected_hair_color_id
+	current_profile.hair_style_id = selected_hair_style_id
 
 	appearance_changed.emit(current_profile)
 	visible = false

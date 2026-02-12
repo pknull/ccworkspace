@@ -1,0 +1,9 @@
+{
+  "id": "long",
+  "display_name": "Long",
+  "visuals": [
+    {"type": "color_rect", "name": "hair", "size": [24, 12], "position": [-3, -7], "color": "HAIR_COLOR"},
+    {"type": "color_rect", "name": "hair_left", "size": [6, 18], "position": [-5, -1], "color": "HAIR_COLOR"},
+    {"type": "color_rect", "name": "hair_right", "size": [6, 18], "position": [17, -1], "color": "HAIR_COLOR"}
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "id": "updo",
+  "display_name": "Updo",
+  "visuals": [
+    {"type": "color_rect", "name": "hair", "size": [22, 10], "position": [-2, -8], "color": "HAIR_COLOR"},
+    {"type": "color_rect", "name": "bun", "size": [10, 10], "position": [4, -15], "color": "HAIR_COLOR"}
+  ]
+}

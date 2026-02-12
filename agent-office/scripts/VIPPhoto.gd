@@ -28,9 +28,9 @@ const FRAME_WIDTH: float = 36
 const FRAME_HEIGHT: float = 48
 const PORTRAIT_SIZE: float = 24
 
-# Use centralized arrays from OfficePalette
-const HAIR_COLORS = OfficePalette.HAIR_COLORS
 const SKIN_TONES = OfficePalette.SKIN_TONES
+
+var appearance_registry: AppearanceRegistry = null
 
 func _ready() -> void:
 	_create_visuals()
@@ -121,7 +121,9 @@ func _create_mini_portrait(profile: AgentProfile) -> void:
 		child.queue_free()
 
 	var skin_color = SKIN_TONES[profile.skin_color_index % SKIN_TONES.size()]
-	var hair_color = HAIR_COLORS[profile.hair_color_index % HAIR_COLORS.size()]
+	var hair_color := OfficePalette.HAIR_BROWN
+	if appearance_registry:
+		hair_color = appearance_registry.get_hair_color_value(profile.hair_color_id)
 
 	# Mini head (centered in portrait area)
 	var head = ColorRect.new()
@@ -143,24 +145,18 @@ func _create_mini_portrait(profile: AgentProfile) -> void:
 	right_eye.color = OfficePalette.EYE_COLOR
 	portrait_container.add_child(right_eye)
 
-	# Hair based on gender and style
-	if profile.is_female:
-		_create_female_hair(profile.hair_style_index, hair_color)
-	else:
-		_create_male_hair(hair_color)
+	# Hair based on style ID
+	_create_mini_hair(profile.hair_style_id, hair_color)
 
-func _create_male_hair(hair_color: Color) -> void:
-	# Short male hair
-	var hair = ColorRect.new()
-	hair.size = Vector2(16, 6)
-	hair.position = Vector2(4, 2)
-	hair.color = hair_color
-	portrait_container.add_child(hair)
-
-func _create_female_hair(style_index: int, hair_color: Color) -> void:
-	match style_index % 3:
-		0:
-			# Long hair with side parts
+func _create_mini_hair(style_id: String, hair_color: Color) -> void:
+	match style_id:
+		"short":
+			var hair = ColorRect.new()
+			hair.size = Vector2(16, 6)
+			hair.position = Vector2(4, 2)
+			hair.color = hair_color
+			portrait_container.add_child(hair)
+		"long":
 			var hair_top = ColorRect.new()
 			hair_top.size = Vector2(18, 8)
 			hair_top.position = Vector2(3, 1)
@@ -178,8 +174,7 @@ func _create_female_hair(style_index: int, hair_color: Color) -> void:
 			hair_right.position = Vector2(18, 5)
 			hair_right.color = hair_color
 			portrait_container.add_child(hair_right)
-		1:
-			# Bob cut
+		"bob":
 			var hair = ColorRect.new()
 			hair.size = Vector2(20, 10)
 			hair.position = Vector2(2, 0)
@@ -191,20 +186,25 @@ func _create_female_hair(style_index: int, hair_color: Color) -> void:
 			hair_sides.position = Vector2(1, 6)
 			hair_sides.color = hair_color
 			portrait_container.add_child(hair_sides)
-		2:
-			# Ponytail/updo
+		"updo":
 			var hair = ColorRect.new()
 			hair.size = Vector2(18, 7)
 			hair.position = Vector2(3, 0)
 			hair.color = hair_color
 			portrait_container.add_child(hair)
 
-			# Bun
 			var bun = ColorRect.new()
 			bun.size = Vector2(6, 6)
 			bun.position = Vector2(9, -4)
 			bun.color = hair_color
 			portrait_container.add_child(bun)
+		_:
+			# Unknown style — render short as fallback
+			var hair = ColorRect.new()
+			hair.size = Vector2(16, 6)
+			hair.position = Vector2(4, 2)
+			hair.color = hair_color
+			portrait_container.add_child(hair)
 
 func update_display(profile: AgentProfile) -> void:
 	if profile == null:

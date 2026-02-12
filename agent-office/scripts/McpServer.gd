@@ -666,7 +666,7 @@ func _list_tools() -> Array[Dictionary]:
 			"inputSchema": {
 				"type": "object",
 				"properties": {
-					"type": {"type": "string", "description": "Furniture type: water_cooler, potted_plant, filing_cabinet, shredder, cat_bed, meeting_table, taskboard, terminal_furniture"},
+					"type": {"type": "string", "description": "Furniture type (e.g. desk, water_cooler, plant, filing_cabinet, shredder, cat_bed, meeting_table, taskboard, terminal_furniture)"},
 					"x": {"type": "number", "description": "X position"},
 					"y": {"type": "number", "description": "Y position"}
 				},
@@ -675,19 +675,17 @@ func _list_tools() -> Array[Dictionary]:
 		},
 		{
 			"name": "update_agent_appearance",
-			"description": "Update an agent's appearance. Use name OR profile_id. Hair colors: brown(0), black(1), auburn(2), blonde(3), dark_brown(4), very_dark(5). Skin tones: light(0), medium(1), tan(2), dark(3), very_light(4). Bottom type: pants(0), skirt(1).",
+			"description": "Update an agent's appearance. Use name OR profile_id. Accepts item IDs (e.g., 'pink_blouse') or legacy indices. Tops: white_shirt, pink_blouse, blue_blouse, lavender_blouse. Bottoms: dark_pants, dark_skirt, charcoal_pants, charcoal_skirt, navy_pants, navy_skirt, burgundy_skirt. Hair colors: brown, black, auburn, blonde, dark_brown, very_dark. Hair styles: short, long, bob, updo. Skin tones: light(0), medium(1), tan(2), dark(3), very_light(4).",
 			"inputSchema": {
 				"type": "object",
 				"properties": {
 					"name": {"type": "string", "description": "Agent name (e.g., 'Quinn')"},
 					"profile_id": {"type": "integer", "description": "Agent profile ID"},
-					"hair_color": {"type": ["string", "integer"], "description": "Hair color name (brown, black, auburn, blonde, dark_brown, very_dark) or index 0-5"},
-					"skin_color": {"type": ["string", "integer"], "description": "Skin tone name (light, medium, tan, dark, very_light) or index 0-4"},
-					"hair_style": {"type": "integer", "description": "Hair style index 0-3"},
-					"is_female": {"type": "boolean", "description": "true = blouse, false = shirt+tie"},
-					"top_color": {"type": "integer", "description": "Blouse or tie color index 0-3"},
-					"bottom_type": {"type": ["string", "integer"], "description": "pants(0) or skirt(1)"},
-					"bottom_color": {"type": "integer", "description": "Bottom color index 0-3"}
+					"top": {"type": ["string", "integer"], "description": "Top item ID (e.g., 'pink_blouse') or legacy index"},
+					"bottom": {"type": ["string", "integer"], "description": "Bottom item ID (e.g., 'navy_pants') or legacy index"},
+					"hair_color": {"type": ["string", "integer"], "description": "Hair color ID (e.g., 'auburn') or legacy index"},
+					"hair_style": {"type": ["string", "integer"], "description": "Hair style ID (e.g., 'bob') or legacy index"},
+					"skin_color": {"type": ["string", "integer"], "description": "Skin tone name (light, medium, tan, dark, very_light) or index 0-4"}
 				}
 			}
 		},
@@ -1194,7 +1192,10 @@ func _tool_add_furniture(args: Dictionary) -> Dictionary:
 	if ftype.is_empty():
 		return _tool_error("type is required")
 
-	var valid_types = ["water_cooler", "potted_plant", "filing_cabinet", "shredder", "cat_bed", "meeting_table", "taskboard", "terminal_furniture"]
+	var valid_types := office_manager.furniture_registry.get_available_types()
+	# Support legacy "potted_plant" name
+	if ftype == "potted_plant":
+		ftype = "plant"
 	if not ftype in valid_types:
 		return _tool_error("Invalid type: %s. Valid: %s" % [ftype, ", ".join(valid_types)])
 
@@ -1202,30 +1203,68 @@ func _tool_add_furniture(args: Dictionary) -> Dictionary:
 	office_manager._add_furniture(ftype, Vector2(x, y))
 	return _tool_ok("Added %s at (%d, %d)" % [ftype, int(x), int(y)])
 
-# Appearance constants - must match AgentVisuals arrays
-const HAIR_COLOR_COUNT: int = 6
+# Skin tone constants (skin remains index-based)
 const SKIN_TONE_COUNT: int = 5
-const HAIR_STYLE_COUNT: int = 4
-const TOP_COLOR_COUNT: int = 4
-const BOTTOM_COLOR_COUNT: int = 4
-
-# Color name mappings for appearance updates
-const HAIR_NAMES: Dictionary = {"brown": 0, "black": 1, "auburn": 2, "blonde": 3, "dark_brown": 4, "very_dark": 5}
 const SKIN_NAMES: Dictionary = {"light": 0, "medium": 1, "tan": 2, "dark": 3, "very_light": 4}
 
-func _parse_color_index(value, name_map: Dictionary, max_index: int) -> Array:
+func _parse_skin_index(value) -> Array:
 	# Returns [success: bool, index: int, error: String]
 	if value is String:
 		var key = value.to_lower().replace(" ", "_")
-		if name_map.has(key):
-			return [true, name_map[key], ""]
-		return [false, -1, "Unknown color name '%s'. Valid: %s" % [value, ", ".join(name_map.keys())]]
+		if SKIN_NAMES.has(key):
+			return [true, SKIN_NAMES[key], ""]
+		return [false, -1, "Unknown skin name '%s'. Valid: %s" % [value, ", ".join(SKIN_NAMES.keys())]]
 	elif value is int or value is float:
 		var idx = int(value)
-		if idx >= 0 and idx < max_index:
+		if idx >= 0 and idx < SKIN_TONE_COUNT:
 			return [true, idx, ""]
-		return [false, -1, "Index %d out of range (0-%d)" % [idx, max_index - 1]]
-	return [false, -1, "Invalid type for color value"]
+		return [false, -1, "Index %d out of range (0-%d)" % [idx, SKIN_TONE_COUNT - 1]]
+	return [false, -1, "Invalid type for skin value"]
+
+func _resolve_appearance_id(value, category: String) -> Array:
+	## Resolve an appearance value to an item ID.
+	## Accepts: string ID, or legacy integer index.
+	## Returns [success: bool, id: String, error: String]
+	var registry: AppearanceRegistry = null
+	if office_manager and office_manager.has_method("get_appearance_registry"):
+		registry = office_manager.get_appearance_registry()
+	if not registry:
+		return [false, "", "No appearance registry available"]
+
+	if value is String:
+		var id_str: String = value.to_lower().replace(" ", "_")
+		match category:
+			"top":
+				if registry.has_top(id_str):
+					return [true, id_str, ""]
+				return [false, "", "Unknown top '%s'. Valid: %s" % [id_str, ", ".join(registry.get_all_top_ids())]]
+			"bottom":
+				if registry.has_bottom(id_str):
+					return [true, id_str, ""]
+				return [false, "", "Unknown bottom '%s'. Valid: %s" % [id_str, ", ".join(registry.get_all_bottom_ids())]]
+			"hair_color":
+				if registry.has_hair_color(id_str):
+					return [true, id_str, ""]
+				return [false, "", "Unknown hair color '%s'. Valid: %s" % [id_str, ", ".join(registry.get_all_hair_color_ids())]]
+			"hair_style":
+				if registry.has_hair_style(id_str):
+					return [true, id_str, ""]
+				return [false, "", "Unknown hair style '%s'. Valid: %s" % [id_str, ", ".join(registry.get_all_hair_style_ids())]]
+		return [false, "", "Unknown category '%s'" % category]
+	elif value is int or value is float:
+		# Legacy index support
+		var idx := int(value)
+		match category:
+			"top":
+				return [true, registry.TOP_INDEX_MAP[idx % registry.TOP_INDEX_MAP.size()], ""]
+			"bottom":
+				return [true, registry.BOTTOM_INDEX_MAP[idx % registry.BOTTOM_INDEX_MAP.size()], ""]
+			"hair_color":
+				return [true, registry.HAIR_COLOR_INDEX_MAP[idx % registry.HAIR_COLOR_INDEX_MAP.size()], ""]
+			"hair_style":
+				return [true, registry.HAIR_STYLE_INDEX_MAP[idx % registry.HAIR_STYLE_INDEX_MAP.size()], ""]
+		return [false, "", "Unknown category '%s'" % category]
+	return [false, "", "Invalid type for appearance value"]
 
 func _find_agent_profile(args: Dictionary) -> Array:
 	# Returns [profile: AgentProfile or null, error: String]
@@ -1280,91 +1319,50 @@ func _tool_update_agent_appearance(args: Dictionary) -> Dictionary:
 	var changes: Array[String] = []
 	var errors: Array[String] = []
 
-	# Hair color
-	if args.has("hair_color"):
-		var parsed = _parse_color_index(args["hair_color"], HAIR_NAMES, HAIR_COLOR_COUNT)
+	# Top (item ID or legacy index)
+	if args.has("top"):
+		var parsed = _resolve_appearance_id(args["top"], "top")
 		if parsed[0]:
-			profile.hair_color_index = parsed[1]
-			changes.append("hair_color=%d" % parsed[1])
+			profile.top_id = parsed[1]
+			changes.append("top=%s" % parsed[1])
+		else:
+			errors.append("top: " + parsed[2])
+
+	# Bottom (item ID or legacy index)
+	if args.has("bottom"):
+		var parsed = _resolve_appearance_id(args["bottom"], "bottom")
+		if parsed[0]:
+			profile.bottom_id = parsed[1]
+			changes.append("bottom=%s" % parsed[1])
+		else:
+			errors.append("bottom: " + parsed[2])
+
+	# Hair color (item ID or legacy index)
+	if args.has("hair_color"):
+		var parsed = _resolve_appearance_id(args["hair_color"], "hair_color")
+		if parsed[0]:
+			profile.hair_color_id = parsed[1]
+			changes.append("hair_color=%s" % parsed[1])
 		else:
 			errors.append("hair_color: " + parsed[2])
 
-	# Skin color
+	# Hair style (item ID or legacy index)
+	if args.has("hair_style"):
+		var parsed = _resolve_appearance_id(args["hair_style"], "hair_style")
+		if parsed[0]:
+			profile.hair_style_id = parsed[1]
+			changes.append("hair_style=%s" % parsed[1])
+		else:
+			errors.append("hair_style: " + parsed[2])
+
+	# Skin color (remains index-based)
 	if args.has("skin_color"):
-		var parsed = _parse_color_index(args["skin_color"], SKIN_NAMES, SKIN_TONE_COUNT)
+		var parsed = _parse_skin_index(args["skin_color"])
 		if parsed[0]:
 			profile.skin_color_index = parsed[1]
 			changes.append("skin_color=%d" % parsed[1])
 		else:
 			errors.append("skin_color: " + parsed[2])
-
-	# Hair style (numeric only)
-	if args.has("hair_style"):
-		var hs_raw = args["hair_style"]
-		if hs_raw is int or hs_raw is float:
-			var hs = int(hs_raw)
-			if hs >= 0 and hs < HAIR_STYLE_COUNT:
-				profile.hair_style_index = hs
-				changes.append("hair_style=%d" % hs)
-			else:
-				errors.append("hair_style: Index %d out of range (0-%d)" % [hs, HAIR_STYLE_COUNT - 1])
-		else:
-			errors.append("hair_style: Must be integer")
-
-	# Gender presentation
-	if args.has("is_female"):
-		profile.is_female = bool(args["is_female"])
-		changes.append("is_female=%s" % str(profile.is_female))
-
-	# Top color
-	if args.has("top_color"):
-		var tc_raw = args["top_color"]
-		if tc_raw is int or tc_raw is float:
-			var tc = int(tc_raw)
-			if tc >= 0 and tc < TOP_COLOR_COUNT:
-				profile.blouse_color_index = tc
-				changes.append("top_color=%d" % tc)
-			else:
-				errors.append("top_color: Index %d out of range (0-%d)" % [tc, TOP_COLOR_COUNT - 1])
-		else:
-			errors.append("top_color: Must be integer")
-
-	# Bottom type
-	if args.has("bottom_type"):
-		var bt = args["bottom_type"]
-		if bt is String:
-			var bt_lower = bt.to_lower()
-			if bt_lower == "skirt":
-				profile.bottom_type = 1
-			elif bt_lower == "pants":
-				profile.bottom_type = 0
-			else:
-				errors.append("bottom_type: Must be 'pants' or 'skirt'")
-				bt = null
-			if bt != null:
-				changes.append("bottom_type=%d" % profile.bottom_type)
-		elif bt is int or bt is float:
-			var bti = int(bt)
-			if bti == 0 or bti == 1:
-				profile.bottom_type = bti
-				changes.append("bottom_type=%d" % bti)
-			else:
-				errors.append("bottom_type: Must be 0 (pants) or 1 (skirt)")
-		else:
-			errors.append("bottom_type: Invalid type")
-
-	# Bottom color
-	if args.has("bottom_color"):
-		var bc_raw = args["bottom_color"]
-		if bc_raw is int or bc_raw is float:
-			var bc = int(bc_raw)
-			if bc >= 0 and bc < BOTTOM_COLOR_COUNT:
-				profile.bottom_color_index = bc
-				changes.append("bottom_color=%d" % bc)
-			else:
-				errors.append("bottom_color: Index %d out of range (0-%d)" % [bc, BOTTOM_COLOR_COUNT - 1])
-		else:
-			errors.append("bottom_color: Must be integer")
 
 	# Report errors if any properties failed
 	if not errors.is_empty():

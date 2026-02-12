@@ -1,0 +1,10 @@
+{
+  "type": "terminal_furniture",
+  "display_name": "Terminal",
+  "category": "terminals",
+  "traits": ["terminal"],
+  "shelf_preview": {
+    "color": "GRUVBOX_BG",
+    "size": [90, 60]
+  }
+}

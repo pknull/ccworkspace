@@ -137,6 +137,9 @@ var draggable_roster: DraggableItem = null
 var furniture_registry: FurnitureRegistry = null
 var trait_furniture: Array = []  # Array of FurnitureBase instances
 
+# Appearance system
+var appearance_registry: AppearanceRegistry = null
+
 # Spontaneous bubble coordination
 var current_spontaneous_agent: Agent = null
 var spontaneous_bubble_cooldown: float = 0.0
@@ -207,6 +210,9 @@ func _ready() -> void:
 	furniture_registry = FurnitureRegistry.new()
 	furniture_registry.navigation_grid = navigation_grid
 
+	# Initialize appearance registry
+	appearance_registry = AppearanceRegistry.new()
+
 	# Initialize agent roster (replaces AgentStable)
 	agent_roster = AgentRoster.new()
 	add_child(agent_roster)
@@ -262,6 +268,9 @@ func _ready() -> void:
 	_update_vip_photo()
 
 	print("[OfficeManager] Ready. Desks: %d" % desks.size())
+
+func get_appearance_registry() -> AppearanceRegistry:
+	return appearance_registry
 
 func _notification(what: int) -> void:
 	# Save all data when the game window is closed
@@ -414,6 +423,7 @@ func _setup_office() -> void:
 	draggable_wall_clock = _wrap_wall_item(wall_clock, "wall_clock", OfficeConstants.WALL_CLOCK_POSITION)
 
 	vip_photo = OfficeVisualFactory.create_vip_photo()
+	vip_photo.appearance_registry = appearance_registry
 	draggable_vip_photo = _wrap_wall_item(vip_photo, "vip_photo", OfficeConstants.VIP_PHOTO_POSITION)
 	vip_photo.clicked.connect(_on_vip_photo_clicked)
 
@@ -1792,6 +1802,7 @@ func _handle_agent_spawn(data: Dictionary) -> void:
 			agent.profile_level = profile.level
 			agent.profile_badges = profile.badges.duplicate()
 			# Apply persistent appearance from profile
+			agent.appearance_registry = appearance_registry
 			agent.apply_profile_appearance(profile)
 			# Optionally use the profile's name for display
 			if agent.description.is_empty():
@@ -2717,6 +2728,7 @@ func _show_agent_profile(agent_id: int) -> void:
 		return
 
 	profile_popup = ProfilePopup.new()
+	profile_popup.appearance_registry = appearance_registry
 	add_child(profile_popup)
 	profile_popup.setup(agent_roster, badge_system)  # Pass roster for colleague names, badge_system for badge info
 	profile_popup.show_profile(profile)
@@ -2781,6 +2793,7 @@ func _show_furniture_shelf() -> void:
 	if furniture_shelf_popup != null:
 		return
 	furniture_shelf_popup = FurnitureShelfPopup.new()
+	furniture_shelf_popup.furniture_registry = furniture_registry
 	add_child(furniture_shelf_popup)
 	furniture_shelf_popup.show_shelf(_get_placed_furniture_list(), wall_item_visibility)
 	furniture_shelf_popup.close_requested.connect(_on_furniture_shelf_closed)

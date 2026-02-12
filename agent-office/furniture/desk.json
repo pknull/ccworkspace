@@ -1,0 +1,10 @@
+{
+  "type": "desk",
+  "display_name": "Desk",
+  "category": "workstations",
+  "traits": ["terminal"],
+  "shelf_preview": {
+    "color": "DESK_SURFACE",
+    "size": [50, 30]
+  }
+}

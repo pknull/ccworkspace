@@ -1,0 +1,7 @@
+{
+  "id": "short",
+  "display_name": "Short",
+  "visuals": [
+    {"type": "color_rect", "name": "hair", "size": [20, 8], "position": [-1, -5], "color": "HAIR_COLOR"}
+  ]
+}

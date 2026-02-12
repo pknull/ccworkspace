@@ -26,16 +26,17 @@ var tooltip_label: Label = null
 var tooltip_header: Label = null
 var tooltip_subtitle: Label = null
 
-# Appearance state
-var is_female: bool = false  # true = blouse, false = shirt+tie
-var hair_color: Color = OfficePalette.HAIR_BROWN
+# Appearance state (ID-based)
+var top_id: String = "white_shirt"
+var bottom_id: String = "dark_pants"
+var hair_color_id: String = "brown"
+var hair_style_id: String = "short"
 var skin_color: Color = OfficePalette.SKIN_LIGHT
-var hair_style_index: int = 0
-var blouse_color_index: int = 0  # top color index
-var bottom_type: int = 0  # 0 = pants, 1 = skirt
-var bottom_color_index: int = 0
 var appearance_applied: bool = false
 var _visuals_created: bool = false
+
+# Registry reference (set by OfficeManager before appearance apply)
+var appearance_registry: AppearanceRegistry = null
 
 # Hover state
 var is_hovered: bool = false
@@ -52,16 +53,7 @@ const STRESS_FLUSH_THRESHOLD = 3  # Level at which face flushes
 var sweat_drops: Array[ColorRect] = []
 var current_stress_level: int = 0  # 0-4 based on context_stress thresholds
 
-# Palettes
-const HAIR_COLORS: Array[Color] = [
-	OfficePalette.HAIR_BROWN,
-	OfficePalette.HAIR_BLACK,
-	OfficePalette.HAIR_AUBURN,
-	OfficePalette.HAIR_BLONDE,
-	OfficePalette.HAIR_DARK_BROWN,
-	OfficePalette.HAIR_VERY_DARK,
-]
-
+# Skin tones (remain index-based)
 const SKIN_TONES: Array[Color] = [
 	OfficePalette.SKIN_LIGHT,
 	OfficePalette.SKIN_MEDIUM,
@@ -70,28 +62,23 @@ const SKIN_TONES: Array[Color] = [
 	OfficePalette.SKIN_VERY_LIGHT,
 ]
 
-const BLOUSE_COLORS: Array[Color] = [
-	OfficePalette.AGENT_SHIRT_WHITE,
-	OfficePalette.AGENT_BLOUSE_PINK,
-	OfficePalette.AGENT_BLOUSE_BLUE,
-	OfficePalette.AGENT_BLOUSE_LAVENDER,
-]
-
 func _init(p_agent: Node2D) -> void:
 	agent = p_agent
 
 func create_visuals() -> void:
 	_ensure_ui_nodes()
-	is_female = randf() < 0.5
-	hair_color = HAIR_COLORS[randi() % HAIR_COLORS.size()]
+	# Random appearance for agents without a profile
+	var tops := AppearanceRegistry.TOP_INDEX_MAP
+	var bottoms := AppearanceRegistry.BOTTOM_INDEX_MAP
+	var hair_colors := AppearanceRegistry.HAIR_COLOR_INDEX_MAP
+	var hair_styles := AppearanceRegistry.HAIR_STYLE_INDEX_MAP
+	top_id = tops[randi() % tops.size()]
+	bottom_id = bottoms[randi() % bottoms.size()]
+	hair_color_id = hair_colors[randi() % hair_colors.size()]
+	hair_style_id = hair_styles[randi() % hair_styles.size()]
 	skin_color = SKIN_TONES[randi() % SKIN_TONES.size()]
-	hair_style_index = randi() % 3
-	blouse_color_index = randi() % 4
 
-	if is_female:
-		_create_female_visuals(skin_color)
-	else:
-		_create_male_visuals(skin_color)
+	_create_agent_body(skin_color)
 	_visuals_created = true
 
 func _ensure_ui_nodes() -> void:
@@ -193,7 +180,31 @@ func _create_tooltip() -> void:
 	tooltip_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(tooltip_label)
 
-func _create_male_visuals(p_skin_color: Color) -> void:
+func _create_agent_body(p_skin_color: Color) -> void:
+	## Unified body rendering driven by appearance IDs.
+	var top_data := {}
+	var bottom_data := {}
+	var hair_col := OfficePalette.HAIR_BROWN
+	var top_color := OfficePalette.AGENT_SHIRT_WHITE
+	var bottom_color := OfficePalette.AGENT_TROUSERS_DARK
+	var tie_color_ref: String = ""
+	var is_skirt := false
+
+	if appearance_registry:
+		top_data = appearance_registry.get_top(top_id)
+		bottom_data = appearance_registry.get_bottom(bottom_id)
+		hair_col = appearance_registry.get_hair_color_value(hair_color_id)
+		top_color = appearance_registry.get_top_color(top_id)
+		bottom_color = appearance_registry.get_bottom_color(bottom_id)
+		tie_color_ref = top_data.get("tie_color", "")
+		is_skirt = bottom_data.get("is_skirt", false)
+	else:
+		# Fallback when no registry (shouldn't happen in normal flow)
+		if top_id == "white_shirt":
+			tie_color_ref = "AGENT_TIE_RED"
+		is_skirt = bottom_id.ends_with("_skirt")
+
+	# Shadow
 	var shadow = ColorRect.new()
 	shadow.size = Vector2(30, 12)
 	shadow.position = Vector2(-15, 28)
@@ -201,93 +212,12 @@ func _create_male_visuals(p_skin_color: Color) -> void:
 	shadow.z_index = -1
 	agent.add_child(shadow)
 
-	var left_leg = ColorRect.new()
-	left_leg.size = Vector2(10, 18)
-	left_leg.position = Vector2(-12, 15)
-	left_leg.color = OfficePalette.AGENT_TROUSERS_DARK
-	agent.add_child(left_leg)
-
-	var right_leg = ColorRect.new()
-	right_leg.size = Vector2(10, 18)
-	right_leg.position = Vector2(2, 15)
-	right_leg.color = OfficePalette.AGENT_TROUSERS_DARK
-	agent.add_child(right_leg)
-
-	body = ColorRect.new()
-	body.size = Vector2(26, 32)
-	body.position = Vector2(-13, -15)
-	body.color = OfficePalette.AGENT_SHIRT_WHITE
-	body.z_index = 0
-	agent.add_child(body)
-
-	var collar_left = ColorRect.new()
-	collar_left.size = Vector2(8, 6)
-	collar_left.position = Vector2(-11, -15)
-	collar_left.color = OfficePalette.AGENT_SHIRT_WHITE
-	agent.add_child(collar_left)
-
-	var collar_right = ColorRect.new()
-	collar_right.size = Vector2(8, 6)
-	collar_right.position = Vector2(3, -15)
-	collar_right.color = OfficePalette.AGENT_SHIRT_WHITE
-	agent.add_child(collar_right)
-
-	var tie_color = Agent.get_agent_color(agent.agent_type)
-	tie = ColorRect.new()
-	tie.size = Vector2(6, 22)
-	tie.position = Vector2(-3, -12)
-	tie.color = tie_color
-	tie.z_index = 1
-	agent.add_child(tie)
-
-	var tie_knot = ColorRect.new()
-	tie_knot.name = "TieKnot"
-	tie_knot.size = Vector2(8, 5)
-	tie_knot.position = Vector2(-4, -15)
-	tie_knot.color = tie_color.darkened(0.1)
-	tie_knot.z_index = 1
-	agent.add_child(tie_knot)
-
-	head = ColorRect.new()
-	head.size = Vector2(18, 18)
-	head.position = Vector2(-9, -35)
-	head.color = p_skin_color
-	head.z_index = 2
-	agent.add_child(head)
-
-	hair = ColorRect.new()
-	hair.size = Vector2(20, 8)
-	hair.position = Vector2(-1, -5)
-	hair.color = hair_color
-	head.add_child(hair)
-
-	var left_eye = ColorRect.new()
-	left_eye.size = Vector2(3, 3)
-	left_eye.position = Vector2(3, 5)
-	left_eye.color = OfficePalette.EYE_COLOR
-	head.add_child(left_eye)
-
-	var right_eye = ColorRect.new()
-	right_eye.size = Vector2(3, 3)
-	right_eye.position = Vector2(12, 5)
-	right_eye.color = OfficePalette.EYE_COLOR
-	head.add_child(right_eye)
-
-func _create_female_visuals(p_skin_color: Color) -> void:
-	var shadow = ColorRect.new()
-	shadow.size = Vector2(30, 12)
-	shadow.position = Vector2(-15, 28)
-	shadow.color = OfficePalette.SHADOW_MEDIUM
-	shadow.z_index = -1
-	agent.add_child(shadow)
-
-	var wears_skirt = randi() % 2 == 0
-
-	if wears_skirt:
+	# Bottom (legs)
+	if is_skirt:
 		var skirt = ColorRect.new()
 		skirt.size = Vector2(28, 14)
 		skirt.position = Vector2(-14, 10)
-		skirt.color = OfficePalette.AGENT_SKIRT_DARK
+		skirt.color = bottom_color
 		agent.add_child(skirt)
 
 		var left_leg = ColorRect.new()
@@ -305,32 +235,62 @@ func _create_female_visuals(p_skin_color: Color) -> void:
 		var left_leg = ColorRect.new()
 		left_leg.size = Vector2(10, 18)
 		left_leg.position = Vector2(-12, 15)
-		left_leg.color = OfficePalette.AGENT_SKIRT_DARK
+		left_leg.color = bottom_color
 		agent.add_child(left_leg)
 
 		var right_leg = ColorRect.new()
 		right_leg.size = Vector2(10, 18)
 		right_leg.position = Vector2(2, 15)
-		right_leg.color = OfficePalette.AGENT_SKIRT_DARK
+		right_leg.color = bottom_color
 		agent.add_child(right_leg)
 
-	var blouse_color = BLOUSE_COLORS[randi() % BLOUSE_COLORS.size()]
-
+	# Body (top)
 	body = ColorRect.new()
 	body.size = Vector2(26, 32)
 	body.position = Vector2(-13, -15)
-	body.color = blouse_color
+	body.color = top_color
 	body.z_index = 0
 	agent.add_child(body)
 
-	var collar = ColorRect.new()
-	collar.size = Vector2(18, 6)
-	collar.position = Vector2(-9, -17)
-	collar.color = blouse_color
-	agent.add_child(collar)
+	# Collar + Tie (rendered when top has tie_color)
+	if not tie_color_ref.is_empty():
+		var resolved_tie_color := FurnitureJsonLoader.resolve_color(tie_color_ref)
 
-	tie = null
+		var collar_left = ColorRect.new()
+		collar_left.size = Vector2(8, 6)
+		collar_left.position = Vector2(-11, -15)
+		collar_left.color = top_color
+		agent.add_child(collar_left)
 
+		var collar_right = ColorRect.new()
+		collar_right.size = Vector2(8, 6)
+		collar_right.position = Vector2(3, -15)
+		collar_right.color = top_color
+		agent.add_child(collar_right)
+
+		tie = ColorRect.new()
+		tie.size = Vector2(6, 22)
+		tie.position = Vector2(-3, -12)
+		tie.color = resolved_tie_color
+		tie.z_index = 1
+		agent.add_child(tie)
+
+		var tie_knot = ColorRect.new()
+		tie_knot.name = "TieKnot"
+		tie_knot.size = Vector2(8, 5)
+		tie_knot.position = Vector2(-4, -15)
+		tie_knot.color = resolved_tie_color.darkened(0.1)
+		tie_knot.z_index = 1
+		agent.add_child(tie_knot)
+	else:
+		var collar = ColorRect.new()
+		collar.size = Vector2(18, 6)
+		collar.position = Vector2(-9, -17)
+		collar.color = top_color
+		agent.add_child(collar)
+		tie = null
+
+	# Head
 	head = ColorRect.new()
 	head.size = Vector2(18, 18)
 	head.position = Vector2(-9, -35)
@@ -338,6 +298,10 @@ func _create_female_visuals(p_skin_color: Color) -> void:
 	head.z_index = 2
 	agent.add_child(head)
 
+	# Hair (JSON-driven or fallback)
+	_build_hair(hair_col)
+
+	# Eyes
 	var left_eye = ColorRect.new()
 	left_eye.size = Vector2(3, 3)
 	left_eye.position = Vector2(3, 5)
@@ -350,63 +314,60 @@ func _create_female_visuals(p_skin_color: Color) -> void:
 	right_eye.color = OfficePalette.EYE_COLOR
 	head.add_child(right_eye)
 
-	_create_female_hair(hair_style_index)
+func _build_hair(hair_col: Color) -> void:
+	## Build hair from JSON style definition, replacing HAIR_COLOR sentinel with actual color.
+	var style_data := {}
+	if appearance_registry:
+		style_data = appearance_registry.get_hair_style(hair_style_id)
 
-func _create_female_hair(style: int) -> void:
-	match style % 3:
-		0:
-			hair = ColorRect.new()
-			hair.size = Vector2(24, 12)
-			hair.position = Vector2(-3, -7)
-			hair.color = hair_color
-			head.add_child(hair)
-
-			var hair_left = ColorRect.new()
-			hair_left.size = Vector2(6, 18)
-			hair_left.position = Vector2(-5, -1)
-			hair_left.color = hair_color
-			head.add_child(hair_left)
-
-			var hair_right = ColorRect.new()
-			hair_right.size = Vector2(6, 18)
-			hair_right.position = Vector2(17, -1)
-			hair_right.color = hair_color
-			head.add_child(hair_right)
-		1:
-			hair = ColorRect.new()
-			hair.size = Vector2(26, 14)
-			hair.position = Vector2(-4, -9)
-			hair.color = hair_color
-			head.add_child(hair)
-
-			var hair_sides = ColorRect.new()
-			hair_sides.size = Vector2(28, 8)
-			hair_sides.position = Vector2(-5, 1)
-			hair_sides.color = hair_color
-			head.add_child(hair_sides)
-		2:
-			hair = ColorRect.new()
-			hair.size = Vector2(22, 10)
-			hair.position = Vector2(-2, -8)
-			hair.color = hair_color
-			head.add_child(hair)
-
-			var bun = ColorRect.new()
-			bun.size = Vector2(10, 10)
-			bun.position = Vector2(4, -15)
-			bun.color = hair_color
-			head.add_child(bun)
+	if style_data.has("visuals") and style_data["visuals"] is Array:
+		# Build from JSON visuals, replacing HAIR_COLOR with actual color
+		for entry in style_data["visuals"]:
+			var rect := ColorRect.new()
+			rect.name = entry.get("name", "hair")
+			var sz = entry.get("size", [20, 8])
+			if sz is Array and sz.size() >= 2:
+				rect.size = Vector2(sz[0], sz[1])
+			var pos = entry.get("position", [0, 0])
+			if pos is Array and pos.size() >= 2:
+				rect.position = Vector2(pos[0], pos[1])
+			# Replace HAIR_COLOR sentinel with actual color
+			var color_ref = entry.get("color", "HAIR_COLOR")
+			if color_ref is String and color_ref == "HAIR_COLOR":
+				rect.color = hair_col
+			else:
+				rect.color = FurnitureJsonLoader.resolve_color(color_ref)
+			head.add_child(rect)
+		# Track 'hair' reference for animations — prefer named, fall back to first ColorRect
+		if head.get_child_count() > 0:
+			var first_rect: ColorRect = null
+			for child in head.get_children():
+				if child is ColorRect:
+					if first_rect == null:
+						first_rect = child
+					if child.name == "hair":
+						hair = child
+						break
+			if hair == null:
+				hair = first_rect
+	else:
+		# Fallback: simple short hair
+		hair = ColorRect.new()
+		hair.size = Vector2(20, 8)
+		hair.position = Vector2(-1, -5)
+		hair.color = hair_col
+		head.add_child(hair)
 
 func apply_profile_appearance(profile) -> void:
-	_apply_appearance_values(profile.is_female, profile.hair_color_index, profile.skin_color_index, profile.hair_style_index, profile.blouse_color_index, profile.bottom_type, profile.bottom_color_index)
+	_apply_appearance_ids(profile.top_id, profile.bottom_id, profile.hair_color_id, profile.hair_style_id, profile.skin_color_index)
 
 func refresh_appearance(profile) -> void:
 	# Force re-apply appearance (used when profile is edited)
 	appearance_applied = false
 	_clear_visual_nodes()
-	_apply_appearance_values(profile.is_female, profile.hair_color_index, profile.skin_color_index, profile.hair_style_index, profile.blouse_color_index, profile.bottom_type, profile.bottom_color_index)
+	_apply_appearance_ids(profile.top_id, profile.bottom_id, profile.hair_color_id, profile.hair_style_id, profile.skin_color_index)
 
-func _apply_appearance_values(p_is_female: bool, p_hair_index: int, p_skin_index: int, p_hair_style: int, p_blouse_color: int, p_bottom_type: int = 0, p_bottom_color: int = 0) -> void:
+func _apply_appearance_ids(p_top: String, p_bottom: String, p_hair_color: String, p_hair_style: String, p_skin_index: int) -> void:
 	if appearance_applied:
 		return
 	appearance_applied = true
@@ -415,249 +376,15 @@ func _apply_appearance_values(p_is_female: bool, p_hair_index: int, p_skin_index
 	if _visuals_created:
 		_clear_visual_nodes()
 
-	is_female = p_is_female
-	hair_color = HAIR_COLORS[p_hair_index % HAIR_COLORS.size()]
+	top_id = p_top
+	bottom_id = p_bottom
+	hair_color_id = p_hair_color
+	hair_style_id = p_hair_style
 	skin_color = SKIN_TONES[p_skin_index % SKIN_TONES.size()]
-	hair_style_index = p_hair_style
-	blouse_color_index = p_blouse_color
-	bottom_type = p_bottom_type
-	bottom_color_index = p_bottom_color
 
-	if is_female:
-		_create_female_visuals_persistent(skin_color, hair_color, hair_style_index, blouse_color_index, bottom_type)
-	else:
-		_create_male_visuals_persistent(skin_color, hair_color, hair_style_index, bottom_type)
+	_create_agent_body(skin_color)
 	_visuals_created = true
 
-func _create_male_visuals_persistent(p_skin_color: Color, p_hair_color: Color, p_hair_style: int = 0, p_bottom_type: int = 0) -> void:
-	var shadow = ColorRect.new()
-	shadow.size = Vector2(30, 12)
-	shadow.position = Vector2(-15, 28)
-	shadow.color = OfficePalette.SHADOW_MEDIUM
-	shadow.z_index = -1
-	agent.add_child(shadow)
-
-	var wears_skirt = (p_bottom_type == 1)
-
-	if wears_skirt:
-		var skirt = ColorRect.new()
-		skirt.size = Vector2(28, 14)
-		skirt.position = Vector2(-14, 10)
-		skirt.color = OfficePalette.AGENT_SKIRT_DARK
-		agent.add_child(skirt)
-
-		var left_leg = ColorRect.new()
-		left_leg.size = Vector2(8, 10)
-		left_leg.position = Vector2(-10, 22)
-		left_leg.color = p_skin_color.darkened(0.1)
-		agent.add_child(left_leg)
-
-		var right_leg = ColorRect.new()
-		right_leg.size = Vector2(8, 10)
-		right_leg.position = Vector2(2, 22)
-		right_leg.color = p_skin_color.darkened(0.1)
-		agent.add_child(right_leg)
-	else:
-		var left_leg = ColorRect.new()
-		left_leg.size = Vector2(10, 18)
-		left_leg.position = Vector2(-12, 15)
-		left_leg.color = OfficePalette.AGENT_TROUSERS_DARK
-		agent.add_child(left_leg)
-
-		var right_leg = ColorRect.new()
-		right_leg.size = Vector2(10, 18)
-		right_leg.position = Vector2(2, 15)
-		right_leg.color = OfficePalette.AGENT_TROUSERS_DARK
-		agent.add_child(right_leg)
-
-	body = ColorRect.new()
-	body.size = Vector2(26, 32)
-	body.position = Vector2(-13, -15)
-	body.color = OfficePalette.AGENT_SHIRT_WHITE
-	body.z_index = 0
-	agent.add_child(body)
-
-	var collar_left = ColorRect.new()
-	collar_left.size = Vector2(8, 6)
-	collar_left.position = Vector2(-11, -15)
-	collar_left.color = OfficePalette.AGENT_SHIRT_WHITE
-	agent.add_child(collar_left)
-
-	var collar_right = ColorRect.new()
-	collar_right.size = Vector2(8, 6)
-	collar_right.position = Vector2(3, -15)
-	collar_right.color = OfficePalette.AGENT_SHIRT_WHITE
-	agent.add_child(collar_right)
-
-	var tie_color = Agent.get_agent_color(agent.agent_type)
-	tie = ColorRect.new()
-	tie.size = Vector2(6, 22)
-	tie.position = Vector2(-3, -12)
-	tie.color = tie_color
-	tie.z_index = 1
-	agent.add_child(tie)
-
-	var tie_knot = ColorRect.new()
-	tie_knot.name = "TieKnot"
-	tie_knot.size = Vector2(8, 5)
-	tie_knot.position = Vector2(-4, -15)
-	tie_knot.color = tie_color.darkened(0.1)
-	tie_knot.z_index = 1
-	agent.add_child(tie_knot)
-
-	head = ColorRect.new()
-	head.size = Vector2(18, 18)
-	head.position = Vector2(-9, -35)
-	head.color = p_skin_color
-	head.z_index = 2
-	agent.add_child(head)
-
-	# Hair (all 4 styles available)
-	_create_agent_hair(p_hair_style, p_hair_color)
-
-	var left_eye = ColorRect.new()
-	left_eye.size = Vector2(3, 3)
-	left_eye.position = Vector2(3, 5)
-	left_eye.color = OfficePalette.EYE_COLOR
-	head.add_child(left_eye)
-
-	var right_eye = ColorRect.new()
-	right_eye.size = Vector2(3, 3)
-	right_eye.position = Vector2(12, 5)
-	right_eye.color = OfficePalette.EYE_COLOR
-	head.add_child(right_eye)
-
-func _create_female_visuals_persistent(p_skin_color: Color, p_hair_color: Color, p_hair_style: int, p_blouse_index: int, p_bottom_type: int = 0) -> void:
-	var shadow = ColorRect.new()
-	shadow.size = Vector2(30, 12)
-	shadow.position = Vector2(-15, 28)
-	shadow.color = OfficePalette.SHADOW_MEDIUM
-	shadow.z_index = -1
-	agent.add_child(shadow)
-
-	var wears_skirt = (p_bottom_type == 1)
-
-	if wears_skirt:
-		var skirt = ColorRect.new()
-		skirt.size = Vector2(28, 14)
-		skirt.position = Vector2(-14, 10)
-		skirt.color = OfficePalette.AGENT_SKIRT_DARK
-		agent.add_child(skirt)
-
-		var left_leg = ColorRect.new()
-		left_leg.size = Vector2(8, 10)
-		left_leg.position = Vector2(-10, 22)
-		left_leg.color = p_skin_color.darkened(0.1)
-		agent.add_child(left_leg)
-
-		var right_leg = ColorRect.new()
-		right_leg.size = Vector2(8, 10)
-		right_leg.position = Vector2(2, 22)
-		right_leg.color = p_skin_color.darkened(0.1)
-		agent.add_child(right_leg)
-	else:
-		var left_leg = ColorRect.new()
-		left_leg.size = Vector2(10, 18)
-		left_leg.position = Vector2(-12, 15)
-		left_leg.color = OfficePalette.AGENT_SKIRT_DARK
-		agent.add_child(left_leg)
-
-		var right_leg = ColorRect.new()
-		right_leg.size = Vector2(10, 18)
-		right_leg.position = Vector2(2, 15)
-		right_leg.color = OfficePalette.AGENT_SKIRT_DARK
-		agent.add_child(right_leg)
-
-	var blouse_color = BLOUSE_COLORS[p_blouse_index % BLOUSE_COLORS.size()]
-
-	body = ColorRect.new()
-	body.size = Vector2(26, 32)
-	body.position = Vector2(-13, -15)
-	body.color = blouse_color
-	body.z_index = 0
-	agent.add_child(body)
-
-	var collar = ColorRect.new()
-	collar.size = Vector2(18, 6)
-	collar.position = Vector2(-9, -17)
-	collar.color = blouse_color
-	agent.add_child(collar)
-
-	tie = null
-
-	head = ColorRect.new()
-	head.size = Vector2(18, 18)
-	head.position = Vector2(-9, -35)
-	head.color = p_skin_color
-	head.z_index = 2
-	agent.add_child(head)
-
-	var left_eye = ColorRect.new()
-	left_eye.size = Vector2(3, 3)
-	left_eye.position = Vector2(3, 5)
-	left_eye.color = OfficePalette.EYE_COLOR
-	head.add_child(left_eye)
-
-	var right_eye = ColorRect.new()
-	right_eye.size = Vector2(3, 3)
-	right_eye.position = Vector2(12, 5)
-	right_eye.color = OfficePalette.EYE_COLOR
-	head.add_child(right_eye)
-
-	# Hair (all 4 styles available)
-	_create_agent_hair(p_hair_style, p_hair_color)
-
-func _create_agent_hair(style: int, hair_color: Color) -> void:
-	# Shared hair creation for all agents - 4 styles: Short, Long, Bob, Updo
-	match style % 4:
-		0:  # Short
-			hair = ColorRect.new()
-			hair.size = Vector2(20, 8)
-			hair.position = Vector2(-1, -5)
-			hair.color = hair_color
-			head.add_child(hair)
-		1:  # Long
-			hair = ColorRect.new()
-			hair.size = Vector2(24, 12)
-			hair.position = Vector2(-3, -7)
-			hair.color = hair_color
-			head.add_child(hair)
-
-			var hair_left = ColorRect.new()
-			hair_left.size = Vector2(6, 18)
-			hair_left.position = Vector2(-5, -1)
-			hair_left.color = hair_color
-			head.add_child(hair_left)
-
-			var hair_right = ColorRect.new()
-			hair_right.size = Vector2(6, 18)
-			hair_right.position = Vector2(17, -1)
-			hair_right.color = hair_color
-			head.add_child(hair_right)
-		2:  # Bob
-			hair = ColorRect.new()
-			hair.size = Vector2(26, 14)
-			hair.position = Vector2(-4, -9)
-			hair.color = hair_color
-			head.add_child(hair)
-
-			var hair_sides = ColorRect.new()
-			hair_sides.size = Vector2(28, 8)
-			hair_sides.position = Vector2(-5, 1)
-			hair_sides.color = hair_color
-			head.add_child(hair_sides)
-		3:  # Updo
-			hair = ColorRect.new()
-			hair.size = Vector2(22, 10)
-			hair.position = Vector2(-2, -8)
-			hair.color = hair_color
-			head.add_child(hair)
-
-			var bun = ColorRect.new()
-			bun.size = Vector2(10, 10)
-			bun.position = Vector2(4, -15)
-			bun.color = hair_color
-			head.add_child(bun)
 
 func _clear_visual_nodes() -> void:
 	var preserve_nodes: Array[Node] = []
@@ -686,12 +413,6 @@ func _clear_visual_nodes() -> void:
 	tie = null
 
 func update_appearance(agent_type: String) -> void:
-	var color = Agent.get_agent_color(agent_type)
-	if tie:
-		tie.color = color
-	var tie_knot_node = agent.get_node_or_null("TieKnot")
-	if tie_knot_node:
-		tie_knot_node.color = color.darkened(0.1)
 	if type_label:
 		type_label.text = Agent.get_agent_label(agent_type)
 

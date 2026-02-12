@@ -1,0 +1,84 @@
+{
+  "type": "plant",
+  "display_name": "Plant",
+  "category": "social",
+  "traits": ["social"],
+  "capacity": 4,
+  "delivery_sound": "",
+  "obstacle_size": [40, 50],
+  "click_area": [-25, -25, 50, 60],
+  "wall_mounted": false,
+  "z_index": {"mode": "dynamic"},
+  "slots": [
+    {"offset": [-40, 0]},
+    {"offset": [40, 0]},
+    {"offset": [0, 40]},
+    {"offset": [0, -35]}
+  ],
+  "shelf_preview": {
+    "color": "LEAF_GREEN",
+    "size": [25, 35]
+  },
+  "visuals": [
+    {
+      "type": "color_rect",
+      "name": "shadow",
+      "size": [36, 14],
+      "position": [-18, 28],
+      "color": "SHADOW"
+    },
+    {
+      "type": "color_rect",
+      "name": "pot_front",
+      "size": [32, 16],
+      "position": [-16, 14],
+      "color": "POT_TERRACOTTA_DARK"
+    },
+    {
+      "type": "color_rect",
+      "name": "pot_rim",
+      "size": [34, 6],
+      "position": [-17, 8],
+      "color": "POT_RIM"
+    },
+    {
+      "type": "color_rect",
+      "name": "soil",
+      "size": [28, 10],
+      "position": [-14, -2],
+      "color": "SOIL_DARK"
+    },
+    {
+      "type": "color_rect",
+      "name": "leaf1",
+      "size": [24, 10],
+      "position": [-22, -12],
+      "color": "LEAF_GREEN_DARK",
+      "rotation": -0.3
+    },
+    {
+      "type": "color_rect",
+      "name": "leaf2",
+      "size": [26, 10],
+      "position": [-8, -22],
+      "color": "LEAF_GREEN_LIGHT",
+      "rotation": 0.2
+    },
+    {
+      "type": "color_rect",
+      "name": "leaf3",
+      "size": [22, 10],
+      "position": [4, -8],
+      "color": "LEAF_GREEN",
+      "rotation": 0.6
+    },
+    {
+      "type": "color_rect",
+      "name": "leaf4",
+      "size": [20, 8],
+      "position": [-4, -16],
+      "color": "LEAF_GREEN_LIGHT",
+      "rotation": -0.5
+    }
+  ]
+}

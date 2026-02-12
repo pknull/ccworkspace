@@ -1,0 +1,8 @@
+{
+  "id": "bob",
+  "display_name": "Bob",
+  "visuals": [
+    {"type": "color_rect", "name": "hair", "size": [26, 14], "position": [-4, -9], "color": "HAIR_COLOR"},
+    {"type": "color_rect", "name": "hair_sides", "size": [28, 8], "position": [-5, 1], "color": "HAIR_COLOR"}
+  ]
+}

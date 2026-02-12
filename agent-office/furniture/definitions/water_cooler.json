@@ -1,0 +1,80 @@
+{
+  "type": "water_cooler",
+  "display_name": "Water Cooler",
+  "category": "social",
+  "traits": ["social"],
+  "capacity": 4,
+  "delivery_sound": "",
+  "obstacle_size": [40, 60],
+  "click_area": [-20, -30, 40, 70],
+  "wall_mounted": false,
+  "z_index": {"mode": "dynamic"},
+  "slots": [
+    {"offset": [-40, 0]},
+    {"offset": [40, 0]},
+    {"offset": [0, 50]},
+    {"offset": [0, -40]}
+  ],
+  "shelf_preview": {
+    "color": "COOLER_BODY_FRONT",
+    "size": [30, 40]
+  },
+  "visuals": [
+    {
+      "type": "color_rect",
+      "name": "shadow",
+      "size": [32, 12],
+      "position": [-16, 32],
+      "color": "SHADOW"
+    },
+    {
+      "type": "color_rect",
+      "name": "base_front",
+      "size": [28, 12],
+      "position": [-14, 24],
+      "color": "COOLER_BASE_DARK"
+    },
+    {
+      "type": "color_rect",
+      "name": "base_top",
+      "size": [28, 8],
+      "position": [-14, 16],
+      "color": "COOLER_BASE"
+    },
+    {
+      "type": "color_rect",
+      "name": "body_front",
+      "size": [24, 20],
+      "position": [-12, -4],
+      "color": "COOLER_BODY_FRONT"
+    },
+    {
+      "type": "color_rect",
+      "name": "body_top",
+      "size": [24, 8],
+      "position": [-12, -12],
+      "color": "COOLER_BODY_TOP"
+    },
+    {
+      "type": "color_rect",
+      "name": "bottle_body",
+      "size": [18, 18],
+      "position": [-9, -30],
+      "color": "COOLER_BOTTLE"
+    },
+    {
+      "type": "color_rect",
+      "name": "bottle_top",
+      "size": [14, 6],
+      "position": [-7, -34],
+      "color": "COOLER_BOTTLE_TOP"
+    },
+    {
+      "type": "color_rect",
+      "name": "tap",
+      "size": [6, 4],
+      "position": [-3, 4],
+      "color": "COOLER_TAP"
+    }
+  ]
+}

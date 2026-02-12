@@ -4,28 +4,14 @@ class_name FurnitureShelfPopup
 # =============================================================================
 # FURNITURE SHELF POPUP - Add/Remove furniture from the office
 # =============================================================================
-# Provides an infinite inventory of furniture types that can be placed
-# and allows removing existing furniture.
+# Registry-driven: queries FurnitureRegistry for types, categories, and previews.
 
 signal close_requested()
 signal furniture_add_requested(furniture_type: String)
 signal furniture_remove_requested(furniture_id: String)
 signal wall_item_toggled(item_type: String, visible: bool)
 
-# Available furniture types with display info
-const FURNITURE_TYPES: Array[Dictionary] = [
-	{"type": "desk", "name": "Desk", "color": Color(0.55, 0.4, 0.25), "size": Vector2(50, 30)},
-	{"type": "terminal_furniture", "name": "Terminal", "color": Color(0.2, 0.2, 0.22), "size": Vector2(90, 60)},
-	{"type": "meeting_table", "name": "Meeting Table", "color": Color(0.45, 0.35, 0.25), "size": Vector2(65, 35)},
-	{"type": "water_cooler", "name": "Water Cooler", "color": Color(0.7, 0.85, 0.95), "size": Vector2(30, 40)},
-	{"type": "potted_plant", "name": "Plant", "color": Color(0.4, 0.7, 0.3), "size": Vector2(25, 35)},
-	{"type": "filing_cabinet", "name": "Filing Cabinet", "color": Color(0.6, 0.6, 0.65), "size": Vector2(30, 35)},
-	{"type": "shredder", "name": "Shredder", "color": Color(0.3, 0.3, 0.35), "size": Vector2(25, 30)},
-	{"type": "cat_bed", "name": "Cat Bed", "color": Color(0.9, 0.75, 0.6), "size": Vector2(35, 20)},
-	{"type": "taskboard", "name": "Taskboard", "color": Color(0.95, 0.95, 0.9), "size": Vector2(40, 50)},
-]
-
-# Wall-mounted items (can be shown/hidden and moved)
+# Wall-mounted items (not managed by registry)
 const WALL_ITEM_TYPES: Array[Dictionary] = [
 	{"type": "wall_clock", "name": "Clock", "color": Color(0.9, 0.9, 0.85), "size": Vector2(30, 30)},
 	{"type": "weather_display", "name": "Weather", "color": Color(0.2, 0.3, 0.2), "size": Vector2(35, 20)},
@@ -56,6 +42,7 @@ var placed_container: VBoxContainer
 # Data
 var placed_furniture: Array = []  # [{id, type, position}, ...]
 var wall_item_visibility: Dictionary = {}  # {type: bool}
+var furniture_registry: FurnitureRegistry = null
 
 func _init() -> void:
 	layer = OfficeConstants.Z_UI_POPUP_LAYER
@@ -122,7 +109,7 @@ func _create_visuals() -> void:
 	add_header.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT3)
 	container.add_child(add_header)
 
-	# Add section - grid of furniture thumbnails
+	# Add section - grid of furniture thumbnails grouped by category
 	add_section = Control.new()
 	add_section.position = Vector2(panel_x + 20, panel_y + 65)
 	add_section.size = Vector2(PANEL_WIDTH - 40, 160)
@@ -160,19 +147,45 @@ func _create_visuals() -> void:
 	placed_scroll.add_child(placed_container)
 
 func _create_furniture_grid() -> void:
-	var x = 0
-	var y = 0
-	for i in range(FURNITURE_TYPES.size()):
-		var ftype = FURNITURE_TYPES[i]
-		var item = _create_furniture_item(ftype, true)
-		item.position = Vector2(x * (ITEM_SIZE + 10), y * (ITEM_SIZE + 25))
-		add_section.add_child(item)
-		x += 1
-		if x >= ITEMS_PER_ROW:
-			x = 0
-			y += 1
+	var x := 0
+	var y := 0
 
-func _create_furniture_item(ftype: Dictionary, is_add: bool) -> Control:
+	if not furniture_registry:
+		return
+
+	# Flatten all types across categories in category order
+	var categories := furniture_registry.get_all_categories()
+	for cat in categories:
+		var types := furniture_registry.get_types_by_category(cat)
+		for type_name in types:
+			var ftype := _build_grid_entry(type_name)
+			var item := _create_furniture_item(ftype)
+			item.position = Vector2(x * (ITEM_SIZE + 10), y * (ITEM_SIZE + 25))
+			add_section.add_child(item)
+			x += 1
+			if x >= ITEMS_PER_ROW:
+				x = 0
+				y += 1
+
+func _build_grid_entry(type_name: String) -> Dictionary:
+	## Build a display dictionary from registry data for a furniture type.
+	var preview := furniture_registry.get_shelf_preview(type_name)
+	var color_ref = preview.get("color", "GRUVBOX_LIGHT4")
+	var size_arr = preview.get("size", [30, 30])
+	var color: Color
+	if color_ref is String:
+		color = OfficePalette.get_color(color_ref)
+	else:
+		color = OfficePalette.GRUVBOX_LIGHT4
+
+	return {
+		"type": type_name,
+		"name": furniture_registry.get_display_name(type_name),
+		"color": color,
+		"size": Vector2(size_arr[0], size_arr[1]) if size_arr is Array and size_arr.size() == 2 else Vector2(30, 30),
+	}
+
+func _create_furniture_item(ftype: Dictionary) -> Control:
 	var item = Control.new()
 	item.custom_minimum_size = Vector2(ITEM_SIZE, ITEM_SIZE + 20)
 	item.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -243,7 +256,14 @@ func show_shelf(current_furniture: Array, current_wall_items: Dictionary = {}) -
 	placed_furniture = current_furniture
 	wall_item_visibility = current_wall_items.duplicate()
 	visible = true
+	# Rebuild the furniture grid (registry may have been set after _ready)
+	_rebuild_furniture_grid()
 	_update_placed_list()
+
+func _rebuild_furniture_grid() -> void:
+	for child in add_section.get_children():
+		child.queue_free()
+	_create_furniture_grid()
 
 func _update_placed_list() -> void:
 	# Clear existing
@@ -298,8 +318,7 @@ func _update_placed_list() -> void:
 
 	for ftype in by_type.keys():
 		var items = by_type[ftype]
-		var type_info = _get_type_info(ftype)
-		var type_name = type_info.get("name", ftype)
+		var type_name := _get_display_name(ftype)
 
 		# Count occupied items (for desks)
 		var occupied_count = 0
@@ -318,7 +337,7 @@ func _update_placed_list() -> void:
 		# Color swatch
 		var swatch = ColorRect.new()
 		swatch.custom_minimum_size = Vector2(20, 20)
-		swatch.color = type_info.get("color", OfficePalette.GRUVBOX_LIGHT4)
+		swatch.color = _get_preview_color(ftype)
 		row.add_child(swatch)
 
 		# Spacer
@@ -366,11 +385,18 @@ func _on_wall_item_toggled(is_visible: bool, item_type: String) -> void:
 	wall_item_visibility[item_type] = is_visible
 	wall_item_toggled.emit(item_type, is_visible)
 
-func _get_type_info(furniture_type: String) -> Dictionary:
-	for ftype in FURNITURE_TYPES:
-		if ftype.get("type") == furniture_type:
-			return ftype
-	return {"name": furniture_type, "color": OfficePalette.GRUVBOX_LIGHT4}
+func _get_display_name(furniture_type: String) -> String:
+	if furniture_registry:
+		return furniture_registry.get_display_name(furniture_type)
+	return furniture_type
+
+func _get_preview_color(furniture_type: String) -> Color:
+	if furniture_registry:
+		var preview := furniture_registry.get_shelf_preview(furniture_type)
+		var color_ref = preview.get("color", "")
+		if color_ref is String and not color_ref.is_empty():
+			return OfficePalette.get_color(color_ref)
+	return OfficePalette.GRUVBOX_LIGHT4
 
 func _on_close_pressed() -> void:
 	visible = false

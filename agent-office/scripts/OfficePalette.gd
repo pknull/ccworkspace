@@ -224,6 +224,7 @@ const AGENT_SHIRT_WHITE = GRUVBOX_LIGHT_HARD  # Brighter white, distinct from de
 const AGENT_BLOUSE_PINK = Color(0.879, 0.668, 0.726)  # GRUVBOX_PURPLE_BRIGHT lightened 0.3
 const AGENT_BLOUSE_BLUE = Color(0.611, 0.718, 0.677)  # GRUVBOX_BLUE_BRIGHT lightened 0.2
 const AGENT_BLOUSE_LAVENDER = Color(0.75, 0.65, 0.80)  # Light purple, replaced cream
+const AGENT_TIE_RED = Color(0.80, 0.14, 0.11)  # GRUVBOX_RED
 const AGENT_TROUSERS_DARK = GRUVBOX_BG  # Darker than floor (BG3) for contrast
 const AGENT_SKIRT_DARK = GRUVBOX_BG1
 
@@ -380,3 +381,158 @@ const MCP_MANAGER_CLIPBOARD = GRUVBOX_BG2           # Clipboard backing
 const MCP_MANAGER_CLIPBOARD_CLIP = GRUVBOX_GRAY     # Metal clip
 const MCP_MANAGER_PAPER = GRUVBOX_LIGHT             # Paper on clipboard
 const MCP_MANAGER_PAPER_LINES = GRUVBOX_LIGHT4      # Writing lines
+
+# =============================================================================
+# COLOR LOOKUP BY NAME (for JSON-driven furniture)
+# =============================================================================
+
+static var _color_map: Dictionary = {}
+
+static func get_color(name: String) -> Color:
+	## Resolve a color reference string to a Color value.
+	## Supports modifiers: "NAME:lightened:0.1", "NAME:darkened:0.05"
+	## Returns magenta for unknown names (visible error).
+	if _color_map.is_empty():
+		_build_color_map()
+
+	# Check for modifier syntax: "COLOR:lightened:0.1" or "COLOR:darkened:0.05"
+	var parts := name.split(":")
+	var base_name := parts[0]
+
+	if not _color_map.has(base_name):
+		push_warning("OfficePalette: Unknown color '%s'" % name)
+		return Color.MAGENTA
+
+	var color: Color = _color_map[base_name]
+
+	if parts.size() == 3:
+		var modifier := parts[1]
+		var amount := float(parts[2])
+		match modifier:
+			"lightened":
+				color = color.lightened(amount)
+			"darkened":
+				color = color.darkened(amount)
+			_:
+				push_warning("OfficePalette: Unknown modifier '%s'" % modifier)
+	elif parts.size() != 1:
+		push_warning("OfficePalette: Malformed modifier syntax '%s' (expected NAME:modifier:amount)" % name)
+
+	return color
+
+static func _build_color_map() -> void:
+	_color_map = {
+		# Gruvbox Dark Backgrounds
+		"GRUVBOX_BG_HARD": GRUVBOX_BG_HARD,
+		"GRUVBOX_BG": GRUVBOX_BG,
+		"GRUVBOX_BG_SOFT": GRUVBOX_BG_SOFT,
+		"GRUVBOX_BG1": GRUVBOX_BG1,
+		"GRUVBOX_BG2": GRUVBOX_BG2,
+		"GRUVBOX_BG3": GRUVBOX_BG3,
+		"GRUVBOX_BG4": GRUVBOX_BG4,
+		# Gruvbox Light Backgrounds
+		"GRUVBOX_LIGHT_HARD": GRUVBOX_LIGHT_HARD,
+		"GRUVBOX_LIGHT": GRUVBOX_LIGHT,
+		"GRUVBOX_LIGHT_SOFT": GRUVBOX_LIGHT_SOFT,
+		"GRUVBOX_LIGHT1": GRUVBOX_LIGHT1,
+		"GRUVBOX_LIGHT2": GRUVBOX_LIGHT2,
+		"GRUVBOX_LIGHT3": GRUVBOX_LIGHT3,
+		"GRUVBOX_LIGHT4": GRUVBOX_LIGHT4,
+		# Gruvbox Accents (Normal)
+		"GRUVBOX_RED": GRUVBOX_RED,
+		"GRUVBOX_GREEN": GRUVBOX_GREEN,
+		"GRUVBOX_YELLOW": GRUVBOX_YELLOW,
+		"GRUVBOX_BLUE": GRUVBOX_BLUE,
+		"GRUVBOX_PURPLE": GRUVBOX_PURPLE,
+		"GRUVBOX_AQUA": GRUVBOX_AQUA,
+		"GRUVBOX_ORANGE": GRUVBOX_ORANGE,
+		"GRUVBOX_GRAY": GRUVBOX_GRAY,
+		# Gruvbox Accents (Bright)
+		"GRUVBOX_RED_BRIGHT": GRUVBOX_RED_BRIGHT,
+		"GRUVBOX_GREEN_BRIGHT": GRUVBOX_GREEN_BRIGHT,
+		"GRUVBOX_YELLOW_BRIGHT": GRUVBOX_YELLOW_BRIGHT,
+		"GRUVBOX_BLUE_BRIGHT": GRUVBOX_BLUE_BRIGHT,
+		"GRUVBOX_PURPLE_BRIGHT": GRUVBOX_PURPLE_BRIGHT,
+		"GRUVBOX_AQUA_BRIGHT": GRUVBOX_AQUA_BRIGHT,
+		"GRUVBOX_ORANGE_BRIGHT": GRUVBOX_ORANGE_BRIGHT,
+		# Gruvbox Accents (Faded)
+		"GRUVBOX_RED_FADED": GRUVBOX_RED_FADED,
+		"GRUVBOX_GREEN_FADED": GRUVBOX_GREEN_FADED,
+		"GRUVBOX_YELLOW_FADED": GRUVBOX_YELLOW_FADED,
+		"GRUVBOX_BLUE_FADED": GRUVBOX_BLUE_FADED,
+		"GRUVBOX_PURPLE_FADED": GRUVBOX_PURPLE_FADED,
+		"GRUVBOX_AQUA_FADED": GRUVBOX_AQUA_FADED,
+		"GRUVBOX_ORANGE_FADED": GRUVBOX_ORANGE_FADED,
+		# Shadows
+		"SHADOW": SHADOW,
+		"SHADOW_MEDIUM": SHADOW_MEDIUM,
+		# Furniture - Wood/Metal
+		"WOOD_FRAME": WOOD_FRAME,
+		"WOOD_DOOR": WOOD_DOOR,
+		"WOOD_DOOR_DARK": WOOD_DOOR_DARK,
+		"WOOD_DOOR_LIGHT": WOOD_DOOR_LIGHT,
+		"DESK_SURFACE": DESK_SURFACE,
+		"DESK_EDGE": DESK_EDGE,
+		"MEETING_TABLE_SURFACE": MEETING_TABLE_SURFACE,
+		"MEETING_TABLE_EDGE": MEETING_TABLE_EDGE,
+		"MEETING_TABLE_LEG": MEETING_TABLE_LEG,
+		"METAL_GRAY": METAL_GRAY,
+		"METAL_GRAY_LIGHT": METAL_GRAY_LIGHT,
+		"METAL_GRAY_DARK": METAL_GRAY_DARK,
+		"METAL_HANDLE": METAL_HANDLE,
+		# Water Cooler
+		"COOLER_BASE": COOLER_BASE,
+		"COOLER_BASE_DARK": COOLER_BASE_DARK,
+		"COOLER_BODY": COOLER_BODY,
+		"COOLER_BODY_FRONT": COOLER_BODY_FRONT,
+		"COOLER_BODY_TOP": COOLER_BODY_TOP,
+		"COOLER_BOTTLE": COOLER_BOTTLE,
+		"COOLER_BOTTLE_TOP": COOLER_BOTTLE_TOP,
+		"COOLER_TAP": COOLER_TAP,
+		# Plant
+		"POT_TERRACOTTA": POT_TERRACOTTA,
+		"POT_TERRACOTTA_DARK": POT_TERRACOTTA_DARK,
+		"POT_RIM": POT_RIM,
+		"SOIL_DARK": SOIL_DARK,
+		"LEAF_GREEN": LEAF_GREEN,
+		"LEAF_GREEN_LIGHT": LEAF_GREEN_LIGHT,
+		"LEAF_GREEN_DARK": LEAF_GREEN_DARK,
+		# Shredder
+		"SHREDDER_BODY": SHREDDER_BODY,
+		"SHREDDER_BODY_FRONT": SHREDDER_BODY_FRONT,
+		"SHREDDER_TOP": SHREDDER_TOP,
+		"SHREDDER_BIN": SHREDDER_BIN,
+		"SHREDDER_BIN_FRONT": SHREDDER_BIN_FRONT,
+		"SHREDDER_SLOT": SHREDDER_SLOT,
+		"SHREDDED_PAPER": SHREDDED_PAPER,
+		"SHREDDED_PAPER_DARK": SHREDDED_PAPER_DARK,
+		# Status LEDs
+		"STATUS_LED_RED": STATUS_LED_RED,
+		"STATUS_LED_GREEN": STATUS_LED_GREEN,
+		"STATUS_LED_GREEN_BRIGHT": STATUS_LED_GREEN_BRIGHT,
+		# Taskboard
+		"TASKBOARD_BG": TASKBOARD_BG,
+		"TASKBOARD_BORDER": TASKBOARD_BORDER,
+		"TASKBOARD_HEADER": TASKBOARD_HEADER,
+		"TASKBOARD_FRAME": TASKBOARD_FRAME,
+		"TASKBOARD_HEADER_TEXT": TASKBOARD_HEADER_TEXT,
+		"TASKBOARD_EASEL_LEG": TASKBOARD_EASEL_LEG,
+		# Agent Clothing
+		"AGENT_SHIRT_WHITE": AGENT_SHIRT_WHITE,
+		"AGENT_TIE_RED": AGENT_TIE_RED,
+		"AGENT_BLOUSE_PINK": AGENT_BLOUSE_PINK,
+		"AGENT_BLOUSE_BLUE": AGENT_BLOUSE_BLUE,
+		"AGENT_BLOUSE_LAVENDER": AGENT_BLOUSE_LAVENDER,
+		"AGENT_TROUSERS_DARK": AGENT_TROUSERS_DARK,
+		"AGENT_SKIRT_DARK": AGENT_SKIRT_DARK,
+		"CHARCOAL": Color(0.25, 0.22, 0.21),
+		"NAVY": Color(0.15, 0.20, 0.25),
+		"BURGUNDY": Color(0.35, 0.25, 0.30),
+		# Hair Colors
+		"HAIR_BROWN": HAIR_BROWN,
+		"HAIR_BLACK": HAIR_BLACK,
+		"HAIR_AUBURN": HAIR_AUBURN,
+		"HAIR_BLONDE": HAIR_BLONDE,
+		"HAIR_DARK_BROWN": HAIR_DARK_BROWN,
+		"HAIR_VERY_DARK": HAIR_VERY_DARK,
+	}

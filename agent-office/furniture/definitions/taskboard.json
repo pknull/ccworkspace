@@ -1,0 +1,83 @@
+{
+  "type": "taskboard",
+  "display_name": "Taskboard",
+  "category": "social",
+  "traits": ["viewable", "social"],
+  "capacity": 3,
+  "delivery_sound": "",
+  "obstacle_size": [150, 30],
+  "click_area": [0, 0, 170, 130],
+  "wall_mounted": true,
+  "visual_center_offset": [85, 161],
+  "drag_bounds": {
+    "min": [30, 100],
+    "max": [1100, 520]
+  },
+  "z_index": {"mode": "fixed", "value": "Z_TASKBOARD"},
+  "slots": [
+    {"offset": [25, 200]},
+    {"offset": [85, 200]},
+    {"offset": [145, 200]}
+  ],
+  "shelf_preview": {
+    "color": "TASKBOARD_BG",
+    "size": [40, 50]
+  },
+  "visuals": [
+    {
+      "type": "color_rect",
+      "name": "left_leg",
+      "size": [6, 70],
+      "position": [10, 126],
+      "color": "TASKBOARD_EASEL_LEG",
+      "z_index": "Z_TASKBOARD_LEGS"
+    },
+    {
+      "type": "color_rect",
+      "name": "right_leg",
+      "size": [6, 70],
+      "position": [154, 126],
+      "color": "TASKBOARD_EASEL_LEG",
+      "z_index": "Z_TASKBOARD_LEGS"
+    },
+    {
+      "type": "color_rect",
+      "name": "brace",
+      "size": [150, 4],
+      "position": [10, 170],
+      "color": "TASKBOARD_EASEL_LEG",
+      "z_index": "Z_TASKBOARD_LEGS"
+    },
+    {
+      "type": "color_rect",
+      "name": "frame",
+      "size": [170, 130],
+      "position": [0, 0],
+      "color": "TASKBOARD_FRAME"
+    },
+    {
+      "type": "color_rect",
+      "name": "surface",
+      "size": [162, 122],
+      "position": [4, 4],
+      "color": "TASKBOARD_BG"
+    },
+    {
+      "type": "label",
+      "name": "header",
+      "text": "Sessions",
+      "position": [4, 6],
+      "size": [162, 18],
+      "font_size": 12,
+      "color": "TASKBOARD_HEADER_TEXT",
+      "horizontal_alignment": "center"
+    },
+    {
+      "type": "color_rect",
+      "name": "underline",
+      "size": [80, 2],
+      "position": [45, 22],
+      "color": "TASKBOARD_HEADER_TEXT"
+    }
+  ]
+}

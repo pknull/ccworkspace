@@ -1,0 +1,73 @@
+{
+  "type": "filing_cabinet",
+  "display_name": "Filing Cabinet",
+  "category": "dropoff",
+  "traits": ["delivery", "social"],
+  "capacity": 4,
+  "delivery_sound": "filing",
+  "obstacle_size": [40, 80],
+  "click_area": [-25, -30, 50, 70],
+  "wall_mounted": false,
+  "z_index": {"mode": "dynamic"},
+  "slots": [
+    {"offset": [-50, 0]},
+    {"offset": [50, 0]},
+    {"offset": [0, 50]},
+    {"offset": [0, -40]}
+  ],
+  "shelf_preview": {
+    "color": "METAL_GRAY",
+    "size": [30, 35]
+  },
+  "visuals": [
+    {
+      "type": "color_rect",
+      "name": "shadow",
+      "size": [44, 16],
+      "position": [-22, 30],
+      "color": "SHADOW"
+    },
+    {
+      "type": "color_rect",
+      "name": "body_front",
+      "size": [40, 45],
+      "position": [-20, -15],
+      "color": "METAL_GRAY_DARK"
+    },
+    {
+      "type": "color_rect",
+      "name": "body_top",
+      "size": [40, 12],
+      "position": [-20, -27],
+      "color": "METAL_GRAY_LIGHT"
+    },
+    {
+      "type": "color_rect",
+      "name": "drawer1",
+      "size": [36, 18],
+      "position": [-18, -12],
+      "color": "METAL_GRAY"
+    },
+    {
+      "type": "color_rect",
+      "name": "handle1",
+      "size": [14, 3],
+      "position": [-7, -6],
+      "color": "METAL_HANDLE"
+    },
+    {
+      "type": "color_rect",
+      "name": "drawer2",
+      "size": [36, 18],
+      "position": [-18, 10],
+      "color": "METAL_GRAY"
+    },
+    {
+      "type": "color_rect",
+      "name": "handle2",
+      "size": [14, 3],
+      "position": [-7, 16],
+      "color": "METAL_HANDLE"
+    }
+  ]
+}

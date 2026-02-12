@@ -1,0 +1,91 @@
+{
+  "type": "meeting_table",
+  "display_name": "Meeting Table",
+  "category": "tables",
+  "traits": ["overflow", "social"],
+  "capacity": 8,
+  "delivery_sound": "",
+  "obstacle_size": [130, 70],
+  "click_area": [-65, -35, 130, 70],
+  "wall_mounted": false,
+  "z_index": {"mode": "dynamic"},
+  "slots": [
+    {"offset": [-60, -30]},
+    {"offset": [-60, 30]},
+    {"offset": [60, -30]},
+    {"offset": [60, 30]},
+    {"offset": [-20, -60]},
+    {"offset": [20, -60]},
+    {"offset": [-20, 60]},
+    {"offset": [20, 60]}
+  ],
+  "shelf_preview": {
+    "color": "MEETING_TABLE_SURFACE",
+    "size": [65, 35]
+  },
+  "visuals": [
+    {
+      "type": "color_rect",
+      "name": "shadow",
+      "size": [130, 20],
+      "position": [-65, 25],
+      "color": "SHADOW"
+    },
+    {
+      "type": "color_rect",
+      "name": "leg_bl",
+      "size": [8, 8],
+      "position": [-54, -24],
+      "color": "MEETING_TABLE_LEG"
+    },
+    {
+      "type": "color_rect",
+      "name": "leg_br",
+      "size": [8, 8],
+      "position": [46, -24],
+      "color": "MEETING_TABLE_LEG"
+    },
+    {
+      "type": "color_rect",
+      "name": "leg_fl",
+      "size": [8, 8],
+      "position": [-54, 16],
+      "color": "MEETING_TABLE_LEG"
+    },
+    {
+      "type": "color_rect",
+      "name": "leg_fr",
+      "size": [8, 8],
+      "position": [46, 16],
+      "color": "MEETING_TABLE_LEG"
+    },
+    {
+      "type": "color_rect",
+      "name": "edge_front",
+      "size": [120, 8],
+      "position": [-60, 22],
+      "color": "MEETING_TABLE_EDGE"
+    },
+    {
+      "type": "color_rect",
+      "name": "surface",
+      "size": [120, 50],
+      "position": [-60, -28],
+      "color": "MEETING_TABLE_SURFACE"
+    },
+    {
+      "type": "color_rect",
+      "name": "edge_top",
+      "size": [120, 4],
+      "position": [-60, -28],
+      "color": "MEETING_TABLE_SURFACE:lightened:0.1"
+    },
+    {
+      "type": "color_rect",
+      "name": "inlay",
+      "size": [80, 30],
+      "position": [-40, -18],
+      "color": "MEETING_TABLE_SURFACE:darkened:0.05"
+    }
+  ]
+}

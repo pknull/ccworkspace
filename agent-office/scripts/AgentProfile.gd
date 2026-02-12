@@ -41,14 +41,12 @@ var agent_name: String = ""
 var hired_at: String = ""
 var last_seen: String = ""
 
-# Appearance (persistent)
-var is_female: bool = false  # true = blouse, false = shirt+tie
-var hair_color_index: int = 0
-var skin_color_index: int = 0
-var hair_style_index: int = 0
-var blouse_color_index: int = 0  # top color (blouse or tie)
-var bottom_type: int = 0  # 0 = pants, 1 = skirt
-var bottom_color_index: int = 0
+# Appearance (persistent, ID-based)
+var top_id: String = "white_shirt"
+var bottom_id: String = "dark_pants"
+var hair_color_id: String = "brown"
+var hair_style_id: String = "short"
+var skin_color_index: int = 0  # Skin stays index-based
 
 # Progression
 var xp: int = 0
@@ -82,14 +80,16 @@ func _init(p_id: int = 0, p_name: String = "") -> void:
 	hired_at = _get_iso_timestamp()
 	last_seen = hired_at
 
-	# Randomize appearance
-	is_female = randf() < 0.5  # 50% blouse, 50% shirt+tie
-	hair_color_index = randi_range(0, 5)
+	# Randomize appearance using default item pools
+	var tops := AppearanceRegistry.TOP_INDEX_MAP
+	var bottoms := AppearanceRegistry.BOTTOM_INDEX_MAP
+	var hair_colors := AppearanceRegistry.HAIR_COLOR_INDEX_MAP
+	var hair_styles := AppearanceRegistry.HAIR_STYLE_INDEX_MAP
+	top_id = tops[randi() % tops.size()]
+	bottom_id = bottoms[randi() % bottoms.size()]
+	hair_color_id = hair_colors[randi() % hair_colors.size()]
+	hair_style_id = hair_styles[randi() % hair_styles.size()]
 	skin_color_index = randi_range(0, 4)
-	hair_style_index = randi_range(0, 3)
-	blouse_color_index = randi_range(0, 3)
-	bottom_type = randi_range(0, 1)  # 0 = pants, 1 = skirt
-	bottom_color_index = randi_range(0, 3)
 
 static func _get_iso_timestamp() -> String:
 	var datetime = Time.get_datetime_dict_from_system()
@@ -222,13 +222,11 @@ func to_dict() -> Dictionary:
 		"hired_at": hired_at,
 		"last_seen": last_seen,
 		"appearance": {
-			"is_female": is_female,
-			"hair_color_index": hair_color_index,
+			"top": top_id,
+			"bottom": bottom_id,
+			"hair_color": hair_color_id,
+			"hair_style": hair_style_id,
 			"skin_color_index": skin_color_index,
-			"hair_style_index": hair_style_index,
-			"blouse_color_index": blouse_color_index,
-			"bottom_type": bottom_type,
-			"bottom_color_index": bottom_color_index,
 		},
 		"progression": {
 			"xp": xp,
@@ -256,19 +254,30 @@ static func from_dict(data: Dictionary) -> AgentProfile:
 	profile.last_seen = data.get("last_seen", profile.hired_at)
 
 	var appearance = data.get("appearance", {})
-	profile.is_female = appearance.get("is_female", false)
-	profile.hair_color_index = appearance.get("hair_color_index", 0)
 	profile.skin_color_index = appearance.get("skin_color_index", 0)
-	profile.hair_style_index = appearance.get("hair_style_index", 0)
-	profile.blouse_color_index = appearance.get("blouse_color_index", 0)
-	# New fields with backwards compatibility (migrate from old encoding)
-	if appearance.has("bottom_type"):
-		profile.bottom_type = appearance.get("bottom_type", 0)
-		profile.bottom_color_index = appearance.get("bottom_color_index", 0)
-	else:
-		# Migrate from old encoding: blouse_color_index % 2 == 0 meant skirt
-		profile.bottom_type = 1 if (profile.is_female and profile.blouse_color_index % 2 == 0) else 0
-		profile.bottom_color_index = 0
+
+	if appearance.has("top"):
+		# New ID-based format
+		profile.top_id = appearance.get("top", "white_shirt")
+		profile.bottom_id = appearance.get("bottom", "dark_pants")
+		profile.hair_color_id = appearance.get("hair_color", "brown")
+		profile.hair_style_id = appearance.get("hair_style", "short")
+	elif appearance.has("hair_color_index"):
+		# Legacy index-based format — migrate to IDs
+		var is_female: bool = appearance.get("is_female", false)
+		var hair_color_index: int = appearance.get("hair_color_index", 0)
+		var hair_style_index: int = appearance.get("hair_style_index", 0)
+		var blouse_color_index: int = appearance.get("blouse_color_index", 0)
+		var bottom_type: int = appearance.get("bottom_type", 0)
+		var bottom_color_index: int = appearance.get("bottom_color_index", 0)
+		# Older profiles without bottom_type
+		if not appearance.has("bottom_type"):
+			bottom_type = 1 if (is_female and blouse_color_index % 2 == 0) else 0
+			bottom_color_index = 0
+		profile.top_id = AppearanceRegistry.top_id_from_index(blouse_color_index, is_female)
+		profile.bottom_id = AppearanceRegistry.bottom_id_from_index(bottom_type, bottom_color_index)
+		profile.hair_color_id = AppearanceRegistry.hair_color_id_from_index(hair_color_index)
+		profile.hair_style_id = AppearanceRegistry.hair_style_id_from_index(hair_style_index)
 
 	var progression = data.get("progression", {})
 	profile.xp = progression.get("xp", 0)

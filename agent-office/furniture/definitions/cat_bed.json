@@ -1,0 +1,56 @@
+{
+  "type": "cat_bed",
+  "display_name": "Cat Bed",
+  "category": "pets",
+  "traits": ["cat_rest"],
+  "capacity": 1,
+  "delivery_sound": "",
+  "obstacle_size": [60, 36],
+  "click_area": [-30, -18, 60, 36],
+  "wall_mounted": false,
+  "z_index": {"mode": "fixed", "value": -5},
+  "slots": [
+    {"offset": [0, 0]}
+  ],
+  "shelf_preview": {
+    "color": "GRUVBOX_RED_FADED",
+    "size": [35, 20]
+  },
+  "visuals": [
+    {
+      "type": "color_rect",
+      "name": "shadow",
+      "size": [46, 10],
+      "position": [-23, 10],
+      "color": "SHADOW"
+    },
+    {
+      "type": "color_rect",
+      "name": "base",
+      "size": [60, 28],
+      "position": [-30, -14],
+      "color": "WOOD_DOOR"
+    },
+    {
+      "type": "color_rect",
+      "name": "rim",
+      "size": [56, 24],
+      "position": [-28, -12],
+      "color": "WOOD_DOOR_LIGHT"
+    },
+    {
+      "type": "color_rect",
+      "name": "cushion",
+      "size": [50, 18],
+      "position": [-25, -9],
+      "color": "GRUVBOX_RED_FADED"
+    },
+    {
+      "type": "color_rect",
+      "name": "pillow",
+      "size": [16, 10],
+      "position": [-8, -7],
+      "color": "GRUVBOX_LIGHT2"
+    }
+  ]
+}

@@ -92,6 +92,7 @@ var profile_name: String = ""  # Display name from roster profile
 var profile_badges: Array[String] = []  # Badge IDs from profile
 var profile_level: int = 0  # Level from profile
 var _pending_profile = null  # Profile to apply once visuals are ready
+var appearance_registry: AppearanceRegistry = null  # Set by OfficeManager before add_child
 var harness_id: String = ""
 var harness_label: String = ""
 var state: State = State.SPAWNING
@@ -231,6 +232,7 @@ func _init() -> void:
 func _ready() -> void:
 	# Initialize component delegates
 	visuals = AgentVisuals.new(self)
+	visuals.appearance_registry = appearance_registry
 	visuals.create_visuals()
 	visuals.update_appearance(agent_type)
 	bubbles = AgentBubbles.new(self)

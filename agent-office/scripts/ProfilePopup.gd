@@ -19,6 +19,7 @@ var current_profile: AgentProfile = null
 # Edit appearance
 var edit_button: Button
 var appearance_editor: AppearanceEditorPopup = null
+var appearance_registry: AppearanceRegistry = null
 
 # Visual elements
 var background: ColorRect
@@ -69,7 +70,6 @@ const FONT_SIZE_BODY: int = 12
 const FONT_SIZE_SMALL: int = 11
 
 # Use centralized arrays from OfficePalette
-const HAIR_COLORS = OfficePalette.HAIR_COLORS
 const SKIN_TONES = OfficePalette.SKIN_TONES
 
 # Reference to badge system for badge info
@@ -374,7 +374,9 @@ func _update_portrait(profile: AgentProfile) -> void:
 		child.queue_free()
 
 	var skin_color = SKIN_TONES[profile.skin_color_index % SKIN_TONES.size()]
-	var hair_color = HAIR_COLORS[profile.hair_color_index % HAIR_COLORS.size()]
+	var hair_color := OfficePalette.HAIR_BROWN
+	if appearance_registry:
+		hair_color = appearance_registry.get_hair_color_value(profile.hair_color_id)
 
 	# Head
 	var head = ColorRect.new()
@@ -396,8 +398,8 @@ func _update_portrait(profile: AgentProfile) -> void:
 	right_eye.color = OfficePalette.EYE_COLOR
 	portrait_layer.add_child(right_eye)
 
-	# Hair (all styles available regardless of clothing)
-	_create_portrait_hair(profile.hair_style_index, hair_color)
+	# Hair (JSON-driven via registry)
+	_create_portrait_hair(profile.hair_style_id, hair_color)
 
 func _create_badge_icon(badge_id: String) -> Control:
 	var info = badge_system.get_badge_info(badge_id) if is_instance_valid(badge_system) else {}
@@ -441,15 +443,15 @@ func _create_badge_icon(badge_id: String) -> Control:
 
 	return badge
 
-func _create_portrait_hair(style_index: int, hair_color: Color) -> void:
-	match style_index % 4:
-		0:  # Short
+func _create_portrait_hair(style_id: String, hair_color: Color) -> void:
+	match style_id:
+		"short":
 			var hair = ColorRect.new()
 			hair.size = Vector2(34, 10)
 			hair.position = Vector2(23, 20)
 			hair.color = hair_color
 			portrait_layer.add_child(hair)
-		1:  # Long
+		"long":
 			var hair_top = ColorRect.new()
 			hair_top.size = Vector2(36, 12)
 			hair_top.position = Vector2(22, 18)
@@ -467,7 +469,7 @@ func _create_portrait_hair(style_index: int, hair_color: Color) -> void:
 			hair_right.position = Vector2(54, 28)
 			hair_right.color = hair_color
 			portrait_layer.add_child(hair_right)
-		2:  # Bob
+		"bob":
 			var hair = ColorRect.new()
 			hair.size = Vector2(38, 16)
 			hair.position = Vector2(21, 20)
@@ -479,7 +481,7 @@ func _create_portrait_hair(style_index: int, hair_color: Color) -> void:
 			hair_sides.position = Vector2(20, 32)
 			hair_sides.color = hair_color
 			portrait_layer.add_child(hair_sides)
-		3:  # Updo
+		"updo":
 			var hair = ColorRect.new()
 			hair.size = Vector2(34, 12)
 			hair.position = Vector2(23, 20)
@@ -656,6 +658,7 @@ func _on_edit_pressed() -> void:
 	# Create appearance editor if needed
 	if appearance_editor == null:
 		appearance_editor = AppearanceEditorPopup.new()
+		appearance_editor.appearance_registry = appearance_registry
 		appearance_editor.close_requested.connect(_on_appearance_editor_closed)
 		appearance_editor.appearance_changed.connect(_on_appearance_changed)
 		get_tree().root.add_child(appearance_editor)

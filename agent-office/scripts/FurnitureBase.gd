@@ -23,6 +23,12 @@ var slots: Array = []  # [{offset: Vector2, occupied_by: String}, ...]
 var wall_mounted: bool = false
 var delivery_sound: String = ""
 
+# JSON-driven furniture data
+var _json_data: Dictionary = {}
+var category: String = ""
+var display_name: String = ""
+var _fixed_z_value: int = 0
+
 func _init() -> void:
 	# Subclasses should override to set traits, capacity, slots
 	pass
@@ -38,6 +44,10 @@ func _ready() -> void:
 	if wall_mounted:
 		use_dynamic_z_index = false
 		z_index = OfficeConstants.Z_WALL_DECORATION  # Wall-mounted items
+
+	# Apply fixed z-index from JSON data
+	if _fixed_z_value != 0:
+		z_index = _fixed_z_value
 
 	# Build visuals if not already built
 	if get_child_count() == 0:
@@ -56,9 +66,14 @@ func _init_default_slots() -> void:
 			"occupied_by": ""
 		})
 
-## Override in subclasses to create visual representation
+## Override in subclasses to create visual representation.
+## JSON-driven furniture delegates to FurnitureJsonLoader.
 func _build_visuals() -> void:
-	pass
+	if not _json_data.is_empty() and _json_data.has("visuals"):
+		var visuals = _json_data.get("visuals")
+		if visuals is Array:
+			FurnitureJsonLoader.build_visuals(self, visuals)
+		return
 
 # --- Trait System ---
 
