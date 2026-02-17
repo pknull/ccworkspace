@@ -2,11 +2,12 @@ name: Build and Release
 
 on:
   push:
+    branches: [main]
     tags:
       - 'v*'
 
 env:
-  GODOT_VERSION: 4.5
+  GODOT_VERSION: "4.5.0"
   PROJECT_PATH: agent-office
   ITCH_USER: pknull
   ITCH_GAME: inference-inc
@@ -23,7 +24,7 @@ jobs:
       - name: Setup Godot
         uses: chickensoft-games/setup-godot@v2
         with:
-          version: 4.5.0
+          version: ${{ env.GODOT_VERSION }}
           use-dotnet: false
           include-templates: true
 
@@ -34,6 +35,38 @@ jobs:
         run: |
           cd ${{ env.PROJECT_PATH }}
           godot --headless --import
+
+      - name: Create stub libraries for cross-platform export
+        run: |
+          cd ${{ env.PROJECT_PATH }}
+          # godot-xterm only ships Linux x86_64 .so files.
+          # Create empty stubs so Godot export doesn't fail when copying
+          # missing platform binaries. The extension simply won't load on
+          # those platforms (terminal feature is Linux-only).
+          LIB_DIR=addons/godot_xterm/lib
+
+          # Windows stubs
+          for arch in x86_64 x86_32 arm64; do
+            touch "$LIB_DIR/libgodot-xterm.windows.template_debug.${arch}.dll"
+            touch "$LIB_DIR/libgodot-xterm.windows.template_release.${arch}.dll"
+          done
+
+          # Linux stubs (non-x86_64 architectures)
+          for arch in x86_32 arm64 arm32; do
+            touch -a "$LIB_DIR/libgodot-xterm.linux.template_debug.${arch}.so"
+            touch -a "$LIB_DIR/libgodot-xterm.linux.template_release.${arch}.so"
+          done
+
+          # macOS framework stubs (frameworks are directories)
+          for variant in debug release; do
+            dir="$LIB_DIR/libgodot-xterm.macos.template_${variant}.framework"
+            mkdir -p "$dir"
+            touch "$dir/libgodot-xterm.macos.template_${variant}"
+          done
+
+          # Web stubs
+          touch "$LIB_DIR/libgodot-xterm.web.template_debug.wasm32.wasm"
+          touch "$LIB_DIR/libgodot-xterm.web.template_release.wasm32.wasm"
 
       - name: Export Linux
         run: |
@@ -99,6 +132,7 @@ jobs:
     name: Create Release
     needs: export
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
 
@@ -150,7 +184,7 @@ jobs:
     name: Publish to itch.io
     needs: export
     runs-on: ubuntu-latest
-    if: ${{ vars.PUBLISH_ITCH != 'false' }}
+    if: startsWith(github.ref, 'refs/tags/v') && vars.PUBLISH_ITCH != 'false'
 
     steps:
       - name: Download all artifacts
