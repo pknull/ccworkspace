@@ -243,10 +243,10 @@ func _create_achievement_row(achievement) -> Control:
 
 	# Description
 	var desc_label = Label.new()
-	desc_label.text = achievement.description
+	desc_label.text = achievement.description if achievement.is_unlocked else "???"
 	desc_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	desc_label.clip_text = true
-	desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	desc_label.custom_minimum_size.y = 14
 	desc_label.add_theme_font_size_override("font_size", FONT_SIZE_DESC)
 	desc_label.add_theme_color_override("font_color", OfficePalette.GRUVBOX_LIGHT4)
 	text_box.add_child(desc_label)
@@ -292,6 +292,4 @@ func _input(event: InputEvent) -> void:
 			var panel_rect = Rect2(panel.position.x, panel.position.y, PANEL_WIDTH, panel_height)
 			if not panel_rect.has_point(event.position):
 				close_requested.emit()
-				get_viewport().set_input_as_handled()
-			else:
 				get_viewport().set_input_as_handled()
