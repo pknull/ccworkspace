@@ -309,14 +309,21 @@ func _is_inside_terminal(local_pos: Vector2) -> bool:
 	return Rect2(_terminal.position, _terminal.size).has_point(local_pos)
 
 func _get_default_shell() -> String:
+	if OS.get_name() == "Windows":
+		if OS.has_environment("COMSPEC"):
+			return OS.get_environment("COMSPEC")
+		return "cmd.exe"
 	if OS.has_environment("SHELL"):
 		return OS.get_environment("SHELL")
 	return "sh"
 
 func _get_shell_cwd() -> String:
-	if OS.has_environment("HOME"):
-		return OS.get_environment("HOME")
-	return "."
+	var home = OS.get_environment("HOME")
+	if home.is_empty():
+		home = OS.get_environment("USERPROFILE")
+	if home.is_empty():
+		return "."
+	return home
 
 func _start_shell() -> void:
 	if _pty == null:

@@ -174,6 +174,10 @@ var office_obstacles: Array[Rect2] = []
 # Grid-based navigation system
 var navigation_grid: NavigationGrid = null
 
+# Drag arbitration - resolves overlapping click candidates
+var _drag_candidates: Array = []  # [{node: Node2D, event: InputEvent}]
+var _drag_arbitration_pending: bool = false
+
 # Event sources
 @onready var mcp_server: McpServer = $McpServer
 var transcript_watcher: Node = null
@@ -667,8 +671,8 @@ func _create_office_cat() -> void:
 	if office_cat.has_method("set_navigation_grid"):
 		office_cat.set_navigation_grid(navigation_grid)
 	office_cat.audio_manager = audio_manager
+	office_cat.office_manager = self
 	_update_cat_obstacles()
-	office_cat.z_index = OfficeConstants.Z_CAT
 	add_child(office_cat)
 	# Connect cat petted signal for MCP petting
 	if office_cat.has_signal("cat_petted"):
@@ -2609,43 +2613,16 @@ func _save_positions() -> void:
 	file.close()
 
 func _on_reset_button_pressed() -> void:
-	print("[OfficeManager] Resetting furniture positions to defaults")
+	print("[OfficeManager] Resetting furniture layout to defaults")
 
-	# Reset all positions to defaults
-	water_cooler_position = DEFAULT_POSITIONS["water_cooler"]
-	plant_position = DEFAULT_POSITIONS["plant"]
-	filing_cabinet_position = DEFAULT_POSITIONS["filing_cabinet"]
-	shredder_position = DEFAULT_POSITIONS["shredder"]
-	taskboard_position = DEFAULT_POSITIONS["taskboard"]
-	meeting_table_position = DEFAULT_POSITIONS["meeting_table"]
-	cat_bed_position = DEFAULT_POSITIONS["cat_bed"]
-
-	# Update draggable furniture positions
-	if draggable_water_cooler:
-		draggable_water_cooler.position = water_cooler_position
-		_on_item_position_changed("water_cooler", water_cooler_position)
-	if draggable_plant:
-		draggable_plant.position = plant_position
-		_on_item_position_changed("plant", plant_position)
-	if draggable_filing_cabinet:
-		draggable_filing_cabinet.position = filing_cabinet_position
-		_on_item_position_changed("filing_cabinet", filing_cabinet_position)
-	if draggable_shredder:
-		draggable_shredder.position = shredder_position
-		_on_item_position_changed("shredder", shredder_position)
-	if draggable_taskboard:
-		draggable_taskboard.position = taskboard_position
-	if meeting_table:
-		meeting_table.position = meeting_table_position
-		_on_item_position_changed("meeting_table", meeting_table_position)
-	if draggable_cat_bed:
-		draggable_cat_bed.position = cat_bed_position
-		_on_item_position_changed("cat_bed", cat_bed_position)
-
-	# Delete saved positions file
+	# Delete saved positions file so reload uses defaults
 	if FileAccess.file_exists(POSITIONS_FILE):
 		DirAccess.remove_absolute(POSITIONS_FILE)
 		print("[OfficeManager] Removed saved positions file")
+
+	# Reload the scene for a clean reset (handles desks, dynamic furniture,
+	# removed defaults, wall items - everything returns to initial state)
+	get_tree().reload_current_scene()
 
 # =============================================================================
 # GAMIFICATION & ROSTER EVENTS
@@ -3247,3 +3224,35 @@ func _close_event_log() -> void:
 
 func _on_pause_quit() -> void:
 	_request_quit()
+
+# =============================================================================
+# DRAG ARBITRATION - resolves overlapping click candidates
+# =============================================================================
+
+func register_drag_candidate(node: Node2D, event: InputEvent) -> void:
+	_drag_candidates.append({"node": node, "event": event})
+	if not _drag_arbitration_pending:
+		_drag_arbitration_pending = true
+		call_deferred("_resolve_drag_candidates")
+
+func _resolve_drag_candidates() -> void:
+	_drag_arbitration_pending = false
+	if _drag_candidates.is_empty():
+		return
+
+	# Pick the candidate with the highest z_index (visually on top)
+	var best = _drag_candidates[0]
+	for i in range(1, _drag_candidates.size()):
+		var candidate = _drag_candidates[i]
+		if candidate.node.z_index > best.node.z_index:
+			best = candidate
+		elif candidate.node.z_index == best.node.z_index:
+			# Tie-break: higher scene tree index (added later = visually on top)
+			if candidate.node.get_index() > best.node.get_index():
+				best = candidate
+
+	_drag_candidates.clear()
+
+	# Start drag on the winner
+	if best.node.has_method("start_drag"):
+		best.node.start_drag(best.event)

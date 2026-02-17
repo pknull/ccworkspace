@@ -54,6 +54,12 @@ func _process(_delta: float) -> void:
 func set_click_area(rect: Rect2) -> void:
 	click_area = rect
 
+func start_drag(_event: InputEvent) -> void:
+	is_dragging = true
+	drag_offset = position - get_global_mouse_position()
+	_create_ghost_preview()
+	_create_grid_overlay()
+
 func _snap_to_grid(pos: Vector2) -> Vector2:
 	if not snap_to_grid:
 		return pos
@@ -79,18 +85,20 @@ func _input(event: InputEvent) -> void:
 				# Check if click is within our bounds
 				var local_pos = get_local_mouse_position()
 				if click_area.has_point(local_pos):
-					is_dragging = true
-					# Warp cursor to furniture center so user knows the alignment point
-					Input.warp_mouse(global_position)
-					drag_offset = Vector2.ZERO  # Cursor is now at center
-					_create_ghost_preview()
-					_create_grid_overlay()
+					# Register as drag candidate for arbitration (highest z_index wins)
+					# Don't call set_input_as_handled() here - other overlapping items
+					# need to register too. The arbitration winner handles the event.
+					if office_manager and office_manager.has_method("register_drag_candidate"):
+						office_manager.register_drag_candidate(self, event)
+					else:
+						# Fallback: no arbitration, start directly
+						start_drag(event)
 			else:
 				if is_dragging:
 					is_dragging = false
 					_clear_obstacle_highlight()
-					# Snap based on mouse position for consistent collision
-					var snapped_pos = _snap_to_grid(_get_clamped_mouse_pos())
+					# Snap based on item position for consistent collision
+					var snapped_pos = _snap_to_grid(_get_clamped_mouse_pos() + drag_offset)
 					var original_snapped = snapped_pos
 
 					# Check for valid placement (no overlap with other objects)
@@ -108,10 +116,11 @@ func _input(event: InputEvent) -> void:
 
 	elif event is InputEventMouseMotion and is_dragging:
 		var mouse_pos = _get_clamped_mouse_pos()
-		position = mouse_pos  # drag_offset is zero due to cursor warp
+		var item_pos = mouse_pos + drag_offset
+		position = item_pos
 
-		# Snap based on mouse position for consistent collision checking
-		var snapped_pos = _snap_to_grid(mouse_pos)
+		# Snap based on item position for consistent collision checking
+		var snapped_pos = _snap_to_grid(item_pos)
 		if ghost_preview:
 			ghost_preview.position = snapped_pos
 		if grid_overlay:
@@ -137,18 +146,33 @@ func _create_ghost_preview() -> void:
 	ghost_preview = Node2D.new()
 	ghost_preview.z_index = z_index + 100
 
-	# Copy all ColorRect children as semi-transparent and hide originals
+	# Copy all visual children (ColorRect + Label) as semi-transparent and hide originals
 	for child in get_children():
 		if child is ColorRect:
 			var ghost_rect = ColorRect.new()
 			ghost_rect.size = child.size
 			ghost_rect.position = child.position
 			ghost_rect.color = child.color
+			ghost_rect.z_as_relative = child.z_as_relative
+			ghost_rect.z_index = child.z_index
 			ghost_rect.modulate.a = 0.6
 			ghost_preview.add_child(ghost_rect)
-			child.visible = false  # Hide original while dragging
+			child.visible = false
+		elif child is Label:
+			var ghost_label = Label.new()
+			ghost_label.text = child.text
+			ghost_label.size = child.size
+			ghost_label.position = child.position
+			ghost_label.horizontal_alignment = child.horizontal_alignment
+			ghost_label.vertical_alignment = child.vertical_alignment
+			if child.has_theme_font_size_override("font_size"):
+				ghost_label.add_theme_font_size_override("font_size", child.get_theme_font_size("font_size"))
+			if child.has_theme_color_override("font_color"):
+				ghost_label.add_theme_color_override("font_color", child.get_theme_color("font_color"))
+			ghost_label.modulate.a = 0.6
+			ghost_preview.add_child(ghost_label)
+			child.visible = false
 
-	# If no ColorRects found, ghost_preview will be empty but still functional
 	get_parent().add_child(ghost_preview)
 	ghost_preview.position = _snap_to_grid(position)
 
@@ -190,7 +214,7 @@ func _update_ghost_validity(is_valid: bool) -> void:
 func _cleanup_drag_visuals() -> void:
 	# Show original children again
 	for child in get_children():
-		if child is ColorRect:
+		if child is ColorRect or child is Label:
 			child.visible = true
 
 	if ghost_preview:

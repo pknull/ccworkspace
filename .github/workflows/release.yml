@@ -2,11 +2,12 @@ name: Build and Release
 
 on:
   push:
+    branches: [main]
     tags:
       - 'v*'
 
 env:
-  GODOT_VERSION: 4.5
+  GODOT_VERSION: "4.5.0"
   PROJECT_PATH: agent-office
   ITCH_USER: pknull
   ITCH_GAME: inference-inc
@@ -23,7 +24,7 @@ jobs:
       - name: Setup Godot
         uses: chickensoft-games/setup-godot@v2
         with:
-          version: 4.5.0
+          version: ${{ env.GODOT_VERSION }}
           use-dotnet: false
           include-templates: true
 
@@ -34,6 +35,17 @@ jobs:
         run: |
           cd ${{ env.PROJECT_PATH }}
           godot --headless --import
+
+      - name: Download godot-xterm binaries
+        run: |
+          cd ${{ env.PROJECT_PATH }}
+          # Download godot-xterm v4.0.2 release (binaries not stored in repo)
+          curl -L -o /tmp/godot-xterm.zip \
+            https://github.com/lihop/godot-xterm/releases/download/v4.0.2/godot-xterm-v4.0.2.zip
+          # Extract only the lib/ binaries we need
+          unzip -o /tmp/godot-xterm.zip "addons/godot_xterm/lib/*" -d .
+          rm /tmp/godot-xterm.zip
+          ls -la addons/godot_xterm/lib/
 
       - name: Export Linux
         run: |
@@ -99,6 +111,7 @@ jobs:
     name: Create Release
     needs: export
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
 
@@ -150,7 +163,7 @@ jobs:
     name: Publish to itch.io
     needs: export
     runs-on: ubuntu-latest
-    if: ${{ vars.PUBLISH_ITCH != 'false' }}
+    if: startsWith(github.ref, 'refs/tags/v') && vars.PUBLISH_ITCH != 'false'
 
     steps:
       - name: Download all artifacts
