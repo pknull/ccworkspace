@@ -74,6 +74,9 @@ var current_waypoint_index: int = 0
 # Audio
 var audio_manager = null  # AudioManager instance
 
+# Drag arbitration
+var office_manager: Node = null
+
 func _ready() -> void:
 	_randomize_appearance()
 	_create_visuals()
@@ -188,6 +191,9 @@ func _create_visuals() -> void:
 	add_child(sleeping_z)
 
 func _process(delta: float) -> void:
+	# Dynamic z_index based on Y position (matches agents and furniture)
+	z_index = int(position.y)
+
 	# Skip normal behavior when being dragged
 	if is_being_dragged:
 		return
@@ -228,15 +234,14 @@ func _input(event: InputEvent) -> void:
 				# Check if click is on cat (rough bounds)
 				var local_pos = get_local_mouse_position()
 				if local_pos.x > -20 and local_pos.x < 25 and local_pos.y > -15 and local_pos.y < 20:
-					is_being_dragged = true
-					drag_offset = position - get_global_mouse_position()
-					# Wake up if sleeping
-					if state == State.SLEEPING:
-						sleeping_z.visible = false
-						for eye in eyes:
-							eye.visible = true
-					state = State.IDLE
-					get_viewport().set_input_as_handled()  # Prevent other nodes from receiving this click
+					# Register as drag candidate for arbitration (highest z_index wins)
+					# Don't call set_input_as_handled() here - other overlapping items
+					# need to register too. The arbitration winner handles the event.
+					if office_manager and office_manager.has_method("register_drag_candidate"):
+						office_manager.register_drag_candidate(self, event)
+					else:
+						# Fallback: no arbitration, start directly
+						start_drag(event)
 			else:
 				if is_being_dragged:
 					is_being_dragged = false
@@ -258,6 +263,16 @@ func _input(event: InputEvent) -> void:
 		new_pos.y = clamp(new_pos.y, bounds_min.y, bounds_max.y)
 		position = new_pos
 		get_viewport().set_input_as_handled()
+
+func start_drag(_event: InputEvent) -> void:
+	is_being_dragged = true
+	drag_offset = position - get_global_mouse_position()
+	# Wake up if sleeping
+	if state == State.SLEEPING:
+		sleeping_z.visible = false
+		for eye in eyes:
+			eye.visible = true
+	state = State.IDLE
 
 func _process_idle(delta: float) -> void:
 	if state_timer >= next_action_time:

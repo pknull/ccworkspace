@@ -171,6 +171,10 @@ var office_obstacles: Array[Rect2] = []
 # Grid-based navigation system
 var navigation_grid: NavigationGrid = null
 
+# Drag arbitration - resolves overlapping click candidates
+var _drag_candidates: Array = []  # [{node: Node2D, event: InputEvent}]
+var _drag_arbitration_pending: bool = false
+
 # Event sources
 @onready var mcp_server: McpServer = $McpServer
 var transcript_watcher: Node = null
@@ -657,8 +661,8 @@ func _create_office_cat() -> void:
 	if office_cat.has_method("set_navigation_grid"):
 		office_cat.set_navigation_grid(navigation_grid)
 	office_cat.audio_manager = audio_manager
+	office_cat.office_manager = self
 	_update_cat_obstacles()
-	office_cat.z_index = OfficeConstants.Z_CAT
 	add_child(office_cat)
 	# Connect cat petted signal for MCP petting
 	if office_cat.has_signal("cat_petted"):
@@ -3234,3 +3238,35 @@ func _close_event_log() -> void:
 
 func _on_pause_quit() -> void:
 	_request_quit()
+
+# =============================================================================
+# DRAG ARBITRATION - resolves overlapping click candidates
+# =============================================================================
+
+func register_drag_candidate(node: Node2D, event: InputEvent) -> void:
+	_drag_candidates.append({"node": node, "event": event})
+	if not _drag_arbitration_pending:
+		_drag_arbitration_pending = true
+		call_deferred("_resolve_drag_candidates")
+
+func _resolve_drag_candidates() -> void:
+	_drag_arbitration_pending = false
+	if _drag_candidates.is_empty():
+		return
+
+	# Pick the candidate with the highest z_index (visually on top)
+	var best = _drag_candidates[0]
+	for i in range(1, _drag_candidates.size()):
+		var candidate = _drag_candidates[i]
+		if candidate.node.z_index > best.node.z_index:
+			best = candidate
+		elif candidate.node.z_index == best.node.z_index:
+			# Tie-break: higher scene tree index (added later = visually on top)
+			if candidate.node.get_index() > best.node.get_index():
+				best = candidate
+
+	_drag_candidates.clear()
+
+	# Start drag on the winner
+	if best.node.has_method("start_drag"):
+		best.node.start_drag(best.event)
