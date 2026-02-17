@@ -36,37 +36,16 @@ jobs:
           cd ${{ env.PROJECT_PATH }}
           godot --headless --import
 
-      - name: Create stub libraries for cross-platform export
+      - name: Download godot-xterm binaries
         run: |
           cd ${{ env.PROJECT_PATH }}
-          # godot-xterm only ships Linux x86_64 .so files.
-          # Create empty stubs so Godot export doesn't fail when copying
-          # missing platform binaries. The extension simply won't load on
-          # those platforms (terminal feature is Linux-only).
-          LIB_DIR=addons/godot_xterm/lib
-
-          # Windows stubs
-          for arch in x86_64 x86_32 arm64; do
-            touch "$LIB_DIR/libgodot-xterm.windows.template_debug.${arch}.dll"
-            touch "$LIB_DIR/libgodot-xterm.windows.template_release.${arch}.dll"
-          done
-
-          # Linux stubs (non-x86_64 architectures)
-          for arch in x86_32 arm64 arm32; do
-            touch -a "$LIB_DIR/libgodot-xterm.linux.template_debug.${arch}.so"
-            touch -a "$LIB_DIR/libgodot-xterm.linux.template_release.${arch}.so"
-          done
-
-          # macOS framework stubs (frameworks are directories)
-          for variant in debug release; do
-            dir="$LIB_DIR/libgodot-xterm.macos.template_${variant}.framework"
-            mkdir -p "$dir"
-            touch "$dir/libgodot-xterm.macos.template_${variant}"
-          done
-
-          # Web stubs
-          touch "$LIB_DIR/libgodot-xterm.web.template_debug.wasm32.wasm"
-          touch "$LIB_DIR/libgodot-xterm.web.template_release.wasm32.wasm"
+          # Download godot-xterm v4.0.2 release (binaries not stored in repo)
+          curl -L -o /tmp/godot-xterm.zip \
+            https://github.com/lihop/godot-xterm/releases/download/v4.0.2/godot-xterm-v4.0.2.zip
+          # Extract only the lib/ binaries we need
+          unzip -o /tmp/godot-xterm.zip "addons/godot_xterm/lib/*" -d .
+          rm /tmp/godot-xterm.zip
+          ls -la addons/godot_xterm/lib/
 
       - name: Export Linux
         run: |
