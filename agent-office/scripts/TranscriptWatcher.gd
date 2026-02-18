@@ -56,12 +56,6 @@ var pending_agents: Dictionary = {}  # tool_use_id -> {agent_type, description, 
 # Track ALL pending tool calls - any tool can require permission
 var pending_tools: Dictionary = {}  # tool_use_id -> {tool_name, session_path}
 
-func _get_home_dir() -> String:
-	var home = OS.get_environment("HOME")
-	if home.is_empty():
-		home = OS.get_environment("USERPROFILE")
-	return home
-
 func _ready() -> void:
 	_register_with_settings()
 	# Find and start watching all active sessions

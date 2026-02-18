@@ -844,7 +844,7 @@ void Terminal::_handle_key_input(Ref<InputEventKey> event) {
     }
 
     // Prevent focus changing to other inputs when pressing Tab or Arrow keys.
-    std::set<Key> tab_arrow_keys = { KEY_LEFT, KEY_UP, KEY_RIGHT, KEY_DOWN, KEY_TAB };
+    std::set<Key> tab_arrow_keys = { KEY_LEFT, KEY_UP, KEY_RIGHT, KEY_DOWN, KEY_TAB, KEY_BACKTAB };
     if (tab_arrow_keys.find(keycode) != tab_arrow_keys.end())
         accept_event();
 }
