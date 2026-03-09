@@ -391,6 +391,12 @@ func _build_tooltip_data() -> Dictionary:
 		var label = harness_label if not harness_label.is_empty() else harness_id
 		lines.append("Harness: " + label)
 
+	if not parent_id.is_empty() and parent_id != "main":
+		var parent_display = parent_id
+		if parent_id.begins_with("orch_"):
+			parent_display = "Orchestrator (" + parent_id.substr(5) + ")"
+		lines.append("Parent: " + parent_display)
+
 	# Show context usage for orchestrators
 	if agent_type == "orchestrator" and context_stress > 0:
 		lines.append("Context: %d%%" % int(context_stress * 100))

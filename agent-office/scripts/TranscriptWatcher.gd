@@ -685,7 +685,8 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 			"created_at": Time.get_unix_time_from_system()
 		}
 
-		print("[TranscriptWatcher] SPAWN: %s - %s (id: %s)" % [agent_type, description, tool_id.substr(0, 12)])
+		var parent_id = _get_orchestrator_id(session_path)
+		print("[TranscriptWatcher] SPAWN: %s - %s (id: %s, parent: %s)" % [agent_type, description, tool_id.substr(0, 12), parent_id])
 
 		var harness = _derive_harness(session_path)
 		call_deferred("_emit_event", {
@@ -693,7 +694,7 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 			"agent_id": tool_id.substr(0, 12),  # Use 12 chars to reduce collision risk
 			"agent_type": agent_type,
 			"description": description,
-			"parent_id": "main",
+			"parent_id": parent_id,
 			"timestamp": timestamp,
 			"session_path": session_path,
 			"harness_id": harness,
@@ -830,6 +831,17 @@ func _derive_session_id(file_path: String) -> String:
 		if not trimmed.is_empty():
 			return trimmed
 	return basename
+
+func _get_session_short_id(session_id: String) -> String:
+	if session_id.is_empty():
+		return "unknown"
+	if session_id.length() <= 8:
+		return session_id
+	return session_id.substr(session_id.length() - 8)
+
+func _get_orchestrator_id(session_path: String) -> String:
+	var session_id = _derive_session_id(session_path)
+	return "orch_" + _get_session_short_id(session_id)
 
 func _derive_harness(session_path: String) -> String:
 	# Determine harness from path (handles both / and \ separators)
