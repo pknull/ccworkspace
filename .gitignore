@@ -25,3 +25,4 @@ builds/
 .playwright-mcp/
 .mcp.json
 agent-office/.mcp.json
+agent-office/.venv/
