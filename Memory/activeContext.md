@@ -1,27 +1,35 @@
----
-version: "2.0"
-lastUpdated: "2026-07-28 07:00 UTC"
-lifecycle: "active"
-synthesizedFrom: "events"
----
+# Objective
 
-# Active Context
+Inference Inc. (repo ccworkspace, Godot 4 app under agent-office/): a
+desktop companion that watches local Claude Code, Codex CLI and Clawdbot
+transcript files and animates agents claiming desks and working, with
+office persistence, navigation, optional loopback MCP control, opt-in
+weather and gamification.
 
-## What Was Accomplished (2026-07-28 — Inference Inc. review and hardening)
-<!-- wwa-session: 019fa62a-aacc-7542-acde-4de0e326dd0d -->
+# State
 
-- Reconstructed the Godot application's intent and architecture: transcript-driven visualization for Claude Code, Codex CLI, and Clawdbot, with optional loopback MCP control, office persistence, navigation, weather, and gamification.
-- Ran independent logic, security, and edge-case reviews, applied the confirmed findings, and repeated slim adversarial passes until all three reviewers passed the final fixes.
-- Corrected transcript normalization and lifecycle behavior, including current Claude/Codex event shapes, partial writes, truncation and replacement detection, bounded retained state, fair scanning, session cleanup, and tool correlation.
-- Hardened MCP HTTP/JSON-RPC handling, furniture operations, loopback defaults, request limits, Unicode framing, client timeouts, and clean shutdown.
-- Corrected navigation obstacle reference counts, desk identity and placement behavior, atomic settings/roster/statistics/layout persistence, opt-in weather lookup, and achievement tracking.
-- Fixed native GodotXterm memory ownership and disabled unsafe cross-thread libuv access. Added a pinned Linux native build path for debug and release libraries.
-- Reworked release packaging and documentation: pinned CI dependencies, excluded private/development resources, included the required native library, and limited reviewed publication to Linux x86-64 until patched Windows/macOS libraries exist.
-- Added `agent-office/tests/test_regressions.gd` and verified the regression suite, Godot editor parse/import, native debug/release compilation, Linux export, packaged runtime startup, Python syntax, shell syntax, workflow YAML, and diff hygiene.
-- Launched the application in the desktop session as `Inference Inc. (DEBUG)` for visual inspection. The startup log showed active Codex/Claude session discovery and agent/tool activity; only the known early-theme-access warnings from GodotXterm remained.
+Verified 2026-09-16. The 2026-07-28 review-and-hardening pass, whose
+session save had committed only Memory, is now committed on master:
+transcript normalization and lifecycle fixes (current Claude/Codex event
+shapes, partial writes, truncation, bounded state, fair scanning), hardened
+loopback MCP JSON-RPC, atomic persistence, navigation obstacle counts,
+opt-in weather, GodotXterm native memory ownership fix with a pinned Linux
+native build (scripts/build_godot_xterm_linux.sh), pinned CI actions in the
+release workflow, and agent-office/tests/test_regressions.gd. Verified today
+under Godot 4.5.stable: REGRESSION TESTS PASSED; watcher.py and the stress
+script compile; build script and workflow parse. Reviewed publication is
+Linux x86-64 only until patched Windows/macOS xterm libraries exist. Memory
+is the v2 pair; the v1 files and event logs were retired 2026-09-16. Public
+repo pknull/ccworkspace.
 
-## Next Steps
+# Next
 
-1. Inspect the running Inference Inc. window and record any visual or interaction changes wanted.
-2. Review the application diff and commit it separately from this Memory checkpoint; the code changes remain intentionally uncommitted and unpushed.
-3. Before restoring Windows or macOS releases, build and test the patched GodotXterm native library on each target and re-enable those workflow artifacts only after runtime smoke tests.
+- Inspect the running app for any visual or interaction changes wanted
+  after the hardening pass (the 07-28 launch showed only the known
+  GodotXterm early-theme warnings).
+- Produce patched Windows/macOS godot-xterm libraries before widening the
+  release matrix.
+
+# Blockers
+
+- None.

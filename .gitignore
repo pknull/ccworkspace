@@ -26,3 +26,18 @@ builds/
 .mcp.json
 agent-office/.mcp.json
 agent-office/.venv/
+
+# Asha / harness local state (Memory v2 pair and .asha/config.json are tracked)
+.asha/*
+!.asha/config.json
+.claude/
+Work/
+Memory/events/
+tmp/
+# Asha Memory v2 recovery (managed)
+/Work/memory-migration/
+/Work/session-state/
+# Asha Control private context (managed)
+/.asha/control-task.json
+/.asha/result.json
+/.asha/outbox/

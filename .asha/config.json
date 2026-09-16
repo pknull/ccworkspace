@@ -1,5 +1,7 @@
 {
-  "version": "1.0.0",
-  "initialized": "2026-01-16T00:00:00+00:00",
-  "plugin": "asha@asha-marketplace"
+  "initialized": true,
+  "memory_version": 2,
+  "plugin": "asha@asha-marketplace",
+  "project_id": "683a5480-9ddd-492e-be21-f4d382ab8d9f",
+  "version": "1.0.0"
 }
