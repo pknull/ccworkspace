@@ -295,7 +295,7 @@ func show_config(watcher, mcp) -> void:
 	if mcp_server and mcp_server.has_method("get_mcp_config"):
 		var mcp_config = mcp_server.get_mcp_config()
 		if mcp_enabled:
-			mcp_enabled.button_pressed = bool(mcp_config.get("enabled", true))
+			mcp_enabled.button_pressed = bool(mcp_config.get("enabled", false))
 		if mcp_port_input:
 			mcp_port_input.text = str(mcp_config.get("port", ""))
 	_update_help_text()
@@ -327,7 +327,7 @@ func _apply_external_config() -> void:
 	if mcp_server and mcp_server.has_method("set_mcp_config"):
 		var base_mcp = mcp_server.get_mcp_config() if mcp_server.has_method("get_mcp_config") else {}
 		var mcp_port = _parse_port(mcp_port_input.text, int(base_mcp.get("port", 9999)))
-		var mcp_enabled_state = mcp_enabled.button_pressed if mcp_enabled else true
+		var mcp_enabled_state = mcp_enabled.button_pressed if mcp_enabled else false
 		mcp_server.set_mcp_config({
 			"enabled": mcp_enabled_state,
 			"port": mcp_port

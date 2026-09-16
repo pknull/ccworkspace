@@ -72,6 +72,7 @@ var cells: Array = []
 
 # Obstacle tracking - obstacle_id -> Array of Vector2i grid positions
 var obstacles: Dictionary = {}
+var blocked_cell_counts: Dictionary = {}
 
 # Work position tracking - grid_pos string -> desk reference
 var work_positions: Dictionary = {}
@@ -98,6 +99,7 @@ func _initialize_grid() -> void:
 
 func clear() -> void:
 	obstacles.clear()
+	blocked_cell_counts.clear()
 	work_positions.clear()
 	clear_path_cache()
 	_initialize_grid()
@@ -151,18 +153,27 @@ func is_walkable(grid_pos: Vector2i) -> bool:
 # =============================================================================
 
 func register_obstacle(world_rect: Rect2, obstacle_id: String) -> void:
-	# Convert world rect to grid cells and mark as blocked
+	if obstacles.has(obstacle_id):
+		unregister_obstacle(obstacle_id)
 	var grid_cells: Array[Vector2i] = _rect_to_grid_cells(world_rect)
 	obstacles[obstacle_id] = grid_cells
 	for cell in grid_cells:
-		set_cell_state(cell, CellState.BLOCKED)
+		var key = _grid_pos_to_key(cell)
+		blocked_cell_counts[key] = int(blocked_cell_counts.get(key, 0)) + 1
+		_refresh_cell_state(cell)
 	clear_path_cache()
 
 func unregister_obstacle(obstacle_id: String) -> void:
 	if obstacles.has(obstacle_id):
 		var grid_cells = obstacles[obstacle_id]
 		for cell in grid_cells:
-			set_cell_state(cell, CellState.WALKABLE)
+			var key = _grid_pos_to_key(cell)
+			var remaining = int(blocked_cell_counts.get(key, 0)) - 1
+			if remaining > 0:
+				blocked_cell_counts[key] = remaining
+			else:
+				blocked_cell_counts.erase(key)
+			_refresh_cell_state(cell)
 		obstacles.erase(obstacle_id)
 		clear_path_cache()
 
@@ -198,6 +209,14 @@ func get_all_obstacle_ids() -> Array[String]:
 	return ids
 
 func can_place_obstacle(world_rect: Rect2, exclude_obstacle_id: String = "") -> bool:
+	var grid_bounds = Rect2(
+		OfficeConstants.GRID_ORIGIN,
+		Vector2(OfficeConstants.GRID_WIDTH, OfficeConstants.GRID_HEIGHT) * OfficeConstants.CELL_SIZE
+	)
+	if world_rect.size.x <= 0.0 or world_rect.size.y <= 0.0:
+		return false
+	if not grid_bounds.encloses(world_rect):
+		return false
 	# Check if the given rect can be placed without overlapping other obstacles
 	var grid_cells = _rect_to_grid_cells(world_rect)
 
@@ -211,8 +230,10 @@ func can_place_obstacle(world_rect: Rect2, exclude_obstacle_id: String = "") -> 
 			return false  # Out of bounds
 		var state = get_cell_state(cell)
 		if state == CellState.BLOCKED:
-			# Check if this cell is from the excluded obstacle
-			if cell not in excluded_cells:
+			# Excluding one moving obstacle removes only its own contribution.
+			# A second obstacle sharing the cell must still block placement.
+			var excluded_contribution = 1 if cell in excluded_cells else 0
+			if int(blocked_cell_counts.get(_grid_pos_to_key(cell), 0)) - excluded_contribution > 0:
 				return false  # Blocked by another obstacle
 	return true
 
@@ -265,7 +286,7 @@ func find_nearest_valid_position(world_rect: Rect2, exclude_obstacle_id: String 
 func _rect_to_grid_cells(world_rect: Rect2) -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
 	var top_left = world_to_grid(world_rect.position)
-	var bottom_right = world_to_grid(world_rect.position + world_rect.size)
+	var bottom_right = world_to_grid(world_rect.end - Vector2(0.001, 0.001))
 
 	for x in range(top_left.x, bottom_right.x + 1):
 		for y in range(top_left.y, bottom_right.y + 1):
@@ -282,7 +303,7 @@ func register_work_position(world_pos: Vector2, desk: Node2D) -> void:
 	var grid_pos = world_to_grid(world_pos)
 	var key = _grid_pos_to_key(grid_pos)
 	work_positions[key] = desk
-	set_cell_state(grid_pos, CellState.WORK_POSITION)
+	_refresh_cell_state(grid_pos)
 
 func unregister_work_position(desk: Node2D) -> void:
 	var to_remove: Array[String] = []
@@ -291,8 +312,19 @@ func unregister_work_position(desk: Node2D) -> void:
 			to_remove.append(key)
 	for key in to_remove:
 		var grid_pos = _key_to_grid_pos(key)
-		set_cell_state(grid_pos, CellState.WALKABLE)
 		work_positions.erase(key)
+		_refresh_cell_state(grid_pos)
+
+func _refresh_cell_state(grid_pos: Vector2i) -> void:
+	if not is_valid_grid_pos(grid_pos):
+		return
+	var key = _grid_pos_to_key(grid_pos)
+	if int(blocked_cell_counts.get(key, 0)) > 0:
+		set_cell_state(grid_pos, CellState.BLOCKED)
+	elif work_positions.has(key):
+		set_cell_state(grid_pos, CellState.WORK_POSITION)
+	else:
+		set_cell_state(grid_pos, CellState.WALKABLE)
 
 func get_desk_for_work_position(world_pos: Vector2) -> Node2D:
 	var grid_pos = world_to_grid(world_pos)
@@ -334,14 +366,18 @@ func find_path(start_world: Vector2, end_world: Vector2) -> Array[Vector2]:
 	end_grid.x = clampi(end_grid.x, 0, OfficeConstants.GRID_WIDTH - 1)
 	end_grid.y = clampi(end_grid.y, 0, OfficeConstants.GRID_HEIGHT - 1)
 
+	var requested_end_grid = end_grid
 	# If start or end is blocked, find nearest walkable cell
 	if not is_walkable(start_grid):
 		start_grid = _find_nearest_walkable(start_grid)
 	if not is_walkable(end_grid):
 		end_grid = _find_nearest_walkable(end_grid)
+	var resolved_end_world = end_world
+	if end_grid != requested_end_grid:
+		resolved_end_world = grid_to_world_center(end_grid)
 
 	if start_grid == end_grid:
-		return [end_world]
+		return [resolved_end_world]
 
 	var cache_key = _path_cache_key(start_grid, end_grid)
 	if path_cache.has(cache_key):
@@ -349,7 +385,7 @@ func find_path(start_world: Vector2, end_world: Vector2) -> Array[Vector2]:
 		var cached_path: Array = path_cache[cache_key]
 		if cached_path.is_empty():
 			return []
-		return _smooth_path(cached_path, end_world)
+		return _smooth_path(cached_path, resolved_end_world)
 
 	var grid_path = _astar_search(start_grid, end_grid)
 	if grid_path.is_empty():
@@ -362,7 +398,7 @@ func find_path(start_world: Vector2, end_world: Vector2) -> Array[Vector2]:
 	path_cache[cache_key] = grid_path
 	_touch_path_cache(cache_key)
 
-	var world_path = _smooth_path(grid_path, end_world)
+	var world_path = _smooth_path(grid_path, resolved_end_world)
 	return world_path
 
 func _astar_search(start: Vector2i, goal: Vector2i) -> Array[Vector2i]:

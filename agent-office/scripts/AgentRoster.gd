@@ -83,8 +83,15 @@ func load_roster() -> void:
 
 	next_id = data.get("next_id", 1)
 	var agent_ids = data.get("agents", [])
+	if not agent_ids is Array:
+		push_warning("[AgentRoster] Invalid agents list in roster index")
+		agent_ids = []
+	var saved_name_indices = data.get("used_name_indices", [])
+	if not saved_name_indices is Array:
+		push_warning("[AgentRoster] Invalid used_name_indices in roster index")
+		saved_name_indices = []
 	used_name_indices = []
-	for idx in data.get("used_name_indices", []):
+	for idx in saved_name_indices:
 		used_name_indices.append(int(idx))
 
 	# Load each agent profile
@@ -119,6 +126,9 @@ func _load_agent_profile(agent_id: int) -> AgentProfile:
 	if error != OK:
 		return null
 
+	if not json.data is Dictionary:
+		push_warning("[AgentRoster] Invalid profile format: %s" % path)
+		return null
 	return AgentProfile.from_dict(json.data)
 
 func _cleanup_orphaned_relationships() -> void:
@@ -172,10 +182,8 @@ func save_roster() -> void:
 	}
 
 	var index_json = JSON.stringify(index_data, "\t")
-	var file = FileAccess.open(INDEX_FILE, FileAccess.WRITE)
-	if file:
-		file.store_string(index_json)
-		file.close()
+	if not _write_text_atomic(INDEX_FILE, index_json):
+		push_warning("[AgentRoster] Failed to save roster index")
 
 	# Save each agent profile
 	for profile in agents.values():
@@ -187,10 +195,29 @@ func save_profile(profile: AgentProfile) -> void:
 	var path = "%s/agent_%03d.json" % [STABLE_DIR, profile.id]
 	var json_string = JSON.stringify(profile.to_dict(), "\t")
 
-	var file = FileAccess.open(path, FileAccess.WRITE)
-	if file:
-		file.store_string(json_string)
-		file.close()
+	if not _write_text_atomic(path, json_string):
+		push_warning("[AgentRoster] Failed to save profile %d" % profile.id)
+
+func _write_text_atomic(path: String, contents: String) -> bool:
+	var temp_path = path + ".tmp"
+	var file = FileAccess.open(temp_path, FileAccess.WRITE)
+	if not file:
+		return false
+	file.store_string(contents)
+	file.flush()
+	var write_error = file.get_error()
+	file.close()
+	if write_error != OK:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(temp_path))
+		return false
+	var rename_error = DirAccess.rename_absolute(
+		ProjectSettings.globalize_path(temp_path),
+		ProjectSettings.globalize_path(path)
+	)
+	if rename_error != OK:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(temp_path))
+		return false
+	return true
 
 # =============================================================================
 # AGENT HIRING & ASSIGNMENT

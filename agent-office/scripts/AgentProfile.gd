@@ -254,6 +254,8 @@ static func from_dict(data: Dictionary) -> AgentProfile:
 	profile.last_seen = data.get("last_seen", profile.hired_at)
 
 	var appearance = data.get("appearance", {})
+	if not appearance is Dictionary:
+		appearance = {}
 	profile.skin_color_index = appearance.get("skin_color_index", 0)
 
 	if appearance.has("top"):
@@ -280,19 +282,25 @@ static func from_dict(data: Dictionary) -> AgentProfile:
 		profile.hair_style_id = AppearanceRegistry.hair_style_id_from_index(hair_style_index)
 
 	var progression = data.get("progression", {})
+	if not progression is Dictionary:
+		progression = {}
 	profile.xp = progression.get("xp", 0)
 	profile.level = progression.get("level", 1)
 
 	var stats = data.get("stats", {})
+	if not stats is Dictionary:
+		stats = {}
 	profile.tasks_completed = stats.get("tasks_completed", 0)
 	profile.total_work_time_seconds = stats.get("total_work_time_seconds", 0.0)
 	profile.orchestrator_sessions = stats.get("orchestrator_sessions", 0)
 
-	profile.skills = data.get("skills", {})
-	profile.tools = data.get("tools", {})
+	profile.skills = data.get("skills", {}) if data.get("skills", {}) is Dictionary else {}
+	profile.tools = data.get("tools", {}) if data.get("tools", {}) is Dictionary else {}
 
 	var relationships = data.get("relationships", {})
-	profile.worked_with = relationships.get("worked_with", {})
-	profile.chatted_with = relationships.get("chatted_with", {})
+	if not relationships is Dictionary:
+		relationships = {}
+	profile.worked_with = relationships.get("worked_with", {}) if relationships.get("worked_with", {}) is Dictionary else {}
+	profile.chatted_with = relationships.get("chatted_with", {}) if relationships.get("chatted_with", {}) is Dictionary else {}
 
 	return profile

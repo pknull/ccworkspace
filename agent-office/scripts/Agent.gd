@@ -149,6 +149,7 @@ const STATE_TIMEOUTS: Dictionary = {
 	State.CHATTING: 20.0,
 	State.WANDERING: 25.0,
 	State.FURNITURE_TOUR: 45.0,
+	State.MEETING: 600.0,
 	State.WORKING: 600.0,  # 10 minutes - dismiss if session dies without completion
 }
 
@@ -570,6 +571,13 @@ func _reset_stuck_state() -> void:
 			result = "Session timed out"
 			if visuals and visuals.status_label:
 				visuals.status_label.text = "Session lost..."
+			_start_leaving()
+		State.MEETING:
+			_log_debug_event("STATE", "Meeting timed out - treating as abandoned")
+			result = "Session timed out"
+			is_in_meeting = false
+			if is_instance_valid(office_manager) and office_manager.has_method("_release_meeting_spot"):
+				office_manager._release_meeting_spot(agent_id)
 			_start_leaving()
 		State.CHATTING:
 			end_chat()

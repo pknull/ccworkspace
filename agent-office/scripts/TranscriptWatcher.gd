@@ -15,6 +15,22 @@ const SCAN_INTERVAL = 1.0  # seconds - how often to scan for new sessions (fast 
 const ACTIVE_THRESHOLD = 300  # seconds - consider sessions active if modified within this time (longer than SESSION_INACTIVE_TIMEOUT)
 const PENDING_AGENT_TIMEOUT = 1800  # seconds - consider pending agents stale after this long without updates
 const WATCHER_CONFIG_FILE = "user://watchers.json"
+const MAX_BYTES_PER_POLL = 1048576
+const MAX_LINE_BYTES = 262144
+const MAX_CONTEXT_ENTRIES = 5000
+const MAX_PENDING_ENTRIES = 10000
+const MAX_WATCHED_SESSIONS = 256
+const MAX_CODEX_SUBAGENTS = 1000
+const MAX_BYTES_PER_POLL_CYCLE = 4194304
+const MAX_POLL_MSEC = 50
+const MAX_SCAN_ENTRIES = 5000
+const MAX_SCAN_MSEC = 200
+const REPLACEMENT_CHECKPOINT_BYTES = 128
+const REPLACEMENT_HASH_BLOCK_BYTES = 65536
+const MAX_CORRELATION_ID_CHARS = 256
+const MAX_TYPE_CHARS = 128
+const MAX_DESCRIPTION_CHARS = 2048
+const MAX_STORED_PATH_CHARS = 4096
 
 # Context window settings
 const CONTEXT_WINDOW_SECONDS = 600.0  # 10 minutes - entries older than this are pruned
@@ -55,6 +71,16 @@ var pending_agents: Dictionary = {}  # tool_use_id -> {agent_type, description, 
 
 # Track ALL pending tool calls - any tool can require permission
 var pending_tools: Dictionary = {}  # tool_use_id -> {tool_name, session_path}
+var codex_subagents: Dictionary = {}  # thread id -> normalized agent metadata
+var scan_entries: int = 0
+var scan_deadline_msec: int = 0
+var warned_missing_paths: Dictionary = {}
+var poll_cursor: int = 0
+var poll_bytes_remaining: int = -1
+var poll_deadline_msec: int = 0
+var session_limit_warned: bool = false
+var scan_directory_cursors: Dictionary = {}
+var verification_session_path: String = ""
 
 func _ready() -> void:
 	_register_with_settings()
@@ -86,13 +112,14 @@ func _register_with_settings() -> void:
 	var v_clawdbot_en = registry.get_setting("watchers", "clawdbot_enabled")
 	harness_enabled["clawdbot"] = v_clawdbot_en if v_clawdbot_en != null else true
 	var v_claude_path = registry.get_setting("watchers", "claude_path")
-	harness_paths["claude"] = v_claude_path if v_claude_path != null else ""
+	harness_paths["claude"] = _validated_custom_path(str(v_claude_path) if v_claude_path != null else "")
 	var v_codex_path = registry.get_setting("watchers", "codex_path")
-	harness_paths["codex"] = v_codex_path if v_codex_path != null else ""
+	harness_paths["codex"] = _validated_custom_path(str(v_codex_path) if v_codex_path != null else "")
 	var v_clawdbot_path = registry.get_setting("watchers", "clawdbot_path")
-	harness_paths["clawdbot"] = v_clawdbot_path if v_clawdbot_path != null else ""
+	harness_paths["clawdbot"] = _validated_custom_path(str(v_clawdbot_path) if v_clawdbot_path != null else "")
 
 func _on_setting_changed(key: String, value: Variant) -> void:
+	var harness = key.trim_suffix("_enabled").trim_suffix("_path")
 	match key:
 		"claude_enabled":
 			harness_enabled["claude"] = bool(value)
@@ -101,11 +128,14 @@ func _on_setting_changed(key: String, value: Variant) -> void:
 		"clawdbot_enabled":
 			harness_enabled["clawdbot"] = bool(value)
 		"claude_path":
-			harness_paths["claude"] = str(value) if value != null else ""
+			harness_paths["claude"] = _validated_custom_path(str(value) if value != null else "")
 		"codex_path":
-			harness_paths["codex"] = str(value) if value != null else ""
+			harness_paths["codex"] = _validated_custom_path(str(value) if value != null else "")
 		"clawdbot_path":
-			harness_paths["clawdbot"] = str(value) if value != null else ""
+			harness_paths["clawdbot"] = _validated_custom_path(str(value) if value != null else "")
+	if harness_enabled.has(harness):
+		_stop_watching_harness(harness)
+		scan_for_sessions()
 
 func _load_config() -> void:
 	if not FileAccess.file_exists(WATCHER_CONFIG_FILE):
@@ -169,19 +199,28 @@ func get_harness_config() -> Dictionary:
 		}
 	return result
 
-func set_harness_enabled(harness: String, enabled: bool) -> void:
+func set_harness_enabled(harness: String, enabled: bool) -> bool:
+	if not harness_enabled.has(harness):
+		return false
 	var registry = get_node_or_null("/root/SettingsRegistry")
 	if registry:
-		registry.set_setting("watchers", harness + "_enabled", enabled)
+		return registry.set_setting("watchers", harness + "_enabled", enabled)
 	else:
 		harness_enabled[harness] = enabled
+		return true
 
-func set_harness_path(harness: String, path: String) -> void:
+func set_harness_path(harness: String, path: String) -> bool:
+	if not harness_paths.has(harness):
+		return false
+	var validated = _validated_custom_path(path)
+	if not path.strip_edges().is_empty() and validated.is_empty():
+		return false
 	var registry = get_node_or_null("/root/SettingsRegistry")
 	if registry:
-		registry.set_setting("watchers", harness + "_path", path)
+		return registry.set_setting("watchers", harness + "_path", validated)
 	else:
-		harness_paths[harness] = path
+		harness_paths[harness] = validated
+		return true
 
 func get_harness_summary() -> Dictionary:
 	var summary: Dictionary = {}
@@ -252,12 +291,19 @@ func scan_for_sessions() -> void:
 	var current_time = Time.get_unix_time_from_system()
 
 	if harness_enabled.get("claude", true):
+		_reset_scan_budget()
 		_scan_claude_sessions(current_time)
 	if harness_enabled.get("codex", true):
+		_reset_scan_budget()
 		_scan_codex_sessions(current_time)
 	if harness_enabled.get("clawdbot", true):
+		_reset_scan_budget()
 		_scan_clawdbot_sessions(current_time)
 	_remove_stale_sessions(current_time)
+
+func _reset_scan_budget() -> void:
+	scan_entries = 0
+	scan_deadline_msec = Time.get_ticks_msec() + MAX_SCAN_MSEC / 3
 
 func _scan_claude_sessions(current_time: float) -> void:
 	var custom_path = harness_paths.get("claude", "")
@@ -268,42 +314,20 @@ func _scan_claude_sessions(current_time: float) -> void:
 		var home_dir = _get_home_dir()
 		projects_dir = home_dir + CLAUDE_PROJECTS_DIR
 
-	var dir = DirAccess.open(projects_dir)
-	if not dir:
-		push_warning("[TranscriptWatcher] Cannot open: %s" % projects_dir)
+	if not DirAccess.dir_exists_absolute(projects_dir):
+		if not warned_missing_paths.has(projects_dir):
+			warned_missing_paths[projects_dir] = true
+			push_warning("[TranscriptWatcher] Cannot open: %s" % projects_dir)
 		return
-
-	# Search all project subdirectories
-	dir.list_dir_begin()
-	var subdir_name = dir.get_next()
-	while subdir_name != "":
-		if dir.current_is_dir() and not subdir_name.begins_with("."):
-			var subdir_path = projects_dir + "/" + subdir_name
-			var subdir = DirAccess.open(subdir_path)
-			if subdir:
-				subdir.list_dir_begin()
-				var file_name = subdir.get_next()
-				while file_name != "":
-					if file_name.ends_with(".jsonl"):
-						var full_path = subdir_path + "/" + file_name
-						var mod_time = FileAccess.get_modified_time(full_path)
-
-						# Only watch recently active sessions
-						if current_time - mod_time < ACTIVE_THRESHOLD:
-							if not watched_sessions.has(full_path):
-								# New session - start watching from end
-								start_watching_session(full_path)
-					file_name = subdir.get_next()
-				subdir.list_dir_end()
-		subdir_name = dir.get_next()
-	dir.list_dir_end()
+	warned_missing_paths.erase(projects_dir)
+	_scan_jsonl_recursive(projects_dir, current_time, 1, "claude")
 
 func _scan_codex_sessions(current_time: float) -> void:
 	var sessions_dir = _get_codex_sessions_dir()
 	var dir = DirAccess.open(sessions_dir)
 	if not dir:
 		return
-	_scan_jsonl_recursive(sessions_dir, current_time, CODEX_MAX_SCAN_DEPTH)
+	_scan_jsonl_recursive(sessions_dir, current_time, CODEX_MAX_SCAN_DEPTH, "codex")
 
 func _scan_clawdbot_sessions(current_time: float) -> void:
 	var sessions_dir = _get_clawdbot_sessions_dir()
@@ -311,30 +335,45 @@ func _scan_clawdbot_sessions(current_time: float) -> void:
 	if not dir:
 		return
 	# We only want to scan agent session folders under ~/.clawdbot/agents
-	_scan_jsonl_recursive(sessions_dir, current_time, CLAWDBOT_MAX_SCAN_DEPTH)
+	_scan_jsonl_recursive(sessions_dir, current_time, CLAWDBOT_MAX_SCAN_DEPTH, "clawdbot")
 
-func _scan_jsonl_recursive(dir_path: String, current_time: float, depth: int) -> void:
-	if depth < 0:
+func _scan_jsonl_recursive(dir_path: String, current_time: float, depth: int, harness: String) -> void:
+	if depth < 0 or scan_entries > MAX_SCAN_ENTRIES or Time.get_ticks_msec() >= scan_deadline_msec:
 		return
 	var dir = DirAccess.open(dir_path)
 	if not dir:
 		return
-	dir.list_dir_begin()
-	var entry_name = dir.get_next()
-	while entry_name != "":
+	var entries: Array = []
+	for directory_name in dir.get_directories():
+		if not directory_name.begins_with("."):
+			entries.append({"name": directory_name, "directory": true})
+	for file_name in dir.get_files():
+		if not file_name.begins_with("."):
+			entries.append({"name": file_name, "directory": false})
+	if entries.is_empty():
+		scan_directory_cursors.erase(dir_path)
+		return
+	var cursor = int(scan_directory_cursors.get(dir_path, 0)) % entries.size()
+	var visited = 0
+	while visited < entries.size():
+		scan_entries += 1
+		if scan_entries > MAX_SCAN_ENTRIES or Time.get_ticks_msec() >= scan_deadline_msec:
+			break
+		var entry: Dictionary = entries[(cursor + visited) % entries.size()]
+		var entry_name = str(entry["name"])
 		if entry_name.begins_with("."):
-			entry_name = dir.get_next()
+			visited += 1
 			continue
 		var entry_path = dir_path + "/" + entry_name
-		if dir.current_is_dir():
-			_scan_jsonl_recursive(entry_path, current_time, depth - 1)
+		if bool(entry["directory"]):
+			_scan_jsonl_recursive(entry_path, current_time, depth - 1, harness)
 		elif entry_name.ends_with(".jsonl"):
 			var mod_time = FileAccess.get_modified_time(entry_path)
 			if current_time - mod_time < ACTIVE_THRESHOLD:
 				if not watched_sessions.has(entry_path):
-					start_watching_session(entry_path)
-		entry_name = dir.get_next()
-	dir.list_dir_end()
+					start_watching_session(entry_path, harness)
+		visited += 1
+	scan_directory_cursors[dir_path] = (cursor + maxi(1, visited)) % entries.size()
 
 func _get_codex_sessions_dir() -> String:
 	var custom_path = harness_paths.get("codex", "")
@@ -369,17 +408,30 @@ func _remove_stale_sessions(current_time: float) -> void:
 		var harness = _derive_harness(path)
 		_cleanup_pending_for_session(path)
 		watched_sessions.erase(path)
+		session_context_entries.erase(path)
 		# Defer session_end emit to avoid synchronous cascade that can cause X11 threading issues
 		call_deferred("_emit_session_end", session_id, path, harness)
 
-func start_watching_session(file_path: String) -> void:
+func start_watching_session(file_path: String, harness: String = "") -> void:
+	if watched_sessions.size() >= MAX_WATCHED_SESSIONS:
+		if not session_limit_warned:
+			session_limit_warned = true
+			push_warning("[TranscriptWatcher] Session watch limit reached (%d)" % MAX_WATCHED_SESSIONS)
+		return
+	session_limit_warned = false
 	# Open file and seek to end
 	var file = FileAccess.open(file_path, FileAccess.READ)
 	if file:
 		file.seek_end(0)
 		watched_sessions[file_path] = {
 			"position": file.get_position(),
-			"last_modified": FileAccess.get_modified_time(file_path)
+			"last_modified": FileAccess.get_modified_time(file_path),
+			"harness_id": harness if not harness.is_empty() else _derive_harness(file_path),
+			"line_buffer": PackedByteArray(),
+			"discarding_line": false,
+			"checkpoint": _read_checkpoint(file, file.get_position()),
+			"block_hashes": _hash_blocks(file, file.get_position()),
+			"verify_block": 0
 		}
 		file.close()
 		print("[TranscriptWatcher] Watching: %s" % file_path.get_file())
@@ -434,39 +486,112 @@ func _emit_session_end(session_id: String, session_path: String, harness: String
 	})
 
 func check_all_sessions() -> void:
-	for file_path in watched_sessions.keys():
-		check_session_for_entries(file_path)
+	var paths = watched_sessions.keys()
+	if paths.is_empty():
+		return
+	poll_bytes_remaining = MAX_BYTES_PER_POLL_CYCLE
+	poll_deadline_msec = Time.get_ticks_msec() + MAX_POLL_MSEC
+	verification_session_path = str(paths[poll_cursor % paths.size()])
+	var visited = 0
+	while visited < paths.size() and poll_bytes_remaining > 0 and Time.get_ticks_msec() < poll_deadline_msec:
+		var index = (poll_cursor + visited) % paths.size()
+		check_session_for_entries(str(paths[index]))
+		visited += 1
+	var cursor_advance = 1 if visited >= paths.size() else maxi(1, visited)
+	poll_cursor = (poll_cursor + cursor_advance) % paths.size()
+	poll_bytes_remaining = -1
+	verification_session_path = ""
 
 func check_session_for_entries(file_path: String) -> void:
+	if not watched_sessions.has(file_path) or not FileAccess.file_exists(file_path):
+		return
 	var session = watched_sessions[file_path]
-
-	# Check if file was modified since last check - avoid unnecessary file opens
-	var current_mod_time = FileAccess.get_modified_time(file_path)
-	if current_mod_time == session.get("last_modified", 0):
-		return  # File hasn't changed, skip opening it
 
 	var file = FileAccess.open(file_path, FileAccess.READ)
 	if not file:
 		return
+	var file_length = file.get_length()
+	var position = int(session.get("position", 0))
+	var modified_time = FileAccess.get_modified_time(file_path)
+	var replaced = false
+	if position > 0 and file_length >= position:
+		var expected: PackedByteArray = session.get("checkpoint", PackedByteArray())
+		if not expected.is_empty() and _read_checkpoint(file, position) != expected:
+			replaced = true
+		# Verify one earlier block per poll cycle, independent of timestamp
+		# resolution. Round-robin block checks eventually detect arbitrary
+		# in-place or same-size rewrites without rehashing every transcript.
+		var should_verify = verification_session_path.is_empty() or verification_session_path == file_path
+		var block_hashes: Array = session.get("block_hashes", [])
+		if not replaced and should_verify and not block_hashes.is_empty():
+			var block_index = int(session.get("verify_block", 0)) % block_hashes.size()
+			var block_start = block_index * REPLACEMENT_HASH_BLOCK_BYTES
+			var block_end = mini(position, block_start + REPLACEMENT_HASH_BLOCK_BYTES)
+			if block_start < block_end:
+				var actual_hash = _hash_range(file, block_start, block_end)
+				if actual_hash != str(block_hashes[block_index]):
+					replaced = true
+			watched_sessions[file_path]["verify_block"] = (block_index + 1) % block_hashes.size()
+	if file_length < position or replaced:
+		position = 0
+		watched_sessions[file_path]["line_buffer"] = PackedByteArray()
+		watched_sessions[file_path]["discarding_line"] = false
+		watched_sessions[file_path]["checkpoint"] = PackedByteArray()
+		watched_sessions[file_path]["block_hashes"] = []
+		watched_sessions[file_path]["verify_block"] = 0
+	if file_length <= position:
+		watched_sessions[file_path]["last_modified"] = modified_time
+		file.close()
+		return
+	file.seek(position)
+	var to_read = mini(file_length - position, MAX_BYTES_PER_POLL)
+	if poll_bytes_remaining >= 0:
+		to_read = mini(to_read, poll_bytes_remaining)
+	if to_read <= 0:
+		file.close()
+		return
+	var read_start_position = position
+	var incoming = file.get_buffer(to_read)
+	if poll_bytes_remaining >= 0:
+		poll_bytes_remaining -= incoming.size()
+	watched_sessions[file_path]["position"] = file.get_position()
+	watched_sessions[file_path]["last_modified"] = modified_time
+	watched_sessions[file_path]["block_hashes"] = _update_block_hashes(
+		file,
+		read_start_position,
+		file.get_position(),
+		watched_sessions[file_path].get("block_hashes", [])
+	)
+	watched_sessions[file_path]["checkpoint"] = _read_checkpoint(file, file.get_position())
+	file.close()
 
-	# Update last modified time
-	watched_sessions[file_path].last_modified = current_mod_time
-
-	# Seek to where we left off
-	file.seek(session.position)
-
-	# Read new lines
+	var buffer: PackedByteArray = watched_sessions[file_path].get("line_buffer", PackedByteArray())
+	buffer.append_array(incoming)
 	var had_content = false
-	while not file.eof_reached():
-		var line = file.get_line()
+	while true:
+		var newline = buffer.find(10)
+		if newline < 0:
+			break
+		var line_bytes = buffer.slice(0, newline)
+		buffer = buffer.slice(newline + 1)
+		if bool(watched_sessions[file_path].get("discarding_line", false)):
+			watched_sessions[file_path]["discarding_line"] = false
+			continue
+		if line_bytes.size() > MAX_LINE_BYTES:
+			push_warning("[TranscriptWatcher] Skipping oversized transcript record in %s" % file_path.get_file())
+			continue
+		if not line_bytes.is_empty() and line_bytes[line_bytes.size() - 1] == 13:
+			line_bytes.resize(line_bytes.size() - 1)
+		var line = line_bytes.get_string_from_utf8()
 		if line.strip_edges().is_empty():
 			continue
 		had_content = true
 		process_line(line, file_path)
-
-	# Update position
-	watched_sessions[file_path].position = file.get_position()
-	file.close()
+	if buffer.size() > MAX_LINE_BYTES:
+		buffer.clear()
+		watched_sessions[file_path]["discarding_line"] = true
+		push_warning("[TranscriptWatcher] Discarding oversized unterminated record in %s" % file_path.get_file())
+	watched_sessions[file_path]["line_buffer"] = buffer
 
 	# Emit session_activity so OfficeManager can respawn missing orchestrators
 	if had_content:
@@ -481,6 +606,42 @@ func check_session_for_entries(file_path: String) -> void:
 			"timestamp": Time.get_datetime_string_from_system()
 		})
 
+func _read_checkpoint(file: FileAccess, position: int) -> PackedByteArray:
+	if position <= 0:
+		return PackedByteArray()
+	var start = maxi(0, position - REPLACEMENT_CHECKPOINT_BYTES)
+	file.seek(start)
+	return file.get_buffer(position - start)
+
+func _hash_range(file: FileAccess, start: int, end: int) -> String:
+	file.seek(start)
+	var context = HashingContext.new()
+	context.start(HashingContext.HASH_SHA256)
+	context.update(file.get_buffer(end - start))
+	return context.finish().hex_encode()
+
+func _hash_blocks(file: FileAccess, end: int) -> Array:
+	var hashes: Array = []
+	var offset = 0
+	while offset < end:
+		var block_end = mini(end, offset + REPLACEMENT_HASH_BLOCK_BYTES)
+		hashes.append(_hash_range(file, offset, block_end))
+		offset = block_end
+	file.seek(end)
+	return hashes
+
+func _update_block_hashes(file: FileAccess, start: int, end: int, existing: Array) -> Array:
+	var hashes = existing.duplicate()
+	var start_block: int = start / REPLACEMENT_HASH_BLOCK_BYTES
+	hashes.resize(start_block)
+	var offset = start_block * REPLACEMENT_HASH_BLOCK_BYTES
+	while offset < end:
+		var block_end = mini(end, offset + REPLACEMENT_HASH_BLOCK_BYTES)
+		hashes.append(_hash_range(file, offset, block_end))
+		offset = block_end
+	file.seek(end)
+	return hashes
+
 func process_line(line: String, session_path: String = "") -> void:
 	var json = JSON.new()
 	var error = json.parse(line)
@@ -494,13 +655,15 @@ func process_line(line: String, session_path: String = "") -> void:
 
 	# Track context usage with sliding window (approximate bytes for context meter)
 	if not session_path.is_empty():
-		var line_bytes = line.length()
+		var line_bytes = line.to_utf8_buffer().size()
 		if not session_context_entries.has(session_path):
 			session_context_entries[session_path] = []
 		session_context_entries[session_path].append({
 			"time": Time.get_unix_time_from_system(),
 			"size": line_bytes
 		})
+		if session_context_entries[session_path].size() > MAX_CONTEXT_ENTRIES:
+			session_context_entries[session_path] = session_context_entries[session_path].slice(-MAX_CONTEXT_ENTRIES)
 		call_deferred("_emit_context_updated", session_path, get_context_percent(session_path))
 
 	if _process_codex_entry(entry, session_path):
@@ -566,10 +729,72 @@ func _process_codex_entry(entry: Dictionary, session_path: String) -> bool:
 			_process_codex_tool_use(payload, entry, session_path)
 		elif payload_type == "function_call_output":
 			_process_codex_tool_result(payload, entry)
+		elif payload_type == "agent_message":
+			_process_codex_agent_message(payload, entry)
 		return true
-	if entry_type == "session_meta" or entry_type == "event_msg" or entry_type == "turn_context":
+	if entry_type == "event_msg":
+		var payload = entry.get("payload", {})
+		if payload is Dictionary and payload.get("type", "") == "sub_agent_activity":
+			_process_codex_subagent_activity(payload, entry, session_path)
+		return true
+	if entry_type == "session_meta" or entry_type == "turn_context":
 		return true
 	return false
+
+func _process_codex_subagent_activity(payload: Dictionary, entry: Dictionary, session_path: String) -> void:
+	var thread_id = str(payload.get("agent_thread_id", "")).strip_edges()
+	if thread_id.is_empty() or thread_id.length() > MAX_CORRELATION_ID_CHARS:
+		return
+	var agent_path = str(payload.get("agent_path", "")).left(MAX_DESCRIPTION_CHARS)
+	var agent_id = thread_id.substr(0, 12)
+	var kind = str(payload.get("kind", ""))
+	if kind == "started":
+		if codex_subagents.size() >= MAX_CODEX_SUBAGENTS and not codex_subagents.has(thread_id):
+			push_warning("[TranscriptWatcher] Codex subagent limit reached (%d)" % MAX_CODEX_SUBAGENTS)
+			return
+		var agent_type = agent_path.get_file()
+		if agent_type.is_empty():
+			agent_type = "default"
+		codex_subagents[thread_id] = {
+			"agent_id": agent_id,
+			"agent_path": agent_path,
+			"session_path": session_path,
+			"created_at": Time.get_unix_time_from_system()
+		}
+		call_deferred("_emit_event", {
+			"event": "agent_spawn", "agent_id": agent_id, "agent_type": agent_type,
+			"description": agent_path, "parent_id": _get_orchestrator_id(session_path),
+			"session_path": session_path, "harness_id": "codex",
+			"harness_label": "Codex", "timestamp": entry.get("timestamp", "")
+		})
+	elif kind == "interrupted" and codex_subagents.has(thread_id):
+		codex_subagents.erase(thread_id)
+		call_deferred("_emit_event", {
+			"event": "agent_complete", "agent_id": agent_id, "success": "false",
+			"result": "Interrupted", "timestamp": entry.get("timestamp", "")
+		})
+
+func _process_codex_agent_message(payload: Dictionary, entry: Dictionary) -> void:
+	var author = str(payload.get("author", ""))
+	if not author.begins_with("/"):
+		return
+	var result_text = ""
+	for block in payload.get("content", []):
+		if block is Dictionary:
+			result_text += str(block.get("text", ""))
+	if not result_text.contains("Message Type: FINAL_ANSWER"):
+		return
+	for thread_id in codex_subagents.keys():
+		var info = codex_subagents[thread_id]
+		if info.get("agent_path", "") != author:
+			continue
+		codex_subagents.erase(thread_id)
+		call_deferred("_emit_event", {
+			"event": "agent_complete", "agent_id": info.get("agent_id", ""),
+			"success": "true", "result": result_text.substr(0, 200),
+			"timestamp": entry.get("timestamp", "")
+		})
+		break
 
 func _process_clawdbot_entry(entry: Dictionary, session_path: String) -> bool:
 	# Clawdbot sessions are JSONL with top-level entry types (session, model_change, message, ...).
@@ -620,7 +845,7 @@ func _process_clawdbot_entry(entry: Dictionary, session_path: String) -> bool:
 			var info = pending_tools.get(tool_use_id, {})
 			pending_tools.erase(tool_use_id)
 			call_deferred("_emit_event", {
-				"event": "input_received",
+				"event": "tool_finished",
 				"agent_id": "main",
 				"tool": info.get("tool_name", ""),
 				"timestamp": timestamp,
@@ -667,15 +892,20 @@ func _parse_codex_tool_input(raw_args) -> Dictionary:
 	return {"raw": str(raw_args)}
 
 func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String = "") -> void:
-	var tool_name = item.get("name", "")
-	var tool_id = item.get("id", "")
+	var tool_name = str(item.get("name", "")).left(MAX_TYPE_CHARS)
+	var tool_id = str(item.get("id", ""))
+	if tool_id.is_empty() or tool_id.length() > MAX_CORRELATION_ID_CHARS:
+		return
 	var tool_input = item.get("input", {})
+	if not tool_input is Dictionary:
+		tool_input = {}
 	var timestamp = entry.get("timestamp", "")
+	session_path = session_path.left(MAX_STORED_PATH_CHARS)
 
-	if tool_name == "Task":
+	if tool_name == "Task" or tool_name == "Agent":
 		# Agent spawn
-		var agent_type = tool_input.get("subagent_type", "default")
-		var description = tool_input.get("description", "")
+		var agent_type = str(tool_input.get("subagent_type", "default")).left(MAX_TYPE_CHARS)
+		var description = str(tool_input.get("description", "")).left(MAX_DESCRIPTION_CHARS)
 
 		# Store for matching with result (including session for cleanup)
 		pending_agents[tool_id] = {
@@ -684,6 +914,7 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 			"session_path": session_path,
 			"created_at": Time.get_unix_time_from_system()
 		}
+		_trim_pending_map(pending_agents)
 
 		var parent_id = _get_orchestrator_id(session_path)
 		print("[TranscriptWatcher] SPAWN: %s - %s (id: %s, parent: %s)" % [agent_type, description, tool_id.substr(0, 12), parent_id])
@@ -706,6 +937,7 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 			"tool_name": tool_name,
 			"session_path": session_path
 		}
+		_trim_pending_map(pending_tools)
 
 		# Build tool description for display
 		var tool_desc = ""
@@ -723,10 +955,11 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 		print("[TranscriptWatcher] TOOL: %s (id: %s)" % [tool_name, tool_id.substr(0, 12)])
 
 		var harness = _derive_harness(session_path)
-		# Emit waiting_for_input - monitor turns red until result comes back
+		# Tool activity is distinct from an explicit permission prompt.
 		call_deferred("_emit_event", {
-			"event": "waiting_for_input",
+			"event": "tool_started",
 			"agent_id": "main",
+			"tool_use_id": tool_id,
 			"tool": tool_name,
 			"description": tool_desc,
 			"timestamp": timestamp,
@@ -736,7 +969,9 @@ func process_tool_use(item: Dictionary, entry: Dictionary, session_path: String 
 		})
 
 func process_tool_result(item: Dictionary, entry: Dictionary) -> void:
-	var tool_use_id = item.get("tool_use_id", "")
+	var tool_use_id = str(item.get("tool_use_id", ""))
+	if tool_use_id.is_empty() or tool_use_id.length() > MAX_CORRELATION_ID_CHARS:
+		return
 	var timestamp = entry.get("timestamp", "")
 
 	# Check if this completes a pending agent
@@ -788,8 +1023,9 @@ func process_tool_result(item: Dictionary, entry: Dictionary) -> void:
 		print("[TranscriptWatcher] TOOL DONE: %s (id: %s)" % [tool_info.tool_name, tool_use_id.substr(0, 12)])
 
 		call_deferred("_emit_event", {
-			"event": "input_received",
+			"event": "tool_finished",
 			"agent_id": "main",
+			"tool_use_id": tool_use_id,
 			"tool": tool_info.tool_name,
 			"timestamp": timestamp,
 			"session_path": tool_info.session_path
@@ -805,6 +1041,10 @@ func session_has_pending_agents(session_path: String, current_time: float = -1.0
 			var created_at = float(agent_info.get("created_at", 0))
 			if created_at > 0 and (now - created_at) <= PENDING_AGENT_TIMEOUT:
 				return true
+	for info in codex_subagents.values():
+		var created_at = float(info.get("created_at", 0))
+		if info.get("session_path", "") == session_path and created_at > 0 and now - created_at <= PENDING_AGENT_TIMEOUT:
+			return true
 	return false
 
 func _cleanup_pending_for_session(session_path: String) -> void:
@@ -823,6 +1063,13 @@ func _cleanup_pending_for_session(session_path: String) -> void:
 			tool_keys.append(tool_id)
 	for tool_id in tool_keys:
 		pending_tools.erase(tool_id)
+
+	var codex_keys: Array = []
+	for thread_id in codex_subagents.keys():
+		if codex_subagents[thread_id].get("session_path", "") == session_path:
+			codex_keys.append(thread_id)
+	for thread_id in codex_keys:
+		codex_subagents.erase(thread_id)
 
 func _derive_session_id(file_path: String) -> String:
 	var basename = file_path.get_file().get_basename()
@@ -844,6 +1091,10 @@ func _get_orchestrator_id(session_path: String) -> String:
 	return "orch_" + _get_session_short_id(session_id)
 
 func _derive_harness(session_path: String) -> String:
+	if watched_sessions.has(session_path):
+		var stored = str(watched_sessions[session_path].get("harness_id", ""))
+		if not stored.is_empty():
+			return stored
 	# Determine harness from path (handles both / and \ separators)
 	var normalized = session_path.replace("\\", "/")
 	if normalized.contains("/.claude/"):
@@ -853,6 +1104,28 @@ func _derive_harness(session_path: String) -> String:
 	elif normalized.contains("/.clawdbot/"):
 		return "clawdbot"
 	return ""
+
+func _validated_custom_path(value: String) -> String:
+	var path = value.strip_edges().simplify_path()
+	if path.is_empty():
+		return ""
+	var home = _get_home_dir().simplify_path()
+	if not path.is_absolute_path() or path == "/" or path == home or not DirAccess.dir_exists_absolute(path):
+		push_warning("[TranscriptWatcher] Rejected unsafe custom watcher path: %s" % value)
+		return ""
+	return path
+
+func _stop_watching_harness(harness: String) -> void:
+	for path in watched_sessions.keys():
+		if _derive_harness(path) == harness:
+			call_deferred("_emit_session_end", _derive_session_id(path), path, harness)
+			_cleanup_pending_for_session(path)
+			watched_sessions.erase(path)
+			session_context_entries.erase(path)
+
+func _trim_pending_map(entries: Dictionary) -> void:
+	while entries.size() > MAX_PENDING_ENTRIES:
+		entries.erase(entries.keys()[0])
 
 func get_watched_count() -> int:
 	return watched_sessions.size()

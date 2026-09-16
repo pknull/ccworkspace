@@ -79,7 +79,9 @@ func set_setting(category: String, key: String, value: Variant) -> bool:
 	_values[category][key] = validated
 
 	# Auto-save
-	save_category(category)
+	if not save_category(category):
+		_values[category][key] = old_value
+		return false
 
 	# Emit change signal
 	setting_changed.emit(category, key, validated)
@@ -120,18 +122,58 @@ func get_all_schemas() -> Dictionary:
 	return result
 
 # Save settings for a category to its persistence file
-func save_category(category: String) -> void:
+func save_category(category: String) -> bool:
 	if not _files.has(category):
-		return
+		return false
 	var file_path = _files[category]
 	if file_path.is_empty():
-		return
+		return false
 
-	var data = _values.get(category, {})
-	var file = FileAccess.open(file_path, FileAccess.WRITE)
+	# Multiple categories may intentionally share one persistence file. Preserve
+	# unknown legacy keys, then overlay every registered category targeting it.
+	var data: Dictionary = {}
+	if FileAccess.file_exists(file_path):
+		var existing = FileAccess.open(file_path, FileAccess.READ)
+		if existing:
+			var parsed = JSON.parse_string(existing.get_as_text())
+			existing.close()
+			if parsed is Dictionary:
+				data = parsed
+	for registered_category in _files.keys():
+		if _files[registered_category] != file_path:
+			continue
+		data.erase(registered_category)
+		for key in _values.get(registered_category, {}).keys():
+			data[key] = _values[registered_category][key]
+	# Remove the former shapes once their registered replacements are present.
+	if _files.get("watchers", "") == file_path:
+		data.erase("harnesses")
+	if _files.get("mcp", "") == file_path:
+		data.erase("mcp")
+		data.erase("tcp")
+	var temp_path = file_path + ".tmp"
+	var file = FileAccess.open(temp_path, FileAccess.WRITE)
 	if file:
 		file.store_string(JSON.stringify(data, "\t"))
+		file.flush()
+		var write_error = file.get_error()
 		file.close()
+		if write_error != OK:
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(temp_path))
+			push_warning("[SettingsRegistry] Could not write %s: %s" % [file_path, error_string(write_error)])
+			return false
+		var rename_error = DirAccess.rename_absolute(
+			ProjectSettings.globalize_path(temp_path),
+			ProjectSettings.globalize_path(file_path)
+		)
+		if rename_error != OK:
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(temp_path))
+			push_warning("[SettingsRegistry] Could not replace %s: %s" % [file_path, error_string(rename_error)])
+			return false
+		return true
+	else:
+		push_warning("[SettingsRegistry] Could not write %s" % file_path)
+		return false
 
 # Load settings for a category from its persistence file
 func load_category(category: String) -> void:
@@ -159,16 +201,30 @@ func load_category(category: String) -> void:
 	if not data is Dictionary:
 		return
 
+	# Accept the former nested layouts during migration.
+	var source: Dictionary = {}
+	if data.get(category) is Dictionary:
+		source.merge(data[category], true)
+	elif category == "watchers" and data.get("harnesses") is Dictionary:
+		for harness_name in data["harnesses"].keys():
+			var harness = data["harnesses"][harness_name]
+			if harness is Dictionary:
+				source["%s_enabled" % harness_name] = harness.get("enabled", true)
+				source["%s_path" % harness_name] = harness.get("path", "")
+	# Canonical flat keys win over migrated values.
+	for key in data.keys():
+		source[key] = data[key]
+
 	# Merge loaded values (validate each against schema)
 	if not _values.has(category):
 		_values[category] = {}
 
-	for key in data.keys():
+	for key in source.keys():
 		var schema = _get_field_schema(category, str(key))
 		if schema.is_empty():
 			continue  # Skip unknown keys
-		var validated = _validate_value(data[key], schema)
-		if validated != null or data[key] == null:
+		var validated = _validate_value(source[key], schema)
+		if validated != null or source[key] == null:
 			_values[category][str(key)] = validated
 
 # Get field schema for a specific key

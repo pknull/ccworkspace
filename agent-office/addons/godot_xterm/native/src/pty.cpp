@@ -29,7 +29,15 @@
 using namespace godot;
 
 void _alloc_buffer(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf);
-void _write_cb(uv_write_t* req, int status) { std::free(req); }
+struct OwnedWriteRequest {
+    uv_write_t request;
+    uv_buf_t buffer;
+};
+void _write_cb(uv_write_t* req, int status) {
+    OwnedWriteRequest* owned = reinterpret_cast<OwnedWriteRequest*>(req);
+    std::free(owned->buffer.base);
+    std::free(owned);
+}
 void _close_cb(uv_handle_t* handle) { /* no-op */ };
 
 void PTY::_bind_methods() {
@@ -86,7 +94,9 @@ void PTY::_bind_methods() {
 }
 
 PTY::PTY() {
-    use_threads = true;
+    // libuv loops and handles are not thread-safe. Keep all loop operations on
+    // Godot's main thread; the former threaded mode raced uv_run() in write().
+    use_threads = false;
 
     set_process_internal(false);
     thread.instantiate();
@@ -145,7 +155,8 @@ void PTY::set_use_os_env(const bool value) {
 
 void PTY::set_use_threads(bool p_use) {
     ERR_FAIL_COND(status != STATUS_CLOSED);
-    use_threads = p_use;
+    ERR_FAIL_COND_MSG(p_use, "Threaded PTY mode is disabled because libuv handles must remain on one thread.");
+    use_threads = false;
 }
 
 bool PTY::is_using_threads() const {
@@ -292,18 +303,31 @@ void PTY::write(const Variant& data) const {
 
     if (status == STATUS_OPEN) {
 #if defined(__linux__) || defined(__APPLE__) || defined(_WIN32)
-        uv_buf_t buf;
-        buf.base = (char*)bytes.ptr();
-        buf.len = bytes.size();
-        uv_write_t* req = (uv_write_t*)malloc(sizeof(uv_write_t));
-        req->data = (void*)buf.base;
+        if (bytes.is_empty()) {
+            return;
+        }
+        OwnedWriteRequest* owned = static_cast<OwnedWriteRequest*>(std::calloc(1, sizeof(OwnedWriteRequest)));
+        ERR_FAIL_NULL(owned);
+        owned->buffer.base = static_cast<char*>(std::malloc(bytes.size()));
+        if (owned->buffer.base == nullptr) {
+            std::free(owned);
+            ERR_FAIL_MSG("Unable to allocate PTY write buffer.");
+        }
+        owned->buffer.len = bytes.size();
+        std::memcpy(owned->buffer.base, bytes.ptr(), bytes.size());
+        int write_error = 0;
 #endif
 
 #if defined(__linux__) || defined(__APPLE__)
-        uv_write(req, (uv_stream_t*)&pipe, &buf, 1, _write_cb);
+        write_error = uv_write(&owned->request, (uv_stream_t*)&pipe, &owned->buffer, 1, _write_cb);
 #elif defined(_WIN32)
-        uv_write(req, (uv_stream_t*)&pipe_out, &buf, 1, _write_cb);
+        write_error = uv_write(&owned->request, (uv_stream_t*)&pipe_out, &owned->buffer, 1, _write_cb);
 #endif
+        if (write_error < 0) {
+            std::free(owned->buffer.base);
+            std::free(owned);
+            ERR_FAIL_MSG(UV_ERR_MSG(write_error));
+        }
 
         uv_run((uv_loop_t*)&loop, UV_RUN_NOWAIT);
     }
@@ -472,6 +496,7 @@ void PTY::_read_cb(uv_stream_t* pipe, ssize_t nread, const uv_buf_t* buf) {
     PTY* pty = static_cast<PTY*>(pipe->data);
 
     if (nread < 0) {
+        std::free(buf->base);
         switch (nread) {
             case UV_EOF:
                 // Normal after shell exits.
@@ -496,8 +521,8 @@ void PTY::_read_cb(uv_stream_t* pipe, ssize_t nread, const uv_buf_t* buf) {
         pty->buffer.resize(new_size);
         memcpy(pty->buffer.ptrw() + old_size, buf->base, nread);
 
-        std::free((char*)buf->base);
     }
+    std::free(buf->base);
 }
 
 Error PTY::_pipe_open(const int fd, uv_pipe_t* pipe) {

@@ -65,6 +65,7 @@ var agent_by_type: Dictionary = {}  # agent_type -> Array of agent_ids
 var agents_by_session: Dictionary = {}  # session_id -> [agent_ids]
 var completed_count: int = 0
 var known_agent_ids: Dictionary = {}  # agent_id -> true
+var active_tool_targets: Dictionary = {}  # tool_use_id -> {agent_id, session_id}
 var completed_agent_ids: Dictionary = {}  # agent_id -> true
 
 # UI elements
@@ -88,6 +89,8 @@ var office_cat: Node2D = null
 var mcp_manager: Node2D = null  # McpManager instance
 var mcp_activity_timer: float = 0.0  # Time since last MCP activity
 const MCP_IDLE_TIMEOUT: float = 30.0  # Manager leaves after 30s of no MCP activity
+const MAX_DESKS: int = 32
+const MAX_ACTIVE_TOOL_TARGETS: int = 10000
 
 # Wall decorations
 var vip_photo: VIPPhoto = null
@@ -798,6 +801,15 @@ func _verify_furniture_ids() -> void:
 	## Fixes inconsistencies from old saves using instance_id format.
 	var fixes_applied := 0
 
+	# Clear every old registration first. Renaming in a single pass can
+	# unregister an ID assigned to a prior desk after a middle deletion.
+	for desk in desks:
+		if desk and is_instance_valid(desk):
+			navigation_grid.unregister_obstacle(desk.furniture_id)
+			if desk.item_name != desk.furniture_id:
+				navigation_grid.unregister_obstacle(desk.item_name)
+			navigation_grid.unregister_work_position(desk)
+
 	# Normalize desk IDs to desk_0, desk_1, etc.
 	for i in range(desks.size()):
 		var desk = desks[i]
@@ -806,27 +818,18 @@ func _verify_furniture_ids() -> void:
 		var needs_fix = desk.furniture_id != expected_id or desk.item_name != expected_id
 		if needs_fix:
 			var old_id = desk.furniture_id
-			# Unregister old obstacle (try both old IDs in case of mismatch)
-			navigation_grid.unregister_obstacle(old_id)
-			if desk.item_name != old_id:
-				navigation_grid.unregister_obstacle(desk.item_name)
-			# Unregister old work position
-			navigation_grid.unregister_work_position(desk)
-			# Update IDs
 			desk.furniture_id = expected_id
 			desk.item_name = expected_id
-			# Re-register with new ID
-			var desk_rect = Rect2(
-				desk.position.x - OfficeConstants.DESK_WIDTH / 2,
-				desk.position.y,
-				OfficeConstants.DESK_WIDTH,
-				OfficeConstants.DESK_DEPTH
-			)
-			navigation_grid.register_obstacle(desk_rect, expected_id)
-			# Re-register work position
-			navigation_grid.register_work_position(desk.get_work_position(), desk)
 			fixes_applied += 1
 			print("[OfficeManager] Normalized desk ID: %s -> %s" % [old_id, expected_id])
+		var desk_rect = Rect2(
+			desk.position.x - OfficeConstants.DESK_WIDTH / 2,
+			desk.position.y,
+			OfficeConstants.DESK_WIDTH,
+			OfficeConstants.DESK_DEPTH
+		)
+		navigation_grid.register_obstacle(desk_rect, expected_id)
+		navigation_grid.register_work_position(desk.get_work_position(), desk)
 
 	# Verify default furniture IDs match their obstacle registrations
 	var default_furniture = [
@@ -1482,12 +1485,11 @@ func _on_event_received(event_data: Dictionary) -> void:
 			_handle_weather_smoke_test(event_data)
 		"weather_smoke_stop":
 			_handle_weather_smoke_stop(event_data)
-		# Note: "tool_use" events don't exist - tools are tracked in "waiting_for_input"
 		"furniture_tour":
 			_handle_furniture_tour(event_data)
-		"waiting_for_input":
+		"waiting_for_input", "tool_started":
 			_handle_waiting_for_input(event_data)
-		"input_received":
+		"input_received", "tool_finished":
 			_handle_input_received(event_data)
 		"set_context_stress":
 			_handle_set_context_stress(event_data)
@@ -1535,7 +1537,17 @@ func _handle_session_end(data: Dictionary) -> void:
 	if not session_id:
 		return
 
-	# Find the orchestrator for this session (agent_id starts with "orch_")
+	var session_key = session_path.get_file().get_basename() if session_path else session_id
+	_clear_active_tools_for_session(session_key)
+	# Finish every entity owned by the session, not just its orchestrator.
+	if agents_by_session.has(session_key):
+		for owned_id in agents_by_session[session_key].duplicate():
+			if str(owned_id).begins_with("orch_"):
+				continue
+			if active_agents.has(owned_id):
+				var owned = active_agents[owned_id] as Agent
+				if owned and is_instance_valid(owned):
+					owned.force_complete(true)
 	var orch_id = "orch_" + _get_session_short_id(session_id)
 	if active_agents.has(orch_id):
 		var orchestrator = active_agents[orch_id] as Agent
@@ -1545,7 +1557,7 @@ func _handle_session_end(data: Dictionary) -> void:
 			if agent_roster and orchestrator.profile_id >= 0:
 				agent_roster.record_orchestrator_session(orchestrator.profile_id)
 			# Complete like any other agent (goes to shredder, then leaves)
-			orchestrator.force_complete()
+			orchestrator.force_complete(true)
 	_update_taskboard()
 	_prune_session_agent_ids(session_path.get_file().get_basename() if session_path else session_id)
 
@@ -1736,7 +1748,16 @@ func _get_all_weather_states() -> Array[int]:
 	]
 
 func _handle_agent_spawn(data: Dictionary) -> void:
-	var agent_id = data.get("agent_id", "agent_%d" % Time.get_ticks_msec())
+	var agent_id = str(data.get("agent_id", "agent_%d" % Time.get_ticks_msec())).strip_edges()
+	if agent_id.is_empty():
+		push_warning("[OfficeManager] Ignored spawn with empty agent id")
+		return
+	if active_agents.has(agent_id):
+		var existing = active_agents[agent_id]
+		if is_instance_valid(existing):
+			push_warning("[OfficeManager] Ignored duplicate spawn: %s" % agent_id)
+			return
+		active_agents.erase(agent_id)
 	var parent_id = data.get("parent_id", "main")
 	var agent_type = data.get("agent_type", "default")
 	var description = data.get("description", "")
@@ -1927,10 +1948,11 @@ func _handle_agent_complete(data: Dictionary) -> void:
 
 func _handle_waiting_for_input(data: Dictionary) -> void:
 	var tool_name = data.get("tool", "")
+	var tool_use_id = str(data.get("tool_use_id", ""))
 	var session_path = data.get("session_path", "")
 	var session_id = session_path.get_file().get_basename() if session_path else ""
 
-	print("[OfficeManager] Waiting for input: %s (session: %s)" % [tool_name, _get_session_short_id(session_id) if session_id else "unknown"])
+	print("[OfficeManager] Tool started: %s (session: %s)" % [tool_name, _get_session_short_id(session_id) if session_id else "unknown"])
 	status_label.text = "Tool: %s" % tool_name if tool_name else "Waiting..."
 
 	# Find the best agent for this session - prefer working sub-agents over orchestrator
@@ -1941,6 +1963,13 @@ func _handle_waiting_for_input(data: Dictionary) -> void:
 		target_agent = _recall_idle_agent_for_session(session_id)
 
 	if target_agent:
+		if not tool_use_id.is_empty():
+			while active_tool_targets.size() >= MAX_ACTIVE_TOOL_TARGETS:
+				active_tool_targets.erase(active_tool_targets.keys()[0])
+			active_tool_targets[tool_use_id] = {
+				"agent_id": target_agent.agent_id,
+				"session_id": session_id,
+			}
 		# Show the tool being used
 		if tool_name:
 			target_agent.show_tool(tool_name)
@@ -1951,8 +1980,8 @@ func _handle_waiting_for_input(data: Dictionary) -> void:
 			agent_roster.record_tool_use(target_agent.profile_id, tool_name)
 		elif OfficeConstants.DEBUG_TOOL_TRACKING and not target_agent.profile_id >= 0:
 			print("[OfficeManager] TOOL TRACK SKIPPED: agent has no profile (id=%d)" % target_agent.profile_id)
-		# Turn monitor red (waiting)
-		if target_agent.assigned_desk:
+		# Legacy explicit permission events retain the red waiting indicator.
+		if data.get("event", "") == "waiting_for_input" and target_agent.assigned_desk:
 			target_agent.assigned_desk.set_monitor_waiting(true)
 
 func _find_working_agent_for_session(session_id: String) -> Agent:
@@ -2003,13 +2032,26 @@ func _recall_idle_agent_for_session(session_id: String) -> Agent:
 	return null
 
 func _handle_input_received(data: Dictionary) -> void:
+	var tool_use_id = str(data.get("tool_use_id", ""))
 	var session_path = data.get("session_path", "")
 	var session_id = session_path.get_file().get_basename() if session_path else ""
 
-	print("[OfficeManager] Input received (session: %s)" % [_get_session_short_id(session_id) if session_id else "unknown"])
+	print("[OfficeManager] Tool finished (session: %s)" % [_get_session_short_id(session_id) if session_id else "unknown"])
 	status_label.text = "Working..."
 
-	# Clear waiting state on all agents belonging to this session
+	if not tool_use_id.is_empty() and active_tool_targets.has(tool_use_id):
+		var target_info: Dictionary = active_tool_targets[tool_use_id]
+		var target_id = str(target_info.get("agent_id", ""))
+		active_tool_targets.erase(tool_use_id)
+		if active_agents.has(target_id):
+			var target = active_agents[target_id] as Agent
+			var still_active = _agent_has_active_tool(target_id)
+			if not still_active:
+				if target.assigned_desk:
+					target.assigned_desk.set_monitor_waiting(false)
+				target._hide_tool()
+		return
+	# Legacy events without correlation clear the session as before.
 	if session_id and agents_by_session.has(session_id):
 		for agent_id in agents_by_session[session_id]:
 			if active_agents.has(agent_id):
@@ -2021,6 +2063,24 @@ func _handle_input_received(data: Dictionary) -> void:
 		for agent in active_agents.values():
 			if agent.assigned_desk:
 				agent.assigned_desk.set_monitor_waiting(false)
+
+func _agent_has_active_tool(agent_id: String) -> bool:
+	for info in active_tool_targets.values():
+		if info is Dictionary and info.get("agent_id", "") == agent_id:
+			return true
+	return false
+
+func _clear_active_tools_for_agent(agent_id: String) -> void:
+	for tool_id in active_tool_targets.keys():
+		var info = active_tool_targets[tool_id]
+		if info is Dictionary and info.get("agent_id", "") == agent_id:
+			active_tool_targets.erase(tool_id)
+
+func _clear_active_tools_for_session(session_id: String) -> void:
+	for tool_id in active_tool_targets.keys():
+		var info = active_tool_targets[tool_id]
+		if info is Dictionary and info.get("session_id", "") == session_id:
+			active_tool_targets.erase(tool_id)
 
 func _handle_furniture_tour(data: Dictionary) -> void:
 	var agent_id = data.get("agent_id", "tour_%d" % Time.get_ticks_msec())
@@ -2035,6 +2095,9 @@ func _handle_furniture_tour(data: Dictionary) -> void:
 	agent.description = "Furniture Tour"
 	agent.set_obstacles(office_obstacles)
 	agent.navigation_grid = navigation_grid
+	agent.office_manager = self
+	agent.audio_manager = audio_manager
+	agent.work_completed.connect(_on_agent_completed)
 	_configure_agent_positions(agent)
 
 	# Set spawn position at door, skip spawn animation
@@ -2133,6 +2196,7 @@ func _find_available_desk() -> FurnitureDesk:
 func _on_agent_completed(agent: Agent) -> void:
 	completed_count += 1
 	var aid = agent.agent_id
+	_clear_active_tools_for_agent(aid)
 
 	# Record task completion on agent profile (this also triggers roster_changed for achievements)
 	if agent_roster and agent.profile_id >= 0:
@@ -2479,35 +2543,34 @@ func _load_positions() -> void:
 		return
 
 	# Apply saved positions
-	if data.has("water_cooler"):
-		water_cooler_position = Vector2(data["water_cooler"]["x"], data["water_cooler"]["y"])
-	if data.has("plant"):
-		plant_position = Vector2(data["plant"]["x"], data["plant"]["y"])
-	if data.has("filing_cabinet"):
-		filing_cabinet_position = Vector2(data["filing_cabinet"]["x"], data["filing_cabinet"]["y"])
-	if data.has("shredder"):
-		shredder_position = Vector2(data["shredder"]["x"], data["shredder"]["y"])
-	if data.has("taskboard"):
-		taskboard_position = Vector2(data["taskboard"]["x"], data["taskboard"]["y"])
-	if data.has("meeting_table"):
-		meeting_table_position = Vector2(data["meeting_table"]["x"], data["meeting_table"]["y"])
-	if data.has("cat_bed"):
-		cat_bed_position = Vector2(data["cat_bed"]["x"], data["cat_bed"]["y"])
+	water_cooler_position = _saved_position(data, "water_cooler", water_cooler_position)
+	plant_position = _saved_position(data, "plant", plant_position)
+	filing_cabinet_position = _saved_position(data, "filing_cabinet", filing_cabinet_position)
+	shredder_position = _saved_position(data, "shredder", shredder_position)
+	taskboard_position = _saved_position(data, "taskboard", taskboard_position)
+	meeting_table_position = _saved_position(data, "meeting_table", meeting_table_position)
+	cat_bed_position = _saved_position(data, "cat_bed", cat_bed_position)
 
 	# Load removed defaults
-	if data.has("removed_defaults"):
+	if data.get("removed_defaults") is Array:
 		removed_default_furniture.clear()
 		for item in data["removed_defaults"]:
 			removed_default_furniture.append(str(item))
 
 	# Load dynamic furniture (will be created after defaults)
-	if data.has("dynamic_furniture"):
+	if data.get("dynamic_furniture") is Array:
 		pending_dynamic_furniture.clear()
 		for item in data["dynamic_furniture"]:
+			if not item is Dictionary:
+				continue
+			var dynamic_x = float(item.get("x", NAN))
+			var dynamic_y = float(item.get("y", NAN))
+			if is_nan(dynamic_x) or is_nan(dynamic_y) or is_inf(dynamic_x) or is_inf(dynamic_y):
+				continue
 			pending_dynamic_furniture.append({
 				"id": str(item.get("id", "")),
 				"type": str(item.get("type", "")),
-				"position": Vector2(item.get("x", 0), item.get("y", 0))
+				"position": Vector2(dynamic_x, dynamic_y)
 			})
 
 	# Load furniture ID counter
@@ -2515,26 +2578,45 @@ func _load_positions() -> void:
 		furniture_id_counter = int(data["furniture_id_counter"])
 
 	# Load saved desk positions
-	if data.has("desks"):
+	if data.get("desks") is Array:
 		saved_desk_positions.clear()
-		for item in data["desks"]:
+		for item in data["desks"].slice(0, MAX_DESKS):
+			if not item is Dictionary:
+				continue
+			var desk_x = float(item.get("x", NAN))
+			var desk_y = float(item.get("y", NAN))
+			if is_nan(desk_x) or is_nan(desk_y) or is_inf(desk_x) or is_inf(desk_y):
+				continue
 			saved_desk_positions.append({
 				"id": str(item.get("id", "")),
-				"position": Vector2(item.get("x", 0), item.get("y", 0))
+				"position": Vector2(desk_x, desk_y)
 			})
 
 	# Load wall item visibility
-	if data.has("wall_item_visibility"):
+	if data.get("wall_item_visibility") is Dictionary:
 		for key in data["wall_item_visibility"]:
 			wall_item_visibility[key] = data["wall_item_visibility"][key]
 
 	# Load wall item positions
-	if data.has("wall_item_positions"):
+	if data.get("wall_item_positions") is Dictionary:
 		for key in data["wall_item_positions"]:
 			var pos_data = data["wall_item_positions"][key]
-			wall_item_positions[key] = Vector2(pos_data.get("x", 0), pos_data.get("y", 0))
+			if pos_data is Dictionary:
+				wall_item_positions[key] = Vector2(pos_data.get("x", 0), pos_data.get("y", 0))
 
 	print("[OfficeManager] Loaded saved furniture positions")
+
+func _saved_position(data: Dictionary, key: String, fallback: Vector2) -> Vector2:
+	var value = data.get(key, {})
+	if not value is Dictionary:
+		push_warning("[OfficeManager] Ignoring malformed saved position: %s" % key)
+		return fallback
+	var x = float(value.get("x", NAN))
+	var y = float(value.get("y", NAN))
+	if is_nan(x) or is_nan(y) or is_inf(x) or is_inf(y):
+		push_warning("[OfficeManager] Ignoring non-finite saved position: %s" % key)
+		return fallback
+	return Vector2(x, y)
 
 func _save_positions() -> void:
 	var data = {
@@ -2604,13 +2686,29 @@ func _save_positions() -> void:
 	data["wall_item_positions"] = wall_positions
 
 	var json_string = JSON.stringify(data, "\t")
-	var file = FileAccess.open(POSITIONS_FILE, FileAccess.WRITE)
-	if file == null:
-		push_warning("Failed to save positions: %s" % FileAccess.get_open_error())
-		return
+	if not _write_text_atomic(POSITIONS_FILE, json_string):
+		push_warning("Failed to save positions")
 
-	file.store_string(json_string)
+func _write_text_atomic(path: String, contents: String) -> bool:
+	var temp_path = path + ".tmp"
+	var file = FileAccess.open(temp_path, FileAccess.WRITE)
+	if not file:
+		return false
+	file.store_string(contents)
+	file.flush()
+	var write_error = file.get_error()
 	file.close()
+	if write_error != OK:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(temp_path))
+		return false
+	var rename_error = DirAccess.rename_absolute(
+		ProjectSettings.globalize_path(temp_path),
+		ProjectSettings.globalize_path(path)
+	)
+	if rename_error != OK:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(temp_path))
+		return false
+	return true
 
 func _on_reset_button_pressed() -> void:
 	print("[OfficeManager] Resetting furniture layout to defaults")
@@ -2996,6 +3094,7 @@ func _remove_desk(desk_index: int) -> bool:
 
 	# Unregister from navigation grid - use furniture_id to match registration
 	navigation_grid.unregister_obstacle(desk.furniture_id)
+	navigation_grid.unregister_work_position(desk)
 
 	# Unregister from trait furniture system
 	unregister_trait_furniture(desk)
@@ -3003,12 +3102,23 @@ func _remove_desk(desk_index: int) -> bool:
 	# Remove from array and free node
 	desks.remove_at(desk_index)
 	desk.queue_free()
+	_verify_furniture_ids()
 
 	_save_positions()
 	print("[OfficeManager] Removed desk at index %d" % desk_index)
 	return true
 
 func _add_desk(pos: Vector2) -> int:
+	if desks.size() >= MAX_DESKS:
+		return -1
+	var placement_rect = Rect2(
+		pos.x - OfficeConstants.DESK_WIDTH / 2,
+		pos.y,
+		OfficeConstants.DESK_WIDTH,
+		OfficeConstants.DESK_DEPTH + OfficeConstants.WORK_POSITION_OFFSET
+	)
+	if not navigation_grid.can_place_obstacle(placement_rect):
+		return -1
 	var desk := furniture_registry.spawn("desk", pos) as FurnitureDesk
 	if not desk:
 		return -1
@@ -3033,6 +3143,7 @@ func _add_desk(pos: Vector2) -> int:
 		OfficeConstants.DESK_DEPTH
 	)
 	navigation_grid.register_obstacle(desk_rect, desk.furniture_id)
+	navigation_grid.register_work_position(desk.get_work_position(), desk)
 
 	_save_positions()
 	print("[OfficeManager] Added desk at %s (index %d)" % [pos, desk_index])

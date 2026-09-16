@@ -13,7 +13,7 @@ const WEATHER_RAIN: int = 1
 const WEATHER_SNOW: int = 2
 const WEATHER_FOG: int = 3
 
-var use_auto_location: bool = true
+var use_auto_location: bool = false
 var location_query: String = ""
 var use_fahrenheit: bool = false
 
@@ -52,7 +52,7 @@ func _register_with_settings() -> void:
 		return
 
 	var schema: Array = [
-		{"key": "use_auto_location", "type": "bool", "default": true, "description": "Auto-detect location via IP"},
+		{"key": "use_auto_location", "type": "bool", "default": false, "description": "Auto-detect location via IP (opt-in)"},
 		{"key": "location_query", "type": "string", "default": "", "description": "Custom location query (e.g. 'Seattle, WA')"},
 		{"key": "use_fahrenheit", "type": "bool", "default": false, "description": "Use Fahrenheit instead of Celsius"},
 		{"key": "saved_lat", "type": "float", "default": NAN, "min": -90.0, "max": 90.0, "description": "Cached latitude"},
@@ -64,7 +64,7 @@ func _register_with_settings() -> void:
 
 	# Load values from registry with defaults
 	var v_auto = registry.get_setting("weather", "use_auto_location")
-	use_auto_location = v_auto if v_auto != null else true
+	use_auto_location = v_auto if v_auto != null else false
 	var v_query = registry.get_setting("weather", "location_query")
 	location_query = v_query if v_query != null else ""
 	var v_fahr = registry.get_setting("weather", "use_fahrenheit")
@@ -158,14 +158,17 @@ func set_use_fahrenheit(enabled: bool) -> void:
 
 func _setup_requests() -> void:
 	ip_request = HTTPRequest.new()
+	ip_request.timeout = 10.0
 	add_child(ip_request)
 	ip_request.request_completed.connect(_on_ip_request_completed)
 
 	geocode_request = HTTPRequest.new()
+	geocode_request.timeout = 10.0
 	add_child(geocode_request)
 	geocode_request.request_completed.connect(_on_geocode_completed)
 
 	forecast_request = HTTPRequest.new()
+	forecast_request.timeout = 10.0
 	add_child(forecast_request)
 	forecast_request.request_completed.connect(_on_forecast_completed)
 
@@ -184,10 +187,12 @@ func _refresh_weather() -> void:
 		return
 	if is_instance_valid(temperature_display):
 		temperature_display.set_status("Weather...")
-	if use_auto_location or location_query == "":
+	if use_auto_location:
 		_request_ip_location()
-	else:
+	elif not location_query.is_empty():
 		_request_geocode(location_query)
+	else:
+		_set_offline_state()
 
 func _request_ip_location() -> void:
 	request_in_flight = true
@@ -225,7 +230,7 @@ func _on_ip_request_completed(result: int, response_code: int, _headers: PackedS
 		return
 	var lat = float(data.get("latitude", data.get("lat", NAN)))
 	var lon = float(data.get("longitude", data.get("lon", NAN)))
-	if is_nan(lat) or is_nan(lon):
+	if is_nan(lat) or is_nan(lon) or absf(lat) > 90.0 or absf(lon) > 180.0:
 		_handle_location_failure(true)
 		return
 	location_lat = lat
@@ -246,9 +251,12 @@ func _on_geocode_completed(result: int, response_code: int, _headers: PackedStri
 	var results = data.get("results", [])
 	if results is Array and results.size() > 0:
 		var entry = results[0]
+		if not entry is Dictionary:
+			_handle_location_failure(false)
+			return
 		location_lat = float(entry.get("latitude", NAN))
 		location_lon = float(entry.get("longitude", NAN))
-		if is_nan(location_lat) or is_nan(location_lon):
+		if is_nan(location_lat) or is_nan(location_lon) or absf(location_lat) > 90.0 or absf(location_lon) > 180.0:
 			_handle_location_failure(false)
 			return
 		location_name = _format_geocode_location(entry)
@@ -446,7 +454,7 @@ func _load_settings() -> void:
 		return
 	var data = json.get_data()
 	if data is Dictionary:
-		use_auto_location = data.get("use_auto_location", true)
+		use_auto_location = data.get("use_auto_location", false)
 		location_query = data.get("location_query", "")
 		use_fahrenheit = data.get("use_fahrenheit", false)
 		var saved_lat_value = data.get("saved_lat", null)

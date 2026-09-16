@@ -12,23 +12,27 @@ const DEFAULT_PORT = 9999
 const DEFAULT_BIND_ADDRESS = "127.0.0.1"
 const WATCHER_CONFIG_FILE = "user://watchers.json"
 const MAX_MESSAGE_SIZE = 65536
+const MAX_HEADER_SIZE = 8192
 const MAX_CLIENTS = 25
+const CLIENT_IDLE_TIMEOUT_MS = 10000
 const EVENT_HISTORY_LIMIT = 200
-const SERVER_NAME = "Claude Office MCP"
-const SERVER_VERSION = "0.1"
+const SERVER_NAME = "Inference Inc. MCP"
+const SERVER_VERSION = "0.2"
 
 var tcp_server: TCPServer = null
 var tcp_clients: Dictionary = {}  # client_id -> StreamPeerTCP
-var tcp_buffers: Dictionary = {}  # client_id -> String (for HTTP request accumulation)
+var tcp_buffers: Dictionary = {}  # client_id -> PackedByteArray
+var tcp_last_activity: Dictionary = {}
 var pending_disconnect: Dictionary = {}  # client_id -> timestamp (deferred disconnect)
 var next_tcp_id: int = 1
 const DISCONNECT_DELAY_MS: int = 100  # Wait for TCP buffer to flush
 var transport: String = "none"
-var enabled: bool = true
+var enabled: bool = false
 var port: int = DEFAULT_PORT
 var bind_address: String = DEFAULT_BIND_ADDRESS
 var office_manager: Node = null
 var recent_events: Array = []
+var generated_agent_sequence: int = 0
 
 func _ready() -> void:
 	_register_with_settings()
@@ -41,20 +45,20 @@ func _register_with_settings() -> void:
 		return
 
 	var schema: Array = [
-		{"key": "enabled", "type": "bool", "default": true, "description": "Enable MCP HTTP server"},
+		{"key": "enabled", "type": "bool", "default": false, "description": "Enable local MCP HTTP server"},
 		{"key": "port", "type": "int", "default": DEFAULT_PORT, "min": 1, "max": 65535, "description": "MCP server port"},
-		{"key": "bind_address", "type": "string", "default": DEFAULT_BIND_ADDRESS, "description": "MCP server bind address"}
+		{"key": "bind_address", "type": "enum", "default": DEFAULT_BIND_ADDRESS, "options": ["127.0.0.1", "::1", "localhost"], "description": "Loopback MCP server bind address"}
 	]
 
 	registry.register_category("mcp", WATCHER_CONFIG_FILE, schema, _on_setting_changed)
 
 	# Load values from registry with defaults
 	var v_enabled = registry.get_setting("mcp", "enabled")
-	enabled = v_enabled if v_enabled != null else true
+	enabled = v_enabled if v_enabled != null else false
 	var v_port = registry.get_setting("mcp", "port")
 	port = v_port if v_port != null else DEFAULT_PORT
 	var v_bind = registry.get_setting("mcp", "bind_address")
-	bind_address = v_bind if v_bind != null and not str(v_bind).is_empty() else DEFAULT_BIND_ADDRESS
+	bind_address = _normalize_bind_address(str(v_bind) if v_bind != null else DEFAULT_BIND_ADDRESS)
 
 func _on_setting_changed(key: String, value: Variant) -> void:
 	var needs_restart = false
@@ -70,9 +74,7 @@ func _on_setting_changed(key: String, value: Variant) -> void:
 				port = new_port
 				needs_restart = true
 		"bind_address":
-			var new_bind = str(value).strip_edges() if value != null else DEFAULT_BIND_ADDRESS
-			if new_bind.is_empty():
-				new_bind = DEFAULT_BIND_ADDRESS
+			var new_bind = _normalize_bind_address(str(value) if value != null else DEFAULT_BIND_ADDRESS)
 			if new_bind != bind_address:
 				bind_address = new_bind
 				needs_restart = true
@@ -130,9 +132,7 @@ func set_mcp_config(config: Dictionary) -> void:
 	else:
 		var next_enabled = bool(config.get("enabled", enabled))
 		var next_port = int(config.get("port", port))
-		var next_bind = str(config.get("bind_address", bind_address)).strip_edges()
-		if next_bind.is_empty():
-			next_bind = bind_address
+		var next_bind = _normalize_bind_address(str(config.get("bind_address", bind_address)))
 
 		var changed = next_enabled != enabled or next_port != port or next_bind != bind_address
 		enabled = next_enabled
@@ -145,6 +145,7 @@ func set_mcp_config(config: Dictionary) -> void:
 func _start_server() -> void:
 	if not enabled:
 		return
+	bind_address = _normalize_bind_address(bind_address)
 	tcp_server = TCPServer.new()
 	var err = tcp_server.listen(port, bind_address)
 	if err != OK:
@@ -172,6 +173,7 @@ func _disconnect_tcp_clients() -> void:
 		peer.disconnect_from_host()
 	tcp_clients.clear()
 	tcp_buffers.clear()
+	tcp_last_activity.clear()
 	pending_disconnect.clear()
 
 func _restart_server() -> void:
@@ -193,7 +195,8 @@ func _process_http() -> void:
 			var client_id = next_tcp_id
 			next_tcp_id += 1
 			tcp_clients[client_id] = peer
-			tcp_buffers[client_id] = ""
+			tcp_buffers[client_id] = PackedByteArray()
+			tcp_last_activity[client_id] = Time.get_ticks_msec()
 			client_connected.emit(client_id)
 
 	# Process existing connections
@@ -211,25 +214,31 @@ func _process_http() -> void:
 		if status != StreamPeerTCP.STATUS_CONNECTED:
 			continue
 		var available = client.get_available_bytes()
-		if available > MAX_MESSAGE_SIZE:
+		if available > MAX_MESSAGE_SIZE + MAX_HEADER_SIZE:
 			_send_http_error(client_id, 413, "Request too large")
 			_schedule_disconnect(client_id)
 			continue
 		if available > 0:
 			var data = client.get_data(available)
 			if data[0] == OK:
-				tcp_buffers[client_id] += data[1].get_string_from_utf8()
-				if tcp_buffers[client_id].length() > MAX_MESSAGE_SIZE:
+				var buffer: PackedByteArray = tcp_buffers[client_id]
+				buffer.append_array(data[1])
+				tcp_buffers[client_id] = buffer
+				tcp_last_activity[client_id] = Time.get_ticks_msec()
+				if buffer.size() > MAX_MESSAGE_SIZE + MAX_HEADER_SIZE:
 					_send_http_error(client_id, 413, "Request too large")
 					_schedule_disconnect(client_id)
 					continue
 				# Check if we have a complete HTTP request
-				if _has_complete_http_request(tcp_buffers[client_id]):
-					_handle_http_request(client_id, tcp_buffers[client_id])
+				if _has_complete_http_request(buffer):
+					_handle_http_request(client_id, buffer)
 					_schedule_disconnect(client_id)
 
 	# Process deferred disconnects (wait for TCP buffer to flush)
 	var now = Time.get_ticks_msec()
+	for client_id in tcp_last_activity.keys():
+		if not pending_disconnect.has(client_id) and now - int(tcp_last_activity[client_id]) > CLIENT_IDLE_TIMEOUT_MS:
+			to_disconnect_now.append(client_id)
 	for client_id in pending_disconnect.keys():
 		var scheduled_time = pending_disconnect[client_id]
 		if now >= scheduled_time:
@@ -243,24 +252,30 @@ func _process_http() -> void:
 			peer.disconnect_from_host()
 			tcp_clients.erase(id)
 			tcp_buffers.erase(id)
+			tcp_last_activity.erase(id)
 			client_disconnected.emit(id)
 
 func _schedule_disconnect(client_id: int) -> void:
 	pending_disconnect[client_id] = Time.get_ticks_msec() + DISCONNECT_DELAY_MS
 
-func _has_complete_http_request(buffer: String) -> bool:
-	# Check for end of headers
-	var header_end = buffer.find("\r\n\r\n")
+func _find_header_end(buffer: PackedByteArray) -> int:
+	for index in range(0, mini(buffer.size() - 3, MAX_HEADER_SIZE + 1)):
+		if buffer[index] == 13 and buffer[index + 1] == 10 and buffer[index + 2] == 13 and buffer[index + 3] == 10:
+			return index
+	return -1
+
+func _has_complete_http_request(buffer: PackedByteArray) -> bool:
+	var header_end = _find_header_end(buffer)
 	if header_end == -1:
 		return false
-	# Check Content-Length if present
-	var headers = buffer.substr(0, header_end)
+	if header_end > MAX_HEADER_SIZE:
+		return true
+	var headers = buffer.slice(0, header_end).get_string_from_ascii()
 	var content_length = _get_content_length(headers)
-	if content_length == 0:
-		return true  # No body expected
+	if content_length < 0 or content_length > MAX_MESSAGE_SIZE:
+		return true
 	var body_start = header_end + 4
-	var body = buffer.substr(body_start)
-	return body.length() >= content_length
+	return buffer.size() - body_start >= content_length
 
 func _get_content_length(headers: String) -> int:
 	for line in headers.split("\r\n"):
@@ -268,12 +283,15 @@ func _get_content_length(headers: String) -> int:
 			var value = line.substr(15).strip_edges()
 			if value.is_valid_int():
 				return int(value)
-	return 0
+			return -1
+	return -1
 
-func _handle_http_request(client_id: int, raw_request: String) -> void:
-	var header_end = raw_request.find("\r\n\r\n")
-	var headers_part = raw_request.substr(0, header_end)
-	var body = raw_request.substr(header_end + 4)
+func _handle_http_request(client_id: int, raw_request: PackedByteArray) -> void:
+	var header_end = _find_header_end(raw_request)
+	if header_end < 0 or header_end > MAX_HEADER_SIZE:
+		_send_http_error(client_id, 431, "Request Header Fields Too Large")
+		return
+	var headers_part = raw_request.slice(0, header_end).get_string_from_ascii()
 
 	var lines = headers_part.split("\r\n")
 	if lines.is_empty():
@@ -287,10 +305,14 @@ func _handle_http_request(client_id: int, raw_request: String) -> void:
 
 	var method = request_line[0]
 	var path = request_line[1]
+	var headers = _parse_headers(lines)
+	if path != "/" or not _request_is_local(headers):
+		_send_http_error(client_id, 403, "Forbidden")
+		return
 
 	# Handle CORS preflight
 	if method == "OPTIONS":
-		_send_http_cors_preflight(client_id)
+		_send_http_cors_preflight(client_id, str(headers.get("origin", "")))
 		return
 
 	# Only accept POST for MCP
@@ -298,10 +320,14 @@ func _handle_http_request(client_id: int, raw_request: String) -> void:
 		_send_http_error(client_id, 405, "Method Not Allowed")
 		return
 
-	# Parse JSON-RPC body
 	var content_length = _get_content_length(headers_part)
-	if content_length > 0:
-		body = body.substr(0, content_length)
+	if content_length < 0 or content_length > MAX_MESSAGE_SIZE:
+		_send_http_error(client_id, 411, "Length Required")
+		return
+	if not str(headers.get("content-type", "")).to_lower().begins_with("application/json"):
+		_send_http_error(client_id, 415, "Unsupported Media Type")
+		return
+	var body = raw_request.slice(header_end + 4, header_end + 4 + content_length).get_string_from_utf8()
 
 	var json = JSON.new()
 	var err = json.parse(body)
@@ -314,39 +340,57 @@ func _handle_http_request(client_id: int, raw_request: String) -> void:
 		var results: Array = []
 		for entry in payload:
 			if entry is Dictionary:
-				results.append(_process_request(entry))
-		_send_http_json_response(client_id, results)
+				var entry_result = _process_request(entry)
+				if not entry_result.is_empty():
+					results.append(entry_result)
+		if results.is_empty():
+			_send_http_no_content(client_id)
+		else:
+			_send_http_json_response(client_id, results)
 	elif payload is Dictionary:
 		var result = _process_request(payload)
-		_send_http_json_response(client_id, result)
+		if result.is_empty():
+			_send_http_no_content(client_id)
+		else:
+			_send_http_json_response(client_id, result)
 	else:
 		_send_http_json_rpc_error(client_id, null, -32600, "Invalid Request")
 
 func _process_request(request: Dictionary) -> Dictionary:
 	var method = str(request.get("method", ""))
 	var id = request.get("id", null)
+	var is_notification = not request.has("id")
 
-	if method.is_empty():
+	if request.get("jsonrpc", "") != "2.0" or method.is_empty():
 		return _build_json_rpc_error(id, -32600, "Invalid Request")
 
+	var response: Dictionary
 	match method:
+		"notifications/initialized":
+			return {}
 		"initialize":
-			return _build_json_rpc_result(id, _build_initialize_result(request.get("params", {})))
+			var params = request.get("params", {})
+			if not params is Dictionary:
+				return _build_json_rpc_error(id, -32602, "Invalid params")
+			response = _build_json_rpc_result(id, _build_initialize_result(params))
 		"resources/list", "list_resources":
-			return _build_json_rpc_result(id, {"resources": _list_resources()})
+			response = _build_json_rpc_result(id, {"resources": _list_resources()})
 		"resources/read", "read_resource":
 			var params = request.get("params", {})
 			var uri = ""
 			if params is Dictionary:
 				uri = str(params.get("uri", ""))
-			return _build_json_rpc_result(id, _read_resource(uri))
+			response = _build_json_rpc_result(id, _read_resource(uri))
 		"tools/list", "list_tools":
-			return _build_json_rpc_result(id, {"tools": _list_tools()})
+			response = _build_json_rpc_result(id, {"tools": _list_tools()})
 		"tools/call", "call_tool":
 			var params = request.get("params", {})
-			return _build_json_rpc_result(id, _call_tool(params))
+			if not params is Dictionary:
+				return _build_json_rpc_error(id, -32602, "Invalid params")
+			response = _build_json_rpc_result(id, _call_tool(params))
 		_:
-			return _build_json_rpc_error(id, -32601, "Method not found")
+			response = _build_json_rpc_error(id, -32601, "Method not found")
+	return {} if is_notification else response
 
 func _build_json_rpc_result(id, result) -> Dictionary:
 	return {
@@ -367,45 +411,77 @@ func _build_json_rpc_error(id, code: int, message: String) -> Dictionary:
 
 func _send_http_json_response(client_id: int, payload) -> void:
 	var body = JSON.stringify(payload)
+	var body_bytes = body.to_utf8_buffer()
 	var response = "HTTP/1.1 200 OK\r\n"
 	response += "Content-Type: application/json\r\n"
-	response += "Content-Length: %d\r\n" % body.length()
-	response += "Access-Control-Allow-Origin: http://localhost\r\n"
+	response += "Content-Length: %d\r\n" % body_bytes.size()
 	response += "Access-Control-Allow-Methods: POST, OPTIONS\r\n"
 	response += "Access-Control-Allow-Headers: Content-Type\r\n"
 	response += "Connection: close\r\n"
 	response += "\r\n"
-	response += body
-	_send_raw(client_id, response)
+	var response_bytes = response.to_utf8_buffer()
+	response_bytes.append_array(body_bytes)
+	_send_raw(client_id, response_bytes)
 
 func _send_http_json_rpc_error(client_id: int, id, code: int, message: String) -> void:
 	_send_http_json_response(client_id, _build_json_rpc_error(id, code, message))
 
+func _send_http_no_content(client_id: int) -> void:
+	_send_raw(client_id, "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_utf8_buffer())
+
 func _send_http_error(client_id: int, status_code: int, message: String) -> void:
+	var message_bytes = message.to_utf8_buffer()
 	var response = "HTTP/1.1 %d %s\r\n" % [status_code, message]
 	response += "Content-Type: text/plain\r\n"
-	response += "Content-Length: %d\r\n" % message.length()
+	response += "Content-Length: %d\r\n" % message_bytes.size()
 	response += "Connection: close\r\n"
 	response += "\r\n"
-	response += message
-	_send_raw(client_id, response)
+	var response_bytes = response.to_utf8_buffer()
+	response_bytes.append_array(message_bytes)
+	_send_raw(client_id, response_bytes)
 
-func _send_http_cors_preflight(client_id: int) -> void:
+func _send_http_cors_preflight(client_id: int, origin: String) -> void:
 	var response = "HTTP/1.1 204 No Content\r\n"
-	response += "Access-Control-Allow-Origin: http://localhost\r\n"
+	if not origin.is_empty():
+		response += "Access-Control-Allow-Origin: %s\r\n" % origin
 	response += "Access-Control-Allow-Methods: POST, OPTIONS\r\n"
 	response += "Access-Control-Allow-Headers: Content-Type\r\n"
 	response += "Access-Control-Max-Age: 86400\r\n"
 	response += "Connection: close\r\n"
 	response += "\r\n"
-	_send_raw(client_id, response)
+	_send_raw(client_id, response.to_utf8_buffer())
 
-func _send_raw(client_id: int, data: String) -> void:
+func _send_raw(client_id: int, data: PackedByteArray) -> void:
 	if not tcp_clients.has(client_id):
 		return
 	var peer = tcp_clients[client_id]
-	peer.put_data(data.to_utf8_buffer())
+	peer.put_data(data)
 	peer.poll()  # Attempt to flush send buffer
+
+func _parse_headers(lines: PackedStringArray) -> Dictionary:
+	var result: Dictionary = {}
+	for index in range(1, lines.size()):
+		var separator = lines[index].find(":")
+		if separator <= 0:
+			continue
+		result[lines[index].substr(0, separator).strip_edges().to_lower()] = lines[index].substr(separator + 1).strip_edges()
+	return result
+
+func _request_is_local(headers: Dictionary) -> bool:
+	var host = str(headers.get("host", "")).strip_edges().to_lower()
+	if not (host == "localhost" or host.begins_with("localhost:") or host == "127.0.0.1" or host.begins_with("127.0.0.1:") or host == "[::1]" or host.begins_with("[::1]:")):
+		return false
+	var origin = str(headers.get("origin", "")).strip_edges()
+	# MCP clients are native local processes. Reject browser-originated requests
+	# rather than exposing destructive tools through ambient CORS authority.
+	return origin.is_empty()
+
+func _normalize_bind_address(value: String) -> String:
+	var normalized = value.strip_edges().to_lower()
+	if normalized in ["127.0.0.1", "localhost", "::1"]:
+		return normalized
+	push_warning("[McpServer] Rejected non-loopback bind address: %s" % value)
+	return DEFAULT_BIND_ADDRESS
 
 func _build_initialize_result(params: Dictionary) -> Dictionary:
 	var protocol_version = str(params.get("protocolVersion", "2024-11-05"))
@@ -816,8 +892,6 @@ func _tool_post_event(args: Dictionary) -> Dictionary:
 		return _tool_error("event is required")
 	# Build event data from args
 	var event_data = args.duplicate()
-	# Record and emit
-	record_event(event_data)
 	call_deferred("_emit_event", event_data)
 	return _tool_ok("Event posted: %s" % event_type)
 
@@ -859,7 +933,10 @@ func _deferred_quit() -> void:
 	await get_tree().create_timer(0.1).timeout
 	if not is_instance_valid(self):
 		return
-	get_tree().quit()
+	if office_manager and office_manager.has_method("_request_quit"):
+		office_manager._request_quit()
+	else:
+		get_tree().quit()
 
 func _tool_get_office_state(_args: Dictionary) -> Dictionary:
 	if not office_manager:
@@ -985,6 +1062,8 @@ func _tool_move_furniture(args: Dictionary) -> Dictionary:
 	var item = str(args.get("item", "")).strip_edges().to_lower()
 	var x = float(args.get("x", 0))
 	var y = float(args.get("y", 0))
+	if is_nan(x) or is_nan(y) or is_inf(x) or is_inf(y):
+		return _tool_error("x and y must be finite numbers")
 
 	# Clamp to valid bounds
 	x = clamp(x, 30, 1250)
@@ -999,11 +1078,37 @@ func _tool_move_furniture(args: Dictionary) -> Dictionary:
 			if not f.has("id") or not f.has("node") or not f.has("position"):
 				continue
 			if f["id"] == item:
+				var obstacle_size: Vector2 = f.get("obstacle_size", Vector2(40, 40))
+				var proposed = Rect2(new_pos - obstacle_size / 2, obstacle_size)
+				if not office_manager.navigation_grid.can_place_obstacle(proposed, item):
+					return _tool_error("Requested position is blocked or outside office bounds")
 				f["node"].position = new_pos
-				f["position"] = new_pos
-				office_manager._save_positions()
+				office_manager._on_dynamic_furniture_moved(item, new_pos, item)
 				return _tool_ok("Moved %s to (%d, %d)" % [item, int(x), int(y)])
 		return _tool_error("Dynamic furniture not found: %s" % item)
+
+	var default_sizes = {
+		"water_cooler": OfficeConstants.WATER_COOLER_OBSTACLE,
+		"plant": OfficeConstants.PLANT_OBSTACLE,
+		"filing_cabinet": OfficeConstants.FILING_CABINET_OBSTACLE,
+		"shredder": OfficeConstants.SHREDDER_OBSTACLE,
+		"cat_bed": OfficeConstants.CAT_BED_OBSTACLE,
+		"meeting_table": OfficeConstants.MEETING_TABLE_OBSTACLE,
+	}
+	if default_sizes.has(item):
+		var default_nodes = {
+			"water_cooler": office_manager.draggable_water_cooler,
+			"plant": office_manager.draggable_plant,
+			"filing_cabinet": office_manager.draggable_filing_cabinet,
+			"shredder": office_manager.draggable_shredder,
+			"cat_bed": office_manager.draggable_cat_bed,
+			"meeting_table": office_manager.meeting_table,
+		}
+		if not default_nodes.get(item):
+			return _tool_error("Furniture is not present: %s" % item)
+		var default_size: Vector2 = default_sizes[item]
+		if not office_manager.navigation_grid.can_place_obstacle(Rect2(new_pos - default_size / 2, default_size), item):
+			return _tool_error("Requested position is blocked or outside office bounds")
 
 	match item:
 		"water_cooler":
@@ -1035,9 +1140,7 @@ func _tool_move_furniture(args: Dictionary) -> Dictionary:
 		_:
 			return _tool_error("Unknown furniture: %s. Valid: water_cooler, plant, filing_cabinet, shredder, cat_bed, meeting_table, or furniture_<id>" % item)
 
-	# Update navigation grid
-	if office_manager.has_method("_register_with_navigation_grid"):
-		office_manager._register_with_navigation_grid()
+	office_manager._on_item_position_changed(item, new_pos)
 
 	return _tool_ok("Moved %s to (%d, %d)" % [item, int(x), int(y)])
 
@@ -1048,6 +1151,8 @@ func _tool_move_desk(args: Dictionary) -> Dictionary:
 	var desk_index = int(args.get("desk_index", -1))
 	var x = float(args.get("x", 0))
 	var y = float(args.get("y", 0))
+	if is_nan(x) or is_nan(y) or is_inf(x) or is_inf(y):
+		return _tool_error("x and y must be finite numbers")
 
 	if desk_index < 0 or desk_index >= office_manager.desks.size():
 		return _tool_error("Invalid desk_index. Valid range: 0-%d" % (office_manager.desks.size() - 1))
@@ -1056,7 +1161,17 @@ func _tool_move_desk(args: Dictionary) -> Dictionary:
 	y = clamp(y, 150, 550)
 
 	var desk = office_manager.desks[desk_index]
+	if not desk.is_empty():
+		return _tool_error("Cannot move desk %d - it is occupied by an agent" % desk_index)
 	var new_pos = Vector2(x, y)
+	var placement_rect = Rect2(
+		new_pos.x - OfficeConstants.DESK_WIDTH / 2,
+		new_pos.y,
+		OfficeConstants.DESK_WIDTH,
+		OfficeConstants.DESK_DEPTH + OfficeConstants.WORK_POSITION_OFFSET
+	)
+	if not office_manager.navigation_grid.can_place_obstacle(placement_rect, desk.furniture_id):
+		return _tool_error("Requested desk position is blocked or outside office bounds")
 	desk.position = new_pos
 
 	# Trigger position change handling (updates navigation, saves)
@@ -1092,6 +1207,8 @@ func _tool_add_desk(args: Dictionary) -> Dictionary:
 
 	var x = float(args.get("x", 0))
 	var y = float(args.get("y", 0))
+	if is_nan(x) or is_nan(y) or is_inf(x) or is_inf(y):
+		return _tool_error("x and y must be finite numbers")
 
 	x = clamp(x, 50, 1200)
 	y = clamp(y, 150, 550)
@@ -1125,7 +1242,8 @@ func _tool_spawn_agent(args: Dictionary) -> Dictionary:
 	var description = str(args.get("description", "")).strip_edges()
 
 	# Generate a unique agent ID
-	var agent_id = "mcp_%d" % Time.get_ticks_msec()
+	generated_agent_sequence += 1
+	var agent_id = "mcp_%d_%d" % [Time.get_ticks_usec(), generated_agent_sequence]
 
 	var event_data = {
 		"event": "agent_spawn",
@@ -1135,7 +1253,6 @@ func _tool_spawn_agent(args: Dictionary) -> Dictionary:
 		"source": "mcp"
 	}
 
-	record_event(event_data)
 	call_deferred("_emit_event", event_data)
 
 	return _tool_ok("Spawned agent: %s (%s)" % [agent_type, agent_id])
@@ -1188,6 +1305,12 @@ func _tool_add_furniture(args: Dictionary) -> Dictionary:
 	var ftype = str(args.get("type", "")).strip_edges()
 	var x = float(args.get("x", 0))
 	var y = float(args.get("y", 0))
+	if is_nan(x) or is_nan(y) or is_inf(x) or is_inf(y):
+		return _tool_error("x and y must be finite numbers")
+	if office_manager.placed_furniture.size() >= 100:
+		return _tool_error("Furniture limit reached")
+	x = clamp(x, 30, 1250)
+	y = clamp(y, 100, 620)
 
 	if ftype.is_empty():
 		return _tool_error("type is required")
@@ -1199,7 +1322,14 @@ func _tool_add_furniture(args: Dictionary) -> Dictionary:
 	if not ftype in valid_types:
 		return _tool_error("Invalid type: %s. Valid: %s" % [ftype, ", ".join(valid_types)])
 
-	# Call the internal add furniture method
+	var preview = office_manager.furniture_registry.spawn(ftype, Vector2(x, y))
+	if not preview:
+		return _tool_error("Could not construct furniture type: %s" % ftype)
+	var obstacle_size: Vector2 = preview.obstacle_size
+	preview.free()
+	if not office_manager.navigation_grid.can_place_obstacle(Rect2(Vector2(x, y) - obstacle_size / 2, obstacle_size)):
+		return _tool_error("Requested position is blocked or outside office bounds")
+
 	office_manager._add_furniture(ftype, Vector2(x, y))
 	return _tool_ok("Added %s at (%d, %d)" % [ftype, int(x), int(y)])
 
@@ -1547,7 +1677,7 @@ func _tool_get_settings(_args: Dictionary) -> Dictionary:
 		var ws = office_manager.weather_service
 		settings["weather"] = {
 			"location": ws.location_query if "location_query" in ws else "",
-			"auto_location": ws.use_auto_location if "use_auto_location" in ws else true,
+			"auto_location": ws.use_auto_location if "use_auto_location" in ws else false,
 			"units": "fahrenheit" if (ws.use_fahrenheit if "use_fahrenheit" in ws else false) else "celsius",
 			"location_name": ws.location_name if "location_name" in ws else ""
 		}
@@ -1598,15 +1728,17 @@ func _tool_set_watcher(args: Dictionary) -> Dictionary:
 	var enabled = bool(args.get("enabled", false))
 	var path = str(args.get("path", "")).strip_edges()
 
-	var valid_harnesses = ["claude", "codex", "opencode", "gemini"]
+	var valid_harnesses = ["claude", "codex", "clawdbot"]
 	if not harness in valid_harnesses:
 		return _tool_error("Invalid harness. Valid: " + ", ".join(valid_harnesses))
 
 	var tw = office_manager.transcript_watcher
 	if tw.has_method("set_harness_enabled"):
-		tw.set_harness_enabled(harness, enabled)
+		if not tw.set_harness_enabled(harness, enabled):
+			return _tool_error("Failed to update watcher setting")
 		if not path.is_empty() and tw.has_method("set_harness_path"):
-			tw.set_harness_path(harness, path)
+			if not tw.set_harness_path(harness, path):
+				return _tool_error("Invalid watcher path")
 		if tw.has_method("save_config"):
 			tw.save_config()
 		var status = "enabled" if enabled else "disabled"
@@ -1733,7 +1865,7 @@ func _build_sessions() -> Dictionary:
 	return {"sessions": sessions}
 
 func _load_mcp_config() -> void:
-	enabled = true
+	enabled = false
 	port = DEFAULT_PORT
 	bind_address = DEFAULT_BIND_ADDRESS
 	if not FileAccess.file_exists(WATCHER_CONFIG_FILE):
@@ -1749,13 +1881,11 @@ func _load_mcp_config() -> void:
 	var data = json.data
 	if not data is Dictionary:
 		return
-	var mcp = data.get("mcp", {})
+	var mcp = data.get("mcp", data)
 	if mcp is Dictionary:
 		enabled = bool(mcp.get("enabled", enabled))
 		port = int(mcp.get("port", port))
-		bind_address = str(mcp.get("bind_address", bind_address)).strip_edges()
-		if bind_address.is_empty():
-			bind_address = DEFAULT_BIND_ADDRESS
+		bind_address = _normalize_bind_address(str(mcp.get("bind_address", bind_address)))
 
 func _save_mcp_config() -> void:
 	var data: Dictionary = {}

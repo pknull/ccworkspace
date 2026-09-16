@@ -8,6 +8,7 @@ class_name GamificationManager
 # Agent tracking is now handled by AgentRoster (owned by OfficeManager).
 
 const AchievementPopupScript = preload("res://scripts/AchievementPopup.gd")
+const STATS_FILE = "user://gamification_stats.json"
 
 # Child components
 var achievement_system: AchievementSystem
@@ -44,6 +45,7 @@ func _ready() -> void:
 
 	# Load persisted achievements
 	achievement_system.load_achievements()
+	_load_stats()
 
 	# Connect achievement system signals
 	achievement_system.achievement_unlocked.connect(_on_achievement_unlocked)
@@ -92,13 +94,25 @@ func _check_achievements() -> void:
 	if not agent_roster:
 		return
 
-	var total_agents = agent_roster.get_agent_count()
 	var total_tasks = _get_total_tasks_from_roster()
 	var total_time = _get_total_work_time_from_roster()
+	var unique_agent_types: Dictionary = {}
+	var unique_tools: Dictionary = {}
+	var total_chats = 0
+	for profile in agent_roster.get_all_agents():
+		for agent_type in profile.skills.keys():
+			unique_agent_types[agent_type] = true
+		for tool_name in profile.tools.keys():
+			unique_tools[tool_name] = true
+		total_chats += profile.get_total_chats()
 
-	# Agent count achievements
-	achievement_system.check_achievement("diverse_team", total_agents)
-	achievement_system.check_achievement("full_house", total_agents)
+	achievement_system.check_achievement("diverse_team", unique_agent_types.size())
+	achievement_system.check_achievement("full_house", unique_agent_types.size())
+	achievement_system.check_achievement("first_chat", total_chats / 2)
+	achievement_system.check_achievement("social_butterfly", total_chats / 2)
+	achievement_system.check_achievement("office_gossip", total_chats / 2)
+	achievement_system.check_achievement("tool_explorer", unique_tools.size())
+	achievement_system.check_achievement("tool_master", unique_tools.size())
 
 	# Task count achievements
 	achievement_system.check_achievement("first_task", total_tasks)
@@ -167,6 +181,7 @@ func _on_popup_finished() -> void:
 
 func save_all() -> void:
 	achievement_system.save_achievements()
+	_save_stats()
 	print("[GamificationManager] Achievements saved")
 
 # =============================================================================
@@ -175,6 +190,7 @@ func save_all() -> void:
 
 func record_cat_interaction() -> void:
 	cat_interactions += 1
+	_save_stats()
 	# Check cat achievements
 	achievement_system.check_achievement("cat_petter", cat_interactions)
 	achievement_system.check_achievement("cat_friend", cat_interactions)
@@ -184,15 +200,52 @@ func record_task_completed(duration_seconds: float) -> void:
 	# Check speed achievements
 	if duration_seconds < 10.0:
 		# Lightning fast - under 10 seconds
+		achievement_system.check_achievement("quick_task", 1)
 		achievement_system.check_achievement("lightning_fast", 1)
 		quick_tasks_count += 1
 	elif duration_seconds < 30.0:
 		# Quick task - under 30 seconds
 		achievement_system.check_achievement("quick_task", 1)
 		quick_tasks_count += 1
+	if duration_seconds < 30.0:
+		_save_stats()
 
 	# Check accumulated quick tasks
 	achievement_system.check_achievement("speed_demon", quick_tasks_count)
+
+func _load_stats() -> void:
+	if not FileAccess.file_exists(STATS_FILE):
+		return
+	var data = JSON.parse_string(FileAccess.get_file_as_string(STATS_FILE))
+	if data is Dictionary:
+		cat_interactions = maxi(0, int(data.get("cat_interactions", 0)))
+		quick_tasks_count = maxi(0, int(data.get("quick_tasks", 0)))
+
+func _save_stats() -> void:
+	var contents = JSON.stringify({
+		"cat_interactions": cat_interactions,
+		"quick_tasks": quick_tasks_count,
+	}, "\t")
+	var temp_path = STATS_FILE + ".tmp"
+	var file = FileAccess.open(temp_path, FileAccess.WRITE)
+	if not file:
+		push_warning("[GamificationManager] Failed to save statistics")
+		return
+	file.store_string(contents)
+	file.flush()
+	var write_error = file.get_error()
+	file.close()
+	if write_error != OK:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(temp_path))
+		push_warning("[GamificationManager] Failed to save statistics: %s" % error_string(write_error))
+		return
+	var rename_error = DirAccess.rename_absolute(
+		ProjectSettings.globalize_path(temp_path),
+		ProjectSettings.globalize_path(STATS_FILE)
+	)
+	if rename_error != OK:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(temp_path))
+		push_warning("[GamificationManager] Failed to replace statistics: %s" % error_string(rename_error))
 
 func get_stats_summary() -> Dictionary:
 	var total_agents = agent_roster.get_agent_count() if agent_roster else 0

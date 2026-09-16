@@ -56,6 +56,8 @@ def send_to_godot(event: dict) -> bool:
 
 def find_session_file(session_id: str = None) -> Path:
     """Find the transcript file for a session."""
+    if not CLAUDE_PROJECTS_DIR.is_dir():
+        return None
     # Look in all project directories
     for project_dir in CLAUDE_PROJECTS_DIR.iterdir():
         if not project_dir.is_dir():
@@ -78,6 +80,9 @@ def find_session_file(session_id: str = None) -> Path:
 def list_sessions():
     """List available sessions."""
     sessions = []
+    if not CLAUDE_PROJECTS_DIR.is_dir():
+        print(f"No Claude project directory found at {CLAUDE_PROJECTS_DIR}")
+        return
     for project_dir in CLAUDE_PROJECTS_DIR.iterdir():
         if not project_dir.is_dir():
             continue
@@ -105,16 +110,20 @@ def list_sessions():
 
 def process_entry(entry: dict):
     """Process a single transcript entry."""
+    if not isinstance(entry, dict):
+        return
     entry_type = entry.get("type")
     message = entry.get("message", {})
+    if not isinstance(message, dict):
+        return
     content = message.get("content", [])
 
-    if not content:
+    if not isinstance(content, list):
         return
 
     for item in content:
         # Skip string content (text messages)
-        if isinstance(item, str):
+        if not isinstance(item, dict):
             continue
 
         item_type = item.get("type")
@@ -132,7 +141,7 @@ def process_tool_use(item: dict, entry: dict):
     tool_input = item.get("input", {})
     timestamp = entry.get("timestamp", "")
 
-    if tool_name == "Task":
+    if tool_name in ("Task", "Agent"):
         # Agent spawn!
         agent_type = tool_input.get("subagent_type", "default")
         description = tool_input.get("description", "")
@@ -221,17 +230,42 @@ def process_tool_result(item: dict, entry: dict):
 
 
 def tail_file(filepath: Path):
-    """Tail a file and yield new lines."""
-    with open(filepath, 'r') as f:
-        # Start at end of file
-        f.seek(0, 2)
-
+    """Tail complete JSONL records, reopening on truncation or replacement."""
+    stream = open(filepath, 'rb')
+    stream.seek(0, 2)
+    identity = (stream.fileno(), filepath.stat().st_ino)
+    remainder = b""
+    try:
         while True:
-            line = f.readline()
-            if line:
-                yield line.strip()
-            else:
+            chunk = stream.read(65536)
+            if chunk:
+                remainder += chunk
+                records = remainder.split(b"\n")
+                remainder = records.pop()
+                if len(remainder) > 262144:
+                    print("  [!] Discarding oversized unterminated transcript record")
+                    remainder = b""
+                for record in records:
+                    if record.strip():
+                        yield record.decode("utf-8", errors="replace").rstrip("\r")
+                continue
+
+            try:
+                stat = filepath.stat()
+            except FileNotFoundError:
                 time.sleep(POLL_INTERVAL)
+                continue
+            if stat.st_ino != identity[1]:
+                stream.close()
+                stream = open(filepath, 'rb')
+                identity = (stream.fileno(), stat.st_ino)
+                remainder = b""
+            elif stat.st_size < stream.tell():
+                stream.seek(0)
+                remainder = b""
+            time.sleep(POLL_INTERVAL)
+    finally:
+        stream.close()
 
 
 def watch_session(session_file: Path):

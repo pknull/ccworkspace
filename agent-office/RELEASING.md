@@ -1,6 +1,6 @@
 # Release Process
 
-This document describes the deterministic release process for Claude Office.
+This document describes the release process for Inference Inc.
 
 ## Version Numbering
 
@@ -26,7 +26,6 @@ When bumping the version, update these files:
 | File | Location | Example |
 |------|----------|---------|
 | `project.godot` | `config/version` | `config/version="1.0.0"` |
-| `export_presets.cfg` | macOS `short_version` and `version` | `application/short_version="1.0.0"` |
 
 ## Release Steps
 
@@ -34,7 +33,6 @@ When bumping the version, update these files:
 
 ```bash
 # Edit project.godot - update config/version
-# Edit export_presets.cfg - update macOS version strings
 ```
 
 ### 2. Commit Changes
@@ -62,7 +60,11 @@ git push origin main
 git push origin v1.0.0
 ```
 
-### 5. Build Exports (Optional - for distributing binaries)
+### 5. Build the Linux Export
+
+Reviewed release artifacts are currently Linux x86-64 only. Windows and macOS
+publishing remains paused until the patched native terminal extension is built
+and tested on those platforms.
 
 #### Prerequisites
 
@@ -76,33 +78,36 @@ git push origin v1.0.0
 Using Godot CLI:
 
 ```bash
-# Create builds directory
-mkdir -p builds/linux builds/windows builds/macos
+python3 -m pip install scons==4.10.1
+./scripts/build_godot_xterm_linux.sh
+mkdir -p builds/linux
+godot --headless --export-release "Linux" builds/linux/inference-inc.x86_64
+```
 
-# Export Linux build
-godot --headless --export-release "Linux" builds/linux/claude-office.x86_64
+Godot places `libgodot-xterm.linux.template_release.x86_64.so` beside the
+executable. It is required at runtime and must be distributed with the
+executable:
 
-# Export Windows build
-godot --headless --export-release "Windows" builds/windows/claude-office.exe
-
-# Export macOS build
-godot --headless --export-release "macOS" builds/macos/claude-office.dmg
+```bash
+cd builds/linux
+zip -9 ../inference-inc-v1.0.0-linux-x86_64.zip \
+  inference-inc.x86_64 \
+  libgodot-xterm.linux.template_release.x86_64.so
+cd ../..
 ```
 
 Or using the Godot Editor:
 1. Open project in Godot
 2. Go to **Project → Export**
-3. Select each preset and click **Export Project**
+3. Select the Linux preset and click **Export Project**
 
 ### 6. Create GitHub Release (Optional)
 
 ```bash
 # Create release with built binaries
 gh release create v1.0.0 \
-  builds/linux/claude-office.x86_64 \
-  builds/windows/claude-office.exe \
-  builds/macos/claude-office.dmg \
-  --title "Claude Office v1.0.0" \
+  builds/inference-inc-v1.0.0-linux-x86_64.zip \
+  --title "Inference Inc. v1.0.0" \
   --notes "Release notes here"
 ```
 
@@ -112,9 +117,7 @@ The `export_presets.cfg` file contains configurations for:
 
 | Preset | Platform | Output Path |
 |--------|----------|-------------|
-| Linux | Linux x86_64 | `builds/linux/claude-office.x86_64` |
-| Windows | Windows x86_64 | `builds/windows/claude-office.exe` |
-| macOS | macOS Universal | `builds/macos/claude-office.dmg` |
+| Linux | Linux x86_64 | `builds/linux/inference-inc.x86_64` |
 
 ## Quick Release Script
 
@@ -144,13 +147,20 @@ git push origin main
 git push origin "v$VERSION"
 
 # Build exports (requires Godot CLI and export templates)
-mkdir -p builds/linux builds/windows builds/macos
-godot --headless --export-release "Linux" "builds/linux/claude-office.x86_64"
-godot --headless --export-release "Windows" "builds/windows/claude-office.exe"
-godot --headless --export-release "macOS" "builds/macos/claude-office.dmg"
+python3 -m pip install scons==4.10.1
+./scripts/build_godot_xterm_linux.sh
+mkdir -p builds/linux
+godot --headless --export-release "Linux" "builds/linux/inference-inc.x86_64"
+test -f builds/linux/libgodot-xterm.linux.template_release.x86_64.so
+(
+  cd builds/linux
+  zip -9 "../inference-inc-v${VERSION}-linux-x86_64.zip" \
+    inference-inc.x86_64 \
+    libgodot-xterm.linux.template_release.x86_64.so
+)
 
 echo "Release v$VERSION complete!"
-echo "Binaries in builds/ directory"
+echo "Archive in builds/ directory"
 ```
 
 ## Troubleshooting
@@ -158,12 +168,3 @@ echo "Binaries in builds/ directory"
 ### Export templates not found
 
 Download templates via Godot Editor: **Editor → Manage Export Templates → Download**
-
-### macOS code signing errors
-
-For unsigned development builds, set `codesign/codesign=1` (ad-hoc signing) in export_presets.cfg.
-For distribution, you'll need an Apple Developer certificate.
-
-### Windows builds fail
-
-Ensure the Windows export template is installed. Cross-compilation from Linux requires the Windows template.
